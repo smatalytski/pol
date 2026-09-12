@@ -29,6 +29,10 @@ dashboards, streaks, gamification. Beginner content — no alphabet drills, no
 core-vocabulary decks. Recognition practice (PL→RU); the app trains
 *production* only.
 
+**Deferred, not excluded:** a hands-free audio mode (§6) is the next planned
+feature. It is not in the first build, but the one decision it constrains —
+server-side cached TTS instead of browser speech synthesis — is made now.
+
 ## 2. Constraints
 
 - **Primary device:** Android phone, Chrome. Desktop browser used for image
@@ -127,7 +131,7 @@ an `image_to_pl` card.
 
 ## 5. Generation
 
-Two services, both called only from server routes so no API key reaches the
+Three services, all called only from server routes so no API key reaches the
 browser.
 
 **Transcription.** Whisper (`whisper-large-v3-turbo` via Groq) with
@@ -164,6 +168,24 @@ For `pl_forms`, a second prompt returns a compact form table as Markdown.
 The raw model response is stored on the capture row for debugging and
 regeneration.
 
+**Speech synthesis.** Cards are spoken by **server-side TTS, cached as blobs**,
+not by the browser's `SpeechSynthesis`. This is a deliberate choice made in the
+first build even though only the 🔊 button needs it at first: `speechSynthesis`
+on Android Chrome stops when the screen locks or the tab backgrounds, which
+would make the planned audio mode impossible. Building it server-side once
+serves both, with no rework.
+
+Access goes through `speak(text, lang): Promise<mediaId>`, backed by Google
+Cloud TTS (`pl-PL` and `ru-RU` neural voices, one pinned voice per language).
+As with transcription, a local implementation — Piper, which has good Polish and
+Russian voices and runs on the same machine — satisfies the same interface at
+zero cost.
+
+Clips are content-addressed by `sha256(text | lang | voice)` and generated once.
+A card's Russian prompt and Polish answer are synthesized the first time either
+is needed and reused forever after; editing a card's text simply yields a new
+key.
+
 ## 6. Review
 
 `/` redirects to `/powtorki`. Opening the app puts you straight into reviewing —
@@ -173,7 +195,7 @@ no menu, no dashboard.
 or the Polish form request. One button: *pokaż*.
 
 **Back:** the Polish answer in large type, then the example sentence and grammar
-note, and a 🔊 that speaks the answer via browser TTS (`pl-PL`). Hearing it
+note, and a 🔊 that plays the cached Polish audio for the answer. Hearing it
 matters when the goal is production.
 
 **Rating:** four buttons, thumb-reachable at the bottom — *nie pamiętam / z
@@ -198,6 +220,37 @@ Cards introduced today are counted as reviews whose `state_before.state` is
 **Session end:** a count of what was reviewed and when the next card comes due.
 
 **Desktop keys:** space reveals, `1`–`4` rate, `z` undoes.
+
+### Audio mode — planned, not in the first build
+
+A hands-free mode for walking, commuting or dishes: the Russian prompt plays,
+about five seconds of silence follow, then the Polish answer.
+
+**Passive exposure only. It records nothing and changes no schedule.** The FSRS
+history stays composed purely of deliberate, rated, on-screen reviews, so no
+half-guess made while walking can corrupt an interval. The benefit is
+repetition; real reviews still happen on screen.
+
+**Per-card sequence:** Russian prompt → 5 s silence (configurable) → Polish
+answer → 1 s → Polish answer again. Repeating the answer is worth the seconds
+when the goal is production rather than recognition.
+
+**Only `ru_to_pl` cards participate.** An image has no audible prompt, and a
+declension table read aloud is noise.
+
+**Background playback is the whole point, so timing must not depend on
+JavaScript.** Backgrounded tabs get their timers throttled, which would wreck a
+five-second gap. Instead the server assembles **one audio file per card** —
+prompt, real silence, answer, silence, answer — and the client plays a playlist
+of those files through a single `<audio>` element, advancing on `ended`. Media
+playback and its `ended` event are reliable with the screen off; `setTimeout` is
+not. The Media Session API supplies lock-screen metadata and play/pause/skip.
+
+**Selection:** due cards first, then recently lapsed ones, capped by a session
+length in minutes rather than a card count, since the point is to fill a walk.
+
+Concatenation is per card rather than per session so that skip works and so that
+a card edited mid-session invalidates only its own file.
 
 ## 7. Scheduling
 
@@ -224,7 +277,7 @@ due queue; separated, the cost is zero.
 ```sql
 CREATE TABLE media (
   id          TEXT PRIMARY KEY,   -- uuid
-  kind        TEXT NOT NULL,      -- 'image' | 'audio'
+  kind        TEXT NOT NULL,      -- 'image' | 'audio' | 'tts'
   mime        TEXT NOT NULL,
   bytes       BLOB NOT NULL,
   byte_size   INTEGER NOT NULL,
@@ -291,6 +344,16 @@ CREATE TABLE captures (
   created_at      INTEGER NOT NULL
 );
 
+-- content-addressed TTS cache; generated once per distinct text, reused forever
+CREATE TABLE tts_clips (
+  id          TEXT PRIMARY KEY,   -- sha256(text | lang | voice)
+  media_id    TEXT NOT NULL REFERENCES media(id),
+  lang        TEXT NOT NULL,      -- 'pl' | 'ru'
+  voice       TEXT NOT NULL,
+  text        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+
 CREATE TABLE settings (
   key    TEXT PRIMARY KEY,
   value  TEXT NOT NULL
@@ -320,6 +383,7 @@ words.
 | `DELETE /api/cards/:id` | delete, cascading its reviews |
 | `POST /api/cards/:id/formy` | generate the `pl_forms` child card |
 | `POST /api/images` | multipart images in, `image_to_pl` cards out |
+| `GET /api/cards/:id/audio?part=answer` | the cached TTS clip for a card's Polish answer or Russian prompt, synthesizing it on first request |
 | `GET /api/media/:id` | serve a blob with an ETag and a long `max-age`; media is immutable so each is fetched once |
 | `POST /api/login` | passphrase in, session cookie out |
 
@@ -362,6 +426,7 @@ lib/
   scheduler/    ts-fsrs wrapper
   generate/     Claude card generation
   transcribe/   Whisper interface + providers
+  tts/          speech synthesis interface + providers + clip cache
   media/        image downscale/encode
 i18n/pl.ts      every UI string
 scripts/backup.sh
@@ -398,6 +463,8 @@ Vitest. Tests go where a silent bug would quietly cost months of learning:
   fixtures rather than live API calls. Includes malformed-response handling.
 - **Capture retry path** — upload failure followed by success creates exactly
   one card.
+- **TTS clip cache** — the same text yields one clip and one synthesis call;
+  editing a card's text yields a new key and leaves the old clip untouched.
 
 No browser E2E suite. There is one user, and he is the end-to-end test.
 
