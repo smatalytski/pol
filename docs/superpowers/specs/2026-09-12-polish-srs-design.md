@@ -143,8 +143,10 @@ else. Running Whisper locally is attractive given the app already runs on the
 author's machine; it is an alternative implementation of the same interface, not
 a separate design.
 
-**Card generation.** `claude-sonnet-5` with a JSON schema via tool use. Input is
-the Polish transcript; output:
+**Card generation.** Claude via structured outputs — `messages.parse()` against
+a Zod schema, so the response is schema-valid or an error, never prose to be
+parsed. Model comes from `FISZKI_MODEL`, default `claude-opus-5`. Input is the
+Polish transcript; output:
 
 ```json
 {
