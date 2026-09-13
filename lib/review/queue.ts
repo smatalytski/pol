@@ -80,13 +80,26 @@ export async function buildQueue(db: Db, now: Date): Promise<QueueItem[]> {
     .orderBy(asc(cards.due))
     .all()
 
+  // `cards.state = 0` alone isn't enough to identify "never introduced": a
+  // card can already have a non-undone, New-state review today (the same
+  // condition `newCardsIntroducedToday` counts by) while its `state` column
+  // still reads 0, e.g. mid-transaction or under a bug elsewhere. Anti-join
+  // against that exact predicate so selection can't drift from counting.
+  const notIntroducedToday = sql`NOT EXISTS (
+    SELECT 1 FROM ${reviews}
+    WHERE ${reviews.cardId} = ${cards.id}
+      AND ${reviews.reviewedAt} >= ${startOfLocalDay(now)}
+      AND ${reviews.undoneAt} IS NULL
+      AND json_extract(${reviews.stateBefore}, '$.state') = 0
+  )`
+
   const fresh =
     remaining === 0
       ? []
       : db
           .select(SELECTION)
           .from(cards)
-          .where(and(REVIEWABLE, eq(cards.state, 0)))
+          .where(and(REVIEWABLE, eq(cards.state, 0), notIntroducedToday))
           .orderBy(asc(cards.createdAt))
           .limit(remaining)
           .all()

@@ -105,7 +105,30 @@ describe('buildQueue', () => {
       })
       .run()
     expect(newCardsIntroducedToday(db, NOW)).toBe(1)
-    expect((await buildQueue(db, NOW)).filter((c) => c.isNew)).toHaveLength(1)
+    const served = (await buildQueue(db, NOW)).filter((c) => c.isNew)
+    expect(served).toHaveLength(1)
+    // n0 was already introduced today (its `cards.state` just hasn't caught up
+    // to that yet in this test); it must not be re-served as new, and one of
+    // the genuinely-unintroduced n1..n4 must fill the slot instead.
+    expect(served.map((c) => c.id)).not.toContain('n0')
+  })
+
+  it('re-offers a card as new once its earlier introduction today was undone', async () => {
+    const { db } = createTestDb()
+    setSetting(db, 'newPerDay', '2')
+    insertCard(db, { id: 'undone-intro' }) // state stays 0: the review below was undone
+    db.insert(reviews)
+      .values({
+        cardId: 'undone-intro',
+        rating: 3,
+        reviewedAt: startOfLocalDay(NOW) + 3_600_000,
+        durationMs: null,
+        stateBefore: JSON.stringify({ state: 0 }),
+        undoneAt: NOW.getTime(),
+      })
+      .run()
+    const q = await buildQueue(db, NOW)
+    expect(q.filter((c) => c.isNew).map((c) => c.id)).toContain('undone-intro')
   })
 
   it('does not count yesterday, an undone review, or a non-new review against the cap', async () => {
