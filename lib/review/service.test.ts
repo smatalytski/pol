@@ -58,6 +58,18 @@ describe('recordReview', () => {
     const { db } = createTestDb()
     expect(() => recordReview(db, 'ghost', 3, null, NOW)).toThrow(/ghost/)
   })
+
+  it('throws on a backwards clock and leaves the database untouched', () => {
+    const { db } = createTestDb()
+    const id = seed(db)
+    const future = new Date(NOW.getTime() + 60_000)
+    db.update(cards).set({ lastReview: future.getTime() }).where(eq(cards.id, id)).run()
+    const before = db.select().from(cards).where(eq(cards.id, id)).get()!
+
+    expect(() => recordReview(db, id, 3, null, NOW)).toThrow(/is before last review/)
+    expect(db.select().from(cards).where(eq(cards.id, id)).get()).toEqual(before)
+    expect(db.select().from(reviews).all()).toHaveLength(0)
+  })
 })
 
 describe('undoLastReview', () => {
