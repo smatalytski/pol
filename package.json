@@ -11,6 +11,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "node --experimental-strip-types scripts/migrate.ts"
