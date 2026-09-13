@@ -12,7 +12,7 @@ describe('answerKey', () => {
 
   it('strips punctuation', () => {
     expect(answerKey('Nie ma co liczyć na jego pomoc!')).toBe('nie ma co liczyć na jego pomoc')
-    expect(answerKey('„przebiegły"')).toBe('przebiegły')
+        expect(answerKey('„przebiegły”')).toBe('przebiegły')
   })
 
   it('PRESERVES diacritics — łaska and laska are different words', () => {
