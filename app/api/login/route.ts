@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { SESSION_COOKIE, constantTimeEqual, createSessionToken, requireEnv } from '@/lib/auth/session'
+import { SESSION_COOKIE, constantTimeEqual, createSessionToken } from '@/lib/auth/session'
+import { requireEnv } from '@/lib/env'
 
 export async function POST(req: Request) {
   const { password } = (await req.json()) as { password?: string }

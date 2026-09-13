@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { SESSION_COOKIE, requireEnv, verifySessionToken } from './lib/auth/session'
+import { SESSION_COOKIE, verifySessionToken } from './lib/auth/session'
+import { requireEnv } from './lib/env'
 
 export async function middleware(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value

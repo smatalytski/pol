@@ -28,7 +28,7 @@ describe('session token', () => {
   })
 
   it('rejects garbage without throwing', async () => {
-    for (const bad of ['', '.', 'abc', 'abc.def', '123.']) {
+    for (const bad of ['', '.', 'abc', 'abc.def', '123.', '1e999.x']) {
       expect(await verifySessionToken(SECRET, bad, NOW)).toBe(false)
     }
   })

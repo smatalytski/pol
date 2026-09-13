@@ -20,6 +20,7 @@ const mustBeGuarded = [
   '/logowanie-fake',
   '/api/login-admin',
   '/swXjs',
+  '/manifestXwebmanifest',
   '/logowanie/sub',
   '/api/login/extra',
   '/api/loginx',

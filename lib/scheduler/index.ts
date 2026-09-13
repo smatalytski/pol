@@ -67,7 +67,7 @@ export function applyRating(
   now: Date,
   requestRetention?: number,
 ): SchedulerState {
-  if (state.lastReview !== null && now.getTime() < state.lastReview) {
+  if (state.lastReview != null && now.getTime() < state.lastReview) {
     throw new Error(
       `applyRating: now (${now.toISOString()}) is before last review (${new Date(state.lastReview).toISOString()})`,
     )

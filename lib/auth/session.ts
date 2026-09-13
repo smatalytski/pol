@@ -2,12 +2,6 @@ export const SESSION_COOKIE = 'fiszki_session'
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000
 const enc = new TextEncoder()
 
-export function requireEnv(name: string): string {
-  const v = process.env[name]
-  if (!v) throw new Error(`${name} is not set`)
-  return v
-}
-
 async function hmacKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
     'sign',

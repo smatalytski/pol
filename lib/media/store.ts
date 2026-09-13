@@ -7,7 +7,7 @@ export type MediaKind = 'image' | 'audio' | 'tts'
 
 export function putMedia(
   db: Db,
-  input: { kind: MediaKind; mime: string; bytes: Uint8Array; id?: string },
+  input: { kind: MediaKind; mime: string; bytes: Uint8Array; id?: string; now?: Date },
 ): string {
   const id = input.id ?? randomUUID()
   const buf = Buffer.from(input.bytes)
@@ -18,7 +18,7 @@ export function putMedia(
       mime: input.mime,
       bytes: buf,
       byteSize: buf.byteLength,
-      createdAt: Date.now(),
+      createdAt: (input.now ?? new Date()).getTime(),
     })
     .run()
   return id
