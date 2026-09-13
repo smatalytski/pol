@@ -1,4 +1,4 @@
-import { createEmptyCard, fsrs, generatorParameters, Rating, type Card as FsrsCard } from 'ts-fsrs'
+import { createEmptyCard, fsrs, generatorParameters, Rating, type Card as FsrsCard, type Grade } from 'ts-fsrs'
 
 export const AGAIN = 1 as const
 export const HARD = 2 as const
@@ -18,7 +18,7 @@ export type SchedulerState = {
   lastReview: number | null
 }
 
-const RATING: Record<RatingValue, Rating> = {
+const RATING: Record<RatingValue, Grade> = {
   [AGAIN]: Rating.Again,
   [HARD]: Rating.Hard,
   [GOOD]: Rating.Good,
