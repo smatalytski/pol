@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, lte, notExists, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { cards, reviews } from '../db/schema'
 import { getSettings } from '../settings'
@@ -39,18 +39,27 @@ export function startOfLocalDay(now: Date): number {
   return d.getTime()
 }
 
+/**
+ * The single definition of "this review counts as an introduction today":
+ * dated today, not undone, and replaying a State.New card. Both
+ * `newCardsIntroducedToday` (the count that caps the session) and
+ * `buildQueue`'s anti-join (which selects which cards are still eligible to
+ * be introduced) consume this exact predicate, so they cannot drift apart.
+ */
+function introducedTodayPredicate(now: Date) {
+  return and(
+    sql`${reviews.reviewedAt} >= ${startOfLocalDay(now)}`,
+    isNull(reviews.undoneAt),
+    sql`json_extract(${reviews.stateBefore}, '$.state') = 0`,
+  )
+}
+
 /** A card counts as introduced today if its first (non-undone) review today was from State.New. */
 export function newCardsIntroducedToday(db: Db, now: Date): number {
   const row = db
     .select({ n: sql<number>`count(distinct ${reviews.cardId})` })
     .from(reviews)
-    .where(
-      and(
-        sql`${reviews.reviewedAt} >= ${startOfLocalDay(now)}`,
-        isNull(reviews.undoneAt),
-        sql`json_extract(${reviews.stateBefore}, '$.state') = 0`,
-      ),
-    )
+    .where(introducedTodayPredicate(now))
     .get()
   return row?.n ?? 0
 }
@@ -84,14 +93,14 @@ export async function buildQueue(db: Db, now: Date): Promise<QueueItem[]> {
   // card can already have a non-undone, New-state review today (the same
   // condition `newCardsIntroducedToday` counts by) while its `state` column
   // still reads 0, e.g. mid-transaction or under a bug elsewhere. Anti-join
-  // against that exact predicate so selection can't drift from counting.
-  const notIntroducedToday = sql`NOT EXISTS (
-    SELECT 1 FROM ${reviews}
-    WHERE ${reviews.cardId} = ${cards.id}
-      AND ${reviews.reviewedAt} >= ${startOfLocalDay(now)}
-      AND ${reviews.undoneAt} IS NULL
-      AND json_extract(${reviews.stateBefore}, '$.state') = 0
-  )`
+  // against that exact predicate (shared with `newCardsIntroducedToday` via
+  // `introducedTodayPredicate`) so selection can't drift from counting.
+  const notIntroducedToday = notExists(
+    db
+      .select({ one: sql`1` })
+      .from(reviews)
+      .where(and(eq(reviews.cardId, cards.id), introducedTodayPredicate(now))),
+  )
 
   const fresh =
     remaining === 0

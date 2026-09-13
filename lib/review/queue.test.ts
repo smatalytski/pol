@@ -148,4 +148,26 @@ describe('buildQueue', () => {
     ]).run()
     expect(newCardsIntroducedToday(db, NOW)).toBe(0)
   })
+
+  it('still serves a card as new when its only New-state review was yesterday', async () => {
+    // Pins the date clause specifically in buildQueue's anti-join (as
+    // opposed to newCardsIntroducedToday's count): yesterday's introduction
+    // must not count against today, in either place the predicate is
+    // evaluated. Without the date clause here, this card would wrongly look
+    // "already introduced" forever and never be re-offered.
+    const { db } = createTestDb()
+    insertCard(db, { id: 'y' }) // state stays 0: never actually introduced today
+    db.insert(reviews)
+      .values({
+        cardId: 'y',
+        rating: 3,
+        reviewedAt: startOfLocalDay(NOW) - 1,
+        durationMs: null,
+        stateBefore: JSON.stringify({ state: 0 }),
+        undoneAt: null,
+      })
+      .run()
+    const q = await buildQueue(db, NOW)
+    expect(q.filter((c) => c.isNew).map((c) => c.id)).toContain('y')
+  })
 })

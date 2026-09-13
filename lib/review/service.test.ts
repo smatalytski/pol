@@ -108,4 +108,42 @@ describe('undoLastReview', () => {
     const { db } = createTestDb()
     expect(undoLastReview(db, NOW)).toBeNull()
   })
+
+  it('throws rather than silently writing partial state when state_before is corrupt', () => {
+    const { db } = createTestDb()
+    const id = seed(db)
+    db.insert(reviews)
+      .values({
+        cardId: id,
+        rating: 3,
+        reviewedAt: NOW.getTime(),
+        durationMs: null,
+        // Short: missing every field but `state`. A newer ts-fsrs adding or
+        // renaming a field, or any other shape drift in the replayed log,
+        // must fail loudly here rather than spread stale/undefined values
+        // into `cards`.
+        stateBefore: JSON.stringify({ state: 0 }),
+        undoneAt: null,
+      })
+      .run()
+    const before = db.select().from(cards).where(eq(cards.id, id)).get()!
+    expect(() => undoLastReview(db, NOW)).toThrow(/invalid scheduler state/)
+    expect(db.select().from(cards).where(eq(cards.id, id)).get()).toEqual(before)
+  })
+
+  it('undoes the truly-last-inserted review even when a backwards clock makes it not the latest by reviewedAt', () => {
+    const { db } = createTestDb()
+    const a = seed(db, 'a')
+    const b = seed(db, 'b')
+    // Card A is reviewed at 10:02...
+    recordReview(db, a, 3, null, new Date(NOW.getTime() + 120_000))
+    // ...then the clock steps back (e.g. an NTP correction) and card B is
+    // reviewed at 10:00, i.e. genuinely after A in insertion order despite
+    // having an earlier reviewedAt. The per-card backwards-clock guard in
+    // applyRating doesn't fire here because it only compares against B's own
+    // prior lastReview (null), not against other cards' reviews.
+    recordReview(db, b, 3, null, NOW)
+    // The user's most recent action was rating B; undo must revert B, not A.
+    expect(undoLastReview(db, NOW)).toEqual({ cardId: b })
+  })
 })

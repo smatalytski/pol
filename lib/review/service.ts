@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { cards, reviews } from '../db/schema'
 import { applyRating, type RatingValue, type SchedulerState } from '../scheduler'
+import { validateSchedulerState } from '../scheduler/validate'
 import { getSettings } from '../settings'
 
 function stateOf(row: typeof cards.$inferSelect): SchedulerState {
@@ -53,12 +54,12 @@ export function undoLastReview(db: Db, now: Date): { cardId: string } | null {
     .select()
     .from(reviews)
     .where(isNull(reviews.undoneAt))
-    .orderBy(desc(reviews.reviewedAt), desc(reviews.id))
+    .orderBy(desc(reviews.id))
     .limit(1)
     .get()
   if (!last) return null
 
-  const before = JSON.parse(last.stateBefore) as SchedulerState
+  const before = validateSchedulerState(JSON.parse(last.stateBefore))
   db.transaction((tx) => {
     tx.update(cards)
       .set({ ...before, updatedAt: now.getTime() })
