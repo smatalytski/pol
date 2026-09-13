@@ -16,6 +16,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!logowanie$|logowanie/|api/login$|manifest\\.webmanifest$|sw\\.js$|icons/|_next/).*)',
+    '/((?!logowanie$|logowanie/$|api/login$|manifest\\.webmanifest$|sw\\.js$|icons/|_next/).*)',
   ],
 }

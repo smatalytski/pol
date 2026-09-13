@@ -20,10 +20,14 @@ const mustBeGuarded = [
   '/logowanie-fake',
   '/api/login-admin',
   '/swXjs',
+  '/logowanie/sub',
+  '/api/login/extra',
+  '/api/loginx',
 ]
 
 const mustBeExcluded = [
   '/logowanie',
+  '/logowanie/',
   '/api/login',
   '/manifest.webmanifest',
   '/sw.js',
