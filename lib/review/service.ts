@@ -60,7 +60,10 @@ export function undoLastReview(db: Db, now: Date): { cardId: string } | null {
 
   const before = JSON.parse(last.stateBefore) as SchedulerState
   db.transaction((tx) => {
-    tx.update(cards).set({ ...before }).where(eq(cards.id, last.cardId)).run()
+    tx.update(cards)
+      .set({ ...before, updatedAt: now.getTime() })
+      .where(eq(cards.id, last.cardId))
+      .run()
     tx.update(reviews)
       .set({ undoneAt: now.getTime() })
       .where(and(eq(reviews.id, last.id), isNull(reviews.undoneAt)))
