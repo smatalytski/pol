@@ -1,6 +1,12 @@
 # Fiszki — a Polish production trainer
 
 **Date:** 2026-09-12
+**Amended:** 2026-09-13 — all three AI services moved to Google Cloud (Gemini on
+Vertex AI for generation, Speech-to-Text v2 for dictation, Chirp 3: HD for
+speech), authentication moved to Application Default Credentials, and deployment
+moved to a Compute Engine VM. The `Transcriber` / `Generator` / `Synthesizer`
+interfaces are unchanged — this is a provider and hosting change, not an
+architectural one.
 **Status:** approved design, ready for implementation planning
 
 ## 1. Goal
@@ -39,9 +45,10 @@ server-side cached TTS instead of browser speech synthesis — is made now.
   cards and bulk editing.
 - **Languages:** dictation is always Polish. Answers are always Polish. Russian
   appears only as prompt content. UI chrome is Polish.
-- **Hosting:** runs on the author's own machine to start, reachable from the
-  phone over Tailscale HTTPS. Must be movable to a cloud host later without a
-  data migration.
+- **Hosting:** a Google Cloud Compute Engine VM in `europe-west*`, reachable
+  from the phone over Tailscale HTTPS. The region matches the `eu` Speech
+  endpoints. The SQLite file lives on a persistent disk separate from the boot
+  disk, so the entire application state survives VM recreation.
 - **Secure context required.** Microphone access, service workers and
   home-screen install all require HTTPS. A bare LAN address over plain HTTP
   would disable the app's central feature, so Tailscale HTTPS is a hard
@@ -131,22 +138,42 @@ an `image_to_pl` card.
 
 ## 5. Generation
 
-Three services, all called only from server routes so no API key reaches the
-browser.
+Three Google Cloud services, all called only from server routes. **There are no
+API keys.** Every call authenticates with Application Default Credentials: the
+VM's attached service account in production, `gcloud auth application-default
+login` locally. Nothing credential-shaped reaches the browser because nothing
+credential-shaped exists on disk — the service account is granted Vertex AI
+user, Speech client and Text-to-Speech access, and that is the whole of the
+app's authority.
 
-**Transcription.** Whisper (`whisper-large-v3-turbo` via Groq) with
-`language: "pl"` pinned — dictation is always Polish, and pinning beats
-auto-detection on accuracy. Access goes through a one-function
-`transcribe(audio): Promise<string>` interface so the provider can be swapped
-for OpenAI's endpoint or a local `whisper.cpp` binary without touching anything
-else. Running Whisper locally is attractive given the app already runs on the
-author's machine; it is an alternative implementation of the same interface, not
-a separate design.
+**Transcription.** Cloud Speech-to-Text **v2** with the `chirp_3` model and
+`pl-PL` pinned as the sole language code — dictation is always Polish, and
+pinning beats auto-detection on accuracy. Polish is served from the `eu`
+regional endpoint, which is why the VM sits in `europe-west*`; a recognizer is
+regional, so endpoint and region must agree.
 
-**Card generation.** Claude via structured outputs — `messages.parse()` against
-a Zod schema, so the response is schema-valid or an error, never prose to be
-parsed. Model comes from `FISZKI_MODEL`, default `claude-opus-5`. Input is the
-Polish transcript; output:
+Access goes through a one-function `transcribe(audio): Promise<string>`
+interface. The interface is the design; the provider behind it is a choice. A
+local `whisper.cpp` binary satisfies the same signature and remains a
+legitimate alternative — attractive because the app already runs on a machine
+that could host it — but it is an implementation swap, not a separate design.
+
+**Card generation.** Gemini on Vertex AI via structured outputs — the request
+carries `responseMimeType: "application/json"` and a `responseSchema`, so the
+response is schema-valid or an error, never prose to be parsed. The Pro tier is
+the default because card quality is the product: a wrong gloss or a mangled
+diacritic is a card drilled wrong for months, and at a few dozen calls a day the
+price difference against the Flash tier is cents a month. Model comes from
+`FISZKI_MODEL`.
+
+The returned JSON is additionally validated with Zod at runtime, and the
+`responseSchema` sent to Gemini is **derived from** the Zod schema rather than
+written alongside it. A schema declared twice is a schema that will eventually
+disagree with itself; deriving one from the other makes the drift impossible
+instead of merely detectable. This is sound because every field is a required
+string (see below) — a deliberate choice that the derivation depends on.
+
+Input is the Polish transcript; output:
 
 ```json
 {
@@ -160,10 +187,10 @@ Polish transcript; output:
 }
 ```
 
-`answer_pl` is a **normalized** Polish form, not the raw transcript. Whisper
-mangling diacritics is the expected common case, so the generator is explicitly
-responsible for correcting spelling and restoring the dictionary form where the
-dictated word was inflected mid-sentence.
+`answer_pl` is a **normalized** Polish form, not the raw transcript. A
+transcriber mangling diacritics is the expected common case, so the generator is
+explicitly responsible for correcting spelling and restoring the dictionary form
+where the dictated word was inflected mid-sentence.
 
 For `pl_forms`, a second prompt returns a compact form table as Markdown.
 
@@ -177,11 +204,12 @@ on Android Chrome stops when the screen locks or the tab backgrounds, which
 would make the planned audio mode impossible. Building it server-side once
 serves both, with no rework.
 
-Access goes through `speak(text, lang): Promise<mediaId>`, backed by Google
-Cloud TTS (`pl-PL` and `ru-RU` neural voices, one pinned voice per language).
-As with transcription, a local implementation — Piper, which has good Polish and
-Russian voices and runs on the same machine — satisfies the same interface at
-zero cost.
+Access goes through `speak(text, lang): Promise<mediaId>`, backed by Cloud
+Text-to-Speech **Chirp 3: HD** voices (`pl-PL-Chirp3-HD-*` and
+`ru-RU-Chirp3-HD-*`, one pinned voice per language, both GA in the `eu` region
+alongside Speech-to-Text). As with transcription, a local implementation —
+Piper, which has good Polish and Russian voices — satisfies the same interface
+at zero cost.
 
 Clips are content-addressed by `sha256(text | lang | voice)` and generated once.
 A card's Russian prompt and Polish answer are synthesized the first time either
@@ -400,6 +428,10 @@ SSE and indistinguishable in practice.
   migrations. WAL mode.
 - **Tailwind** for UI; mobile-first, large tap targets.
 - **`ts-fsrs`** for scheduling.
+- **Google Cloud client libraries** for the three AI services: the Gen AI SDK
+  for Gemini on Vertex, plus the Speech-to-Text v2 and Text-to-Speech clients.
+  All three resolve credentials through Application Default Credentials, so the
+  app carries no secrets for them.
 - **PWA:** a manifest with `display: standalone` and `start_url: /powtorki`,
   plus a minimal service worker with a passthrough fetch handler — required for
   Chrome to offer home-screen install. It caches the app shell only; there is no
@@ -408,11 +440,20 @@ SSE and indistinguishable in practice.
   httpOnly cookie with a long expiry. Middleware guards everything except the
   login route. Tailscale already keeps the app off the public internet; the
   passphrase means a lost phone is not instant access.
-- **Access:** `tailscale serve --bg https / http://localhost:3000`, giving a
-  real certificate on a `*.ts.net` hostname.
-- **Cloud move, when it happens:** the same container deploys to Fly.io with a
-  volume for the SQLite file. No schema change, no media migration, because
-  media is already in the database. Nothing in the app knows where it runs.
+- **Access:** Tailscale runs on the VM, and `tailscale serve --bg https /
+  http://localhost:3000` gives a real certificate on a `*.ts.net` hostname. The
+  VM has **no public ingress** — no firewall rule opens 80 or 443, and the app
+  is never on the public internet. This is what makes a single passphrase an
+  adequate second factor rather than the only one.
+- **Host:** a Compute Engine VM in `europe-west*` (an `e2-small` class machine
+  is ample for one user), Debian, Node 22, with the app run by a systemd unit
+  that restarts on failure.
+- **State:** the SQLite file lives on a persistent disk mounted separately from
+  the boot disk (`FISZKI_DB=/mnt/fiszki/fiszki.db`). The boot disk is
+  disposable; the data disk is not. Because all media is already inside the
+  database (§8), that one file on that one disk is the entire application state.
+- **Credentials:** the VM's attached service account, read from the metadata
+  server. No key files, no key rotation, nothing to leak.
 
 Repository layout:
 
@@ -426,8 +467,8 @@ app/            routes and screens
 lib/
   db/           schema, migrations, queries
   scheduler/    ts-fsrs wrapper
-  generate/     Claude card generation
-  transcribe/   Whisper interface + providers
+  generate/     Gemini card generation
+  transcribe/   Speech-to-Text interface + providers
   tts/          speech synthesis interface + providers + clip cache
   media/        image downscale/encode
 i18n/pl.ts      every UI string
@@ -448,6 +489,7 @@ Each failure degrades to something that never costs a captured word.
 | Wrong diacritics | expected; the generator returns a normalized form rather than trusting the transcript |
 | LLM unreachable entirely | capture still works end to end; cards land as `needs_input` |
 | Mic permission denied | an explanatory screen, since the app is unusable without it |
+| Service account misconfigured | all three AI services fail at once and identically; captures still land as `needs_input`, and the error names the missing role rather than reporting a generic 403 |
 
 ## 12. Testing
 
@@ -463,6 +505,10 @@ Vitest. Tests go where a silent bug would quietly cost months of learning:
   diacritics are not stripped.
 - **Generation parsing** — recorded transcripts in, expected card shape out, on
   fixtures rather than live API calls. Includes malformed-response handling.
+- **Schema derivation** — the `responseSchema` generated from the Zod schema
+  names the same fields, marks them all required, and carries the field
+  descriptions through, since those descriptions are part of the model's
+  instructions and silently dropping them would degrade cards with no failure.
 - **Capture retry path** — upload failure followed by success creates exactly
   one card.
 - **TTS clip cache** — the same text yields one clip and one synthesis call;
@@ -475,3 +521,9 @@ No browser E2E suite. There is one user, and he is the end-to-end test.
 `scripts/backup.sh` runs `VACUUM INTO 'backup-YYYY-MM-DD.db'` — a consistent
 snapshot taken while the app is running, which a plain file copy is not. One
 file contains cards, review history, images and audio.
+
+The snapshot is then copied to a Cloud Storage bucket and the local copy
+deleted, on a systemd timer. A snapshot that lives only on the same disk as the
+database it came from is not a backup: it survives a corrupt write and nothing
+else. Offsite is the whole point, and it is one `gcloud storage cp` away once
+the VM already has a service account.
