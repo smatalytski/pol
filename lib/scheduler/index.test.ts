@@ -20,13 +20,13 @@ describe('scheduler', () => {
     expect(s.lastReview).toBe(T0.getTime())
   })
 
-  it('orders intervals Again <= Hard <= Good <= Easy from the same state', () => {
+  it('orders intervals Again < Hard < Good < Easy from the same state', () => {
     const base = applyRating(applyRating(newState(T0), GOOD, T0), GOOD, days(1))
     const at = days(5)
     const due = ([AGAIN, HARD, GOOD, EASY] as const).map((r) => applyRating(base, r, at).due)
-    expect(due[0]).toBeLessThanOrEqual(due[1])
-    expect(due[1]).toBeLessThanOrEqual(due[2])
-    expect(due[2]).toBeLessThanOrEqual(due[3])
+    expect(due[0]).toBeLessThan(due[1])
+    expect(due[1]).toBeLessThan(due[2])
+    expect(due[2]).toBeLessThan(due[3])
   })
 
   it('counts a lapse only on Again, and only from a reviewing state', () => {
@@ -46,5 +46,10 @@ describe('scheduler', () => {
   it('round-trips through a plain object without loss', () => {
     const s = applyRating(newState(T0), HARD, T0)
     expect(applyRating({ ...s }, GOOD, days(1))).toEqual(applyRating(s, GOOD, days(1)))
+  })
+
+  it('throws if now is before the last review, instead of producing NaN state', () => {
+    const s = applyRating(newState(T0), GOOD, T0)
+    expect(() => applyRating(s, GOOD, days(-2))).toThrow(/now.*before.*last review/i)
   })
 })

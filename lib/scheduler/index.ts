@@ -39,8 +39,8 @@ function toFsrs(s: SchedulerState): FsrsCard {
     reps: s.reps,
     lapses: s.lapses,
     state: s.state,
-    last_review: s.lastReview === null ? undefined : new Date(s.lastReview),
-  } as FsrsCard
+    last_review: s.lastReview == null ? undefined : new Date(s.lastReview),
+  }
 }
 
 function fromFsrs(c: FsrsCard): SchedulerState {
@@ -67,5 +67,10 @@ export function applyRating(
   now: Date,
   requestRetention?: number,
 ): SchedulerState {
+  if (state.lastReview !== null && now.getTime() < state.lastReview) {
+    throw new Error(
+      `applyRating: now (${now.toISOString()}) is before last review (${new Date(state.lastReview).toISOString()})`,
+    )
+  }
   return fromFsrs(scheduler(requestRetention).next(toFsrs(state), now, RATING[rating]).card)
 }
