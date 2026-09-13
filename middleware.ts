@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { SESSION_COOKIE, verifySessionToken } from './lib/auth/session'
+import { SESSION_COOKIE, requireEnv, verifySessionToken } from './lib/auth/session'
 
 export async function middleware(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value
-  if (token && (await verifySessionToken(process.env.SESSION_SECRET!, token, new Date()))) {
+  if (token && (await verifySessionToken(requireEnv('SESSION_SECRET'), token, new Date()))) {
     return NextResponse.next()
   }
   if (req.nextUrl.pathname.startsWith('/api/')) {
@@ -15,5 +15,7 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!logowanie|api/login|manifest.webmanifest|sw.js|icons/|_next/).*)'],
+  matcher: [
+    '/((?!logowanie$|logowanie/|api/login$|manifest\\.webmanifest$|sw\\.js$|icons/|_next/).*)',
+  ],
 }

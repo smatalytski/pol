@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { SESSION_COOKIE, constantTimeEqual, createSessionToken } from '@/lib/auth/session'
+import { SESSION_COOKIE, constantTimeEqual, createSessionToken, requireEnv } from '@/lib/auth/session'
 
 export async function POST(req: Request) {
   const { password } = (await req.json()) as { password?: string }
-  if (!password || !constantTimeEqual(password, process.env.APP_PASSWORD!)) {
+  if (!password || !constantTimeEqual(password, requireEnv('APP_PASSWORD'))) {
     return NextResponse.json({ error: 'bad-password' }, { status: 401 })
   }
-  const token = await createSessionToken(process.env.SESSION_SECRET!, new Date())
+  const token = await createSessionToken(requireEnv('SESSION_SECRET'), new Date())
   const res = NextResponse.json({ ok: true })
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
