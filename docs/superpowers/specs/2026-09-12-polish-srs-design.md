@@ -160,11 +160,26 @@ that could host it — but it is an implementation swap, not a separate design.
 
 **Card generation.** Gemini on Vertex AI via structured outputs — the request
 carries `responseMimeType: "application/json"` and a `responseSchema`, so the
-response is schema-valid or an error, never prose to be parsed. The Pro tier is
-the default because card quality is the product: a wrong gloss or a mangled
-diacritic is a card drilled wrong for months, and at a few dozen calls a day the
-price difference against the Flash tier is cents a month. Model comes from
-`FISZKI_MODEL`.
+response is schema-valid or an error, never prose to be parsed. The model is
+`gemini-3.8-flash`, from `FISZKI_MODEL`.
+
+That choice deserves its reasoning, because it reverses an earlier one. The
+first instinct was "Pro tier, because card quality is the product" — a wrong
+gloss or a mangled diacritic is a card drilled wrong for months, and at a few
+dozen calls a day the price difference is cents either way. But when the live
+model list was actually queried (2026-09-14), the only GA non-preview Pro model
+was a generation behind: `gemini-2.5-pro`, against a 3.x line offering
+`gemini-3.8-flash` at GA and Pro only in preview. Since cost is irrelevant at
+this volume, tier was never the real axis — **generation** is, because Polish
+morphology and Russian glossing are exactly where newer multilingual training
+shows up.
+
+So the trade is a newer generation over a nominally higher tier, and it is a
+bet rather than a certainty. `FISZKI_MODEL` is one environment variable, and
+the fallback is named: if generated cards show mangled diacritics, ambiguous
+glosses, or English leaking in, switch to `gemini-2.5-pro` and re-check. The
+live verification that ends the generation task exists to make that call on
+evidence rather than on this paragraph.
 
 The returned JSON is additionally validated with Zod at runtime, and the
 `responseSchema` sent to Gemini is **derived from** the Zod schema rather than
