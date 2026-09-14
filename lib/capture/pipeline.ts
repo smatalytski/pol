@@ -22,7 +22,7 @@ export type CaptureView = {
 }
 
 export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }, now: Date): string {
-  const audioMediaId = putMedia(db, { kind: 'audio', mime: audio.mime, bytes: audio.bytes })
+  const audioMediaId = putMedia(db, { kind: 'audio', mime: audio.mime, bytes: audio.bytes, now })
   const id = randomUUID()
   db.insert(captures)
     .values({
@@ -88,7 +88,23 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
       { promptText: null, promptHint: null, answerPl: transcript, examplePl: null, exampleRu: null, grammarNote: null }
 
   const key = answerKey(fields.answerPl)
-  const existing = db.select({ id: cards.id }).from(cards).where(eq(cards.answerKey, key)).get()
+  let existing = db.select({ id: cards.id }).from(cards).where(eq(cards.answerKey, key)).get()
+
+  // Best-effort second lookup, success path only: a word that first landed as `needs_input`
+  // is keyed by its raw transcript, but a later successful re-dictation is keyed by the
+  // diacritic-restored answer_pl, so the primary lookup above would otherwise miss it and
+  // silently fork the word into a second card while orphaning the first. This is NOT a
+  // guarantee — a differently-mangled second transcript still misses — but a re-dictation is
+  // usually mangled the same way the first one was, so it catches the common case at near
+  // zero cost. When both keys would match, the generated-answer match above already won,
+  // since we only fall through to this check when it found nothing.
+  if (!existing && generated) {
+    const transcriptKey = answerKey(transcript)
+    if (transcriptKey !== key) {
+      existing = db.select({ id: cards.id }).from(cards).where(eq(cards.answerKey, transcriptKey)).get()
+    }
+  }
+
   if (existing) {
     db.update(captures)
       .set({

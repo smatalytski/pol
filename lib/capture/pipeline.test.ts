@@ -39,7 +39,11 @@ describe('createCapture', () => {
     const row = d.db.select().from(captures).where(eq(captures.id, id)).get()!
     expect(row.status).toBe('uploaded')
     expect(row.audioMediaId).not.toBeNull()
-    expect(d.db.select().from(media).all()).toHaveLength(1)
+    const mediaRows = d.db.select().from(media).all()
+    expect(mediaRows).toHaveLength(1)
+    // The media row must be stamped with the injected clock, not the wall clock: createCapture
+    // receives `now` specifically so every timestamp it writes is deterministic under test.
+    expect(mediaRows[0].createdAt).toBe(NOW.getTime())
   })
 })
 
@@ -79,6 +83,30 @@ describe('processCapture', () => {
     expect(d.db.select().from(cards).all()).toHaveLength(1)
     const view = listCaptures(d.db, 0).find((c) => c.id === second)!
     expect(view.duplicateOf).toBe(d.db.select().from(cards).get()!.id)
+    expect(view.status).toBe('generated')
+  })
+
+  it('surfaces a duplicate across a needs_input/ready pair via the transcript-key fallback', async () => {
+    // First dictation: generation is down, so the card is keyed by the raw transcript
+    // ('zloslivy') and lands needs_input. Second dictation of the SAME word: generation
+    // succeeds and would key the card by the restored 'złośliwy' — a different string — so
+    // the primary answer-key lookup alone would miss the first card entirely and silently
+    // fork the word into a second, orphaning the first.
+    const fromPolish = vi.fn().mockRejectedValueOnce(new Error('llm down')).mockResolvedValue(GENERATED)
+    const d = deps({ generator: { fromPolish } })
+
+    const first = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, first, NOW)
+    const firstCard = d.db.select().from(cards).get()!
+    expect(firstCard.status).toBe('needs_input')
+    expect(firstCard.answerKey).toBe('zloslivy')
+
+    const second = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, second, NOW)
+
+    expect(d.db.select().from(cards).all()).toHaveLength(1)
+    const view = listCaptures(d.db, 0).find((c) => c.id === second)!
+    expect(view.duplicateOf).toBe(firstCard.id)
     expect(view.status).toBe('generated')
   })
 
