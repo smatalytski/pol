@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   GeneratedCardSchema,
   GenerationError,
@@ -83,8 +83,12 @@ describe('geminiGenerator.fromPolish', () => {
     await make(generate).fromPolish('złośliwy')
     const system = (generate.mock.calls[0][0] as { config: { systemInstruction: string } }).config
       .systemInstruction
-    expect(system).toMatch(/русск/i)
-    expect(system).toMatch(/polsk|польск/i)
+    // Pinned to the direction-setting rule lines themselves, not merely to
+    // "русском"/"польском" appearing anywhere — those words also occur in
+    // the prompt's intro sentence, which would leave this test green even
+    // if the actual rule bullets were deleted.
+    expect(system).toMatch(/prompt_ru\s+всегда\s+на\s+русском/i)
+    expect(system).toMatch(/answer_pl\s+всегда\s+на\s+польском/i)
     expect(system).toMatch(/never|никогда/i)
   })
 
@@ -134,5 +138,17 @@ describe('geminiGenerator.forms', () => {
   it('returns a Polish prompt and a Polish answer table', async () => {
     const payload = { prompt_pl: 'przyzwyczaić się — wszystkie formy', answer_pl: '…' }
     expect(await make(ok(payload)).forms('przyzwyczaić się')).toEqual(payload)
+  })
+})
+
+describe('geminiGenerator model resolution', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('throws a clean GenerationError, not an obscure failure, when FISZKI_MODEL is unset and no model is passed', () => {
+    vi.stubEnv('FISZKI_MODEL', undefined)
+    expect(() => geminiGenerator({ generate: ok(FULL) as never })).toThrow(GenerationError)
+    expect(() => geminiGenerator({ generate: ok(FULL) as never })).toThrow(/FISZKI_MODEL/)
   })
 })

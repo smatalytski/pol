@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, type GenerateContentParameters } from '@google/genai'
 import { z } from 'zod'
 import { gcpProject, vertexLocation } from '../gcp/clients'
 
@@ -111,7 +111,20 @@ export function geminiGenerator(
         project: gcpProject(),
         location: vertexLocation(),
       })
-      return ai.models.generateContent(req as never) as never
+      // Built against the SDK's own GenerateContentParameters (read from
+      // node_modules, not guessed), so tsc validates the field names and
+      // nesting generateContent actually expects. `contents`/`config` still
+      // need a narrowing cast: GenerateFn deliberately types them `unknown`
+      // so the seam stays stable if the SDK's shape moves — that seam is not
+      // being changed here. The response is a GenerateContentResponse
+      // instance whose `.text` getter is `string | undefined`, which is
+      // structurally assignable to `{ text?: string | null }` with no cast.
+      const params: GenerateContentParameters = {
+        model: req.model,
+        contents: req.contents as GenerateContentParameters['contents'],
+        config: req.config as GenerateContentParameters['config'],
+      }
+      return ai.models.generateContent(params)
     })
 
   async function run<T extends z.ZodObject<Record<string, z.ZodString>>>(
