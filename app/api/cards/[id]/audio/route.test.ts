@@ -1,0 +1,127 @@
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+
+// route.ts imports the real `@/lib/db/client` singleton, which opens a
+// sqlite file at process.env.FISZKI_DB on import. Point it at a throwaway
+// file instead of the dev db (data/fiszki.db) before anything imports it.
+const tmpDir = mkdtempSync(path.join(tmpdir(), 'fiszki-tts-route-'))
+process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
+afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
+
+type GetClipArgs = [db: unknown, synth: unknown, text: string, lang: 'pl' | 'ru', now: Date]
+const getClipMock = vi.fn<(...args: GetClipArgs) => Promise<string>>(async () => 'media-id-stub')
+const getSynthesizerMock = vi.fn(() => ({ synthesize: vi.fn() }))
+
+// Mock only the TTS seam, so we can assert exactly which language the route
+// asked for without touching GCP. The db is real (a throwaway file), so the
+// route's own card lookup and eligibility logic run unmocked.
+vi.mock('@/lib/tts', () => ({
+  getClip: (...args: Parameters<typeof getClipMock>) => getClipMock(...args),
+  getSynthesizer: () => getSynthesizerMock(),
+}))
+
+const { GET } = await import('./route')
+const { db } = await import('@/lib/db/client')
+const { cards } = await import('@/lib/db/schema')
+const { newState } = await import('@/lib/scheduler')
+
+const NOW = new Date('2026-09-12T10:00:00')
+
+function seedCard(overrides: Partial<typeof cards.$inferInsert> & { id: string }) {
+  db.insert(cards)
+    .values({
+      type: 'ru_to_pl',
+      promptText: 'злобный',
+      promptHint: null,
+      promptMediaId: null,
+      answerPl: 'złośliwy',
+      answerKey: 'złośliwy',
+      examplePl: null,
+      exampleRu: null,
+      grammarNote: null,
+      status: 'ready',
+      parentCardId: null,
+      suspendedAt: null,
+      createdAt: NOW.getTime(),
+      updatedAt: NOW.getTime(),
+      ...newState(NOW),
+      ...overrides,
+    })
+    .run()
+  return overrides.id
+}
+
+function call(id: string, part?: string) {
+  const url = `http://test/api/cards/${id}/audio${part ? `?part=${part}` : ''}`
+  return GET(new Request(url), { params: Promise.resolve({ id }) })
+}
+
+beforeEach(() => {
+  db.delete(cards).run()
+  getClipMock.mockClear()
+  getSynthesizerMock.mockClear()
+})
+
+describe('GET /api/cards/:id/audio', () => {
+  it('ru_to_pl prompt is spoken in Russian', async () => {
+    seedCard({ id: 'c1', type: 'ru_to_pl', promptText: 'злобный' })
+    const res = await call('c1', 'prompt')
+    expect(res.status).toBe(307)
+    expect(getClipMock).toHaveBeenCalledTimes(1)
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('ru')
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('злобный')
+  })
+
+  it('ru_to_pl answer is spoken in Polish', async () => {
+    seedCard({ id: 'c2', type: 'ru_to_pl', answerPl: 'złośliwy' })
+    const res = await call('c2', 'answer')
+    expect(res.status).toBe(307)
+    expect(getClipMock).toHaveBeenCalledTimes(1)
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('złośliwy')
+  })
+
+  it('image_to_pl answer is spoken in Polish', async () => {
+    seedCard({ id: 'c3', type: 'image_to_pl', promptText: null, answerPl: 'kot' })
+    const res = await call('c3', 'answer')
+    expect(res.status).toBe(307)
+    expect(getClipMock).toHaveBeenCalledTimes(1)
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
+  })
+
+  it('image_to_pl prompt has nothing to speak (image only, no gloss)', async () => {
+    seedCard({ id: 'c4', type: 'image_to_pl', promptText: null })
+    const res = await call('c4', 'prompt')
+    expect(res.status).toBe(404)
+    expect(getClipMock).not.toHaveBeenCalled()
+  })
+
+  it('pl_forms prompt has nothing to speak (it is a Polish form request, not a Russian gloss)', async () => {
+    seedCard({ id: 'c5', type: 'pl_forms', promptText: 'zamek, forms: sg/pl, all cases' })
+    const res = await call('c5', 'prompt')
+    expect(res.status).toBe(404)
+    expect(getClipMock).not.toHaveBeenCalled()
+  })
+
+  it('pl_forms answer has nothing to speak (a declension table read aloud is noise)', async () => {
+    seedCard({ id: 'c6', type: 'pl_forms', answerPl: '| case | sg | pl |\n|---|---|---|' })
+    const res = await call('c6', 'answer')
+    expect(res.status).toBe(404)
+    expect(getClipMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid part before touching the card', async () => {
+    seedCard({ id: 'c7' })
+    const res = await call('c7', 'bogus')
+    expect(res.status).toBe(400)
+    expect(getClipMock).not.toHaveBeenCalled()
+  })
+
+  it('404s for an unknown card id', async () => {
+    const res = await call('does-not-exist', 'answer')
+    expect(res.status).toBe(404)
+    expect(getClipMock).not.toHaveBeenCalled()
+  })
+})
