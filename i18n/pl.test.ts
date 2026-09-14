@@ -25,4 +25,11 @@ describe('strings', () => {
   it('has no empty strings', () => {
     for (const [key, value] of Object.entries(t)) expect(value.trim(), key).not.toBe('')
   })
+
+  it('pins the four ratings to their exact values and order', () => {
+    // FSRS Again/Hard/Good/Easy, in that order. A swap here means a button
+    // reading "dobrze" silently records Hard — the schedule corrupts with
+    // no way for the user to notice.
+    expect([t.again, t.hard, t.good, t.easy]).toEqual(['nie pamiętam', 'z trudem', 'dobrze', 'łatwo'])
+  })
 })
