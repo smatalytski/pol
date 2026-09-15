@@ -48,6 +48,24 @@ describe('useHoldToRecord', () => {
     vi.useRealTimers()
   })
 
+  // The implementation compares with `>=`, so exactly 300ms must be KEPT, not
+  // discarded — the two tests above only exercise 100ms and 500ms, which
+  // would also pass a `> minMs` off-by-one. This pins the boundary itself.
+  it('keeps a press of exactly minMs (the boundary is inclusive)', async () => {
+    vi.useFakeTimers()
+    const onRecorded = vi.fn()
+    const { factory, stop } = fakeFactory()
+    const { result } = renderHook(() => useHoldToRecord({ factory, onRecorded, minMs: 300 }))
+
+    await act(async () => { result.current.start() })
+    vi.advanceTimersByTime(300)
+    await act(async () => { result.current.stop() })
+
+    expect(stop).toHaveBeenCalled()
+    expect(onRecorded).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
   it('stops a recorder that was still starting up when the finger lifted', async () => {
     const onRecorded = vi.fn()
     const { factory, stop, hold, release } = fakeFactory()
@@ -77,6 +95,25 @@ describe('useHoldToRecord', () => {
     const { factory } = fakeFactory()
     const { result } = renderHook(() => useHoldToRecord({ factory, onRecorded: vi.fn(), minMs: 0 }))
     await act(async () => { result.current.stop() })
+    expect(result.current.recording).toBe(false)
+  })
+
+  // A bare `stop()` with no prior `start()` is exercised above, but
+  // `recording` starts `false` and stays `false` there regardless of whether
+  // `stop()` does anything at all — that assertion can't fail even if `stop`
+  // were broken. This one proves it by driving a real start/stop cycle first,
+  // then firing a second, unmatched `stop()` and checking with a spy that it
+  // does not tear the (already-gone) recorder down a second time.
+  it('does not double-tear-down the recorder on a second, unmatched stop', async () => {
+    const { factory, stop } = fakeFactory()
+    const { result } = renderHook(() => useHoldToRecord({ factory, onRecorded: vi.fn(), minMs: 0 }))
+
+    await act(async () => { result.current.start() })
+    await act(async () => { result.current.stop() })
+    expect(stop).toHaveBeenCalledTimes(1)
+
+    await act(async () => { result.current.stop() }) // e.g. a duplicate pointerup/pointercancel pair
+    expect(stop).toHaveBeenCalledTimes(1)
     expect(result.current.recording).toBe(false)
   })
 

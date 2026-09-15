@@ -1,18 +1,28 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CaptureChip } from '@/components/CaptureChip'
+import { CaptureChip, chipCreatedAt, chipKey, type ChipItem } from '@/components/CaptureChip'
 import { useHoldToRecord, mediaRecorderFactory } from '@/hooks/useHoldToRecord'
 import { useWakeLock } from '@/hooks/useWakeLock'
-import { enqueue, flush } from '@/lib/capture/outbox'
+import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbox'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import { t } from '@/i18n/pl'
 
 export default function AddPage() {
   const [captures, setCaptures] = useState<CaptureView[]>([])
-  const [pendingUploads, setPendingUploads] = useState(0)
+  const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([])
   const [micDenied, setMicDenied] = useState(false)
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
+
+  // Shared by every async chain below (drain, poll) that eventually calls a
+  // setter: guards against updating state after the screen has been
+  // navigated away from, rather than each chain inventing its own flag.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   // One getUserMedia for the whole session, so the second and later presses
   // start recording instantly instead of waiting on a permission round-trip.
@@ -26,21 +36,41 @@ export default function AddPage() {
     return streamRef.current
   }, [])
 
+  const fetchCaptures = useCallback(async () => {
+    const res = await fetch(`/api/captures?since=${since.current}`)
+    const d = await res.json()
+    if (mountedRef.current) setCaptures(d.captures)
+  }, [])
+
   const drain = useCallback(async () => {
-    const { kept } = await flush(async (item) => {
+    const { sent } = await flush(async (item) => {
       const form = new FormData()
       form.set('audio', new Blob([item.bytes], { type: item.mime }), 'capture.webm')
       const res = await fetch('/api/captures', { method: 'POST', body: form })
       if (!res.ok) throw new Error(`upload failed: ${res.status}`)
     })
-    setPendingUploads(kept.length)
-  }, [])
+    const items = await listOutbox()
+    if (mountedRef.current) setOutboxItems(items)
+    // A sent item's server row already exists by the time `flush` deleted it
+    // (the upload only resolves after `createCapture` ran) — fetch it now
+    // rather than waiting for the next poll tick, which may never come if
+    // this was the item keeping `hasPending` true. Without this, a capture
+    // that finishes uploading in the same cycle that empties the outbox can
+    // vanish from both lists until something else happens to poll again.
+    if (sent.length > 0) await fetchCaptures()
+  }, [fetchCaptures])
 
   const onRecorded = useCallback(
     async (bytes: ArrayBuffer, mime: string) => {
       await enqueue({ id: crypto.randomUUID(), bytes, mime, createdAt: Date.now() })
-      setPendingUploads((n) => n + 1)
       navigator.vibrate?.(20)
+      // Reflect the just-enqueued recording immediately, as its own chip,
+      // rather than waiting for `drain` to attempt (and possibly finish) the
+      // upload first — otherwise a fast upload could skip the "uploading"
+      // state entirely and a slow one would leave the word unaccounted for
+      // until the next poll tick.
+      const items = await listOutbox()
+      if (mountedRef.current) setOutboxItems(items)
       await drain()
     },
     [drain],
@@ -59,18 +89,13 @@ export default function AddPage() {
   // stalled upload still needs retrying. Polling forever on a phone-first
   // app is a battery drain for no benefit once the screen is idle, so the
   // interval is torn down the moment nothing is left to watch, and a fresh
-  // recording (via `pendingUploads`) restarts it.
+  // recording (via `outboxItems`) restarts it.
   const hasPending =
-    pendingUploads > 0 || captures.some((c) => c.status !== 'generated' && c.status !== 'failed')
+    outboxItems.length > 0 || captures.some((c) => c.status !== 'generated' && c.status !== 'failed')
 
   useEffect(() => {
-    let cancelled = false
     function poll() {
-      void fetch(`/api/captures?since=${since.current}`)
-        .then((r) => r.json())
-        .then((d) => {
-          if (!cancelled) setCaptures(d.captures)
-        })
+      void fetchCaptures()
       void drain()
     }
     // Always poll once on mount (or whenever pending work appears) so a
@@ -79,10 +104,9 @@ export default function AddPage() {
     poll()
     const id = hasPending ? setInterval(poll, 1000) : null
     return () => {
-      cancelled = true
       if (id) clearInterval(id)
     }
-  }, [hasPending, drain])
+  }, [hasPending, drain, fetchCaptures])
 
   const retry = useCallback((id: string) => {
     void fetch(`/api/captures/${id}/retry`, { method: 'POST' })
@@ -93,6 +117,15 @@ export default function AddPage() {
   if (micDenied) {
     return <p className="p-6 text-lg">{t.micDenied}</p>
   }
+
+  // Outbox items (no server row yet — still local, possibly stuck retrying an
+  // upload) and server-known captures are merged into one waterfall, newest
+  // first. See `components/CaptureChip.tsx` for how the two id spaces are
+  // kept from permanently colliding.
+  const chips: ChipItem[] = [
+    ...outboxItems.map((o): ChipItem => ({ kind: 'outbox', id: o.id, createdAt: o.createdAt })),
+    ...captures.map((c): ChipItem => ({ kind: 'capture', capture: c })),
+  ].sort((a, b) => chipCreatedAt(b) - chipCreatedAt(a))
 
   return (
     <div className="flex flex-col items-center gap-6">
@@ -106,11 +139,10 @@ export default function AddPage() {
       >
         {t.holdToRecord}
       </button>
-      {pendingUploads > 0 && <p className="text-sm text-neutral-500">{pendingUploads}</p>}
 
       <ul className="w-full">
-        {captures.map((c) => (
-          <CaptureChip key={c.id} capture={c} onRetry={retry} />
+        {chips.map((item) => (
+          <CaptureChip key={chipKey(item)} item={item} onRetry={retry} />
         ))}
       </ul>
     </div>
