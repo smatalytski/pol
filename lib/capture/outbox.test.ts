@@ -80,7 +80,7 @@ describe('outbox', () => {
     expect(await flush(vi.fn())).toEqual({ sent: [], kept: [] })
   })
 
-  it('attempts one item to fail and continues to the rest, accounting for every item', async () => {
+  it('attempts every item even when one fails, and accounts for all of them', async () => {
     await enqueue(item('a'))
     await enqueue(item('b'))
     await enqueue(item('c'))
