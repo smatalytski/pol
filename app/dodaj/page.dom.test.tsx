@@ -292,4 +292,80 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
     // the fetch mock is torn down, for the same reason as the test above.
     unmount()
   })
+
+  // The two tests above only check *eventual* state via `waitFor`, and the
+  // mocked `/api/captures?since=` GET resolves as a near-instant microtask —
+  // so they can't see a window that opens only while a real network request
+  // is in flight. This test holds that GET open on a deferred promise it
+  // controls, so it can assert on the render that exists *during* the gap
+  // between "the upload landed" and "the server row was fetched" — the
+  // window `drain()` must not open at all.
+  it('never has the word absent from every list while the server row is being fetched', async () => {
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+
+    let capturesFixture: CaptureView[] = []
+    let postCalls = 0
+    // Every `/api/captures?since=` call (there can be more than one — the
+    // polling effect's own `fetchCaptures()` and `drain()`'s post-upload
+    // re-fetch can both fire around the same time; that redundancy is
+    // known and accepted, not what this test is about) is held open on a
+    // deferred promise until explicitly released below, so the assertion
+    // can be made about the render that exists while ALL of them are still
+    // pending — none has had a chance to update any state yet.
+    const capturesGetResolvers: Array<(res: unknown) => void> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
+          return new Promise((resolve) => {
+            capturesGetResolvers.push(resolve)
+          })
+        }
+        if (url === '/api/captures' && init?.method === 'POST') {
+          postCalls++
+          capturesFixture = [captureRow('server-3', 'uploaded')]
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captureId: 'server-3' }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+
+    const { unmount } = render(<AddPage />)
+    const button = screen.getByRole('button', { name: t.holdToRecord })
+
+    await act(async () => {
+      fireEvent.pointerDown(button)
+    })
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 320))
+    })
+    await act(async () => {
+      fireEvent.pointerUp(button)
+    })
+
+    // Wait until the upload has resolved — `drain()`'s `sent.length > 0`
+    // branch has necessarily started (and issued its captures re-fetch) by
+    // this point — but release none of the pending GETs yet.
+    await waitFor(() => expect(postCalls).toBe(1))
+
+    // The upload has landed server-side, but every captures re-fetch is
+    // still pending, so nothing has reconciled the local outbox chip away
+    // yet. The word's chip must still be present — it must not have
+    // vanished from every list while this is in flight.
+    expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText(t.uploading)).toBeTruthy()
+
+    // Release every deferred GET: the server chip lands and the outbox chip
+    // is reconciled away, converging to exactly one chip for this word.
+    await act(async () => {
+      for (const resolve of capturesGetResolvers) {
+        resolve({ json: () => Promise.resolve({ captures: capturesFixture }) })
+      }
+    })
+    await waitFor(() => expect(screen.queryByText(t.uploading)).toBeNull())
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(1))
+
+    unmount()
+  })
 })

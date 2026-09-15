@@ -36,11 +36,18 @@ export default function AddPage() {
     return streamRef.current
   }, [])
 
-  const fetchCaptures = useCallback(async () => {
+  // Split from `fetchCaptures` below so `drain` can pull the raw data without
+  // committing it to state on its own — see the `sent.length > 0` branch.
+  const fetchCapturesData = useCallback(async (): Promise<CaptureView[]> => {
     const res = await fetch(`/api/captures?since=${since.current}`)
     const d = await res.json()
-    if (mountedRef.current) setCaptures(d.captures)
+    return d.captures as CaptureView[]
   }, [])
+
+  const fetchCaptures = useCallback(async () => {
+    const captures = await fetchCapturesData()
+    if (mountedRef.current) setCaptures(captures)
+  }, [fetchCapturesData])
 
   const drain = useCallback(async () => {
     const { sent } = await flush(async (item) => {
@@ -49,16 +56,26 @@ export default function AddPage() {
       const res = await fetch('/api/captures', { method: 'POST', body: form })
       if (!res.ok) throw new Error(`upload failed: ${res.status}`)
     })
-    const items = await listOutbox()
-    if (mountedRef.current) setOutboxItems(items)
-    // A sent item's server row already exists by the time `flush` deleted it
-    // (the upload only resolves after `createCapture` ran) — fetch it now
-    // rather than waiting for the next poll tick, which may never come if
-    // this was the item keeping `hasPending` true. Without this, a capture
-    // that finishes uploading in the same cycle that empties the outbox can
-    // vanish from both lists until something else happens to poll again.
-    if (sent.length > 0) await fetchCaptures()
-  }, [fetchCaptures])
+    if (sent.length > 0) {
+      // A sent item's server row already exists by the time `flush` deleted
+      // it (the upload only resolves after `createCapture` ran). Fetch that
+      // row *before* clearing the local outbox chip, and commit both state
+      // updates together, so the word is never absent from every list at
+      // once — worst case it briefly appears in both (the outbox chip and
+      // the new capture chip), which is harmless and self-corrects on the
+      // next render, unlike a gap where it's in neither.
+      const [captures, items] = await Promise.all([fetchCapturesData(), listOutbox()])
+      if (mountedRef.current) {
+        setCaptures(captures)
+        setOutboxItems(items)
+      }
+    } else {
+      // Nothing landed (upload still failing/retrying) — still refresh
+      // outboxItems so the attempt count and retry state stay visible.
+      const items = await listOutbox()
+      if (mountedRef.current) setOutboxItems(items)
+    }
+  }, [fetchCapturesData])
 
   const onRecorded = useCallback(
     async (bytes: ArrayBuffer, mime: string) => {
