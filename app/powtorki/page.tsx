@@ -58,19 +58,28 @@ export default function ReviewPage() {
 
   const undo = useCallback(() => {
     if (!state.lastRated || undoInFlight.current) return
+    // `undoLastReview` acts on the globally-last non-undone review row — it
+    // has no notion of "this client" or "this session's queue". With a
+    // second writer (another tab, another device on the same Tailscale
+    // network) it's possible for this client to optimistically restore card
+    // X while the server actually reverted a different card, Y, rated from
+    // elsewhere a moment later. Capture which card *this* undo expects
+    // before dispatching, so the response can be checked against it rather
+    // than trusted just because it came back non-null.
+    const expectedCardId = state.lastRated.id
     undoInFlight.current = true
     dispatch({ type: 'undo' })
     setReviewedCount((n) => Math.max(0, n - 1))
     void fetch('/api/review/undo', { method: 'POST' })
       .then((r) => r.json())
       .then((d) => {
-        // `undoLastReview` looks at the whole reviews log, not this session's
-        // queue. If it found nothing to undo (log empty, or already undone by
-        // the time this ran) the client's optimistic revert is a lie — the
-        // card was never actually reverted server-side. Reload from the
-        // server's truth rather than leave the UI showing a card that isn't
-        // really due for review again.
-        if (!d.undone) {
+        // Either "nothing was undone" (log empty, or already undone by the
+        // time this ran) or "the wrong card was undone" (a second writer's
+        // review became the globally-last one first) makes the client's
+        // optimistic revert a lie. Reload from the server's truth rather
+        // than leave the UI showing a card that wasn't actually reverted —
+        // or was, but isn't the one now sitting at the front of the queue.
+        if (!d.undone || d.undone.cardId !== expectedCardId) {
           return fetch('/api/review/queue')
             .then((r2) => r2.json())
             .then((q) => {
@@ -127,11 +136,11 @@ export default function ReviewPage() {
       <div className="p-8 text-center">
         <p className="text-xl">{t.doneForToday}</p>
         <p className="mt-2 text-sm text-neutral-500">
-          {t.review}: {reviewedCount}
+          {t.sessionReviewed}: {reviewedCount}
         </p>
         {nextDue != null && (
           <p className="mt-1 text-sm text-neutral-500">
-            {t.nextDue}: {new Date(nextDue).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })}
+            {t.nextReviewAt}: {new Date(nextDue).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })}
           </p>
         )}
         {state.lastRated && (

@@ -17,6 +17,8 @@ export const t = {
   doneForToday: 'Na dziś koniec',
   nextDue: 'Następna powtórka',
   noCards: 'Brak fiszek',
+  sessionReviewed: 'Przejrzano',
+  nextReviewAt: 'Kolejna powtórka',
 
   holdToRecord: 'przytrzymaj i mów',
   uploading: 'wysyłanie…',
