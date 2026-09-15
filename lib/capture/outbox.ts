@@ -30,14 +30,24 @@ export async function clearOutbox(): Promise<void> {
  * count incremented — losing a dictated word is worse than a stuck queue, so
  * there is deliberately no give-up threshold.
  *
- * Only one flush runs at a time (guarded by `flushing`): a second concurrent
- * call is a no-op that returns `{ sent: [], kept: [] }` immediately, rather
- * than racing the first over the same rows. This is a lock, not a queue —
- * nothing here defers the caller's items to "run again after"; the caller
- * (or the next scheduled flush) simply tries again later. That is safe
- * because a flush that finds nothing new to do is free, and it avoids two
- * concurrent flushes both reading an item, both uploading it, and one of
- * them deleting out from under the other's in-flight upload.
+ * Only one flush runs at a time within this module instance (guarded by the
+ * in-memory `flushing` flag): a second concurrent call in the same tab is a
+ * no-op that returns `{ sent: [], kept: [] }` immediately, rather than racing
+ * the first over the same rows. This is a lock, not a queue — nothing here
+ * defers the caller's items to "run again after"; the caller (or the next
+ * scheduled flush) simply tries again later. That is safe because a flush
+ * that finds nothing new to do is free, and within a single tab/process it
+ * avoids two concurrent flushes both reading an item, both uploading it, and
+ * one of them deleting out from under the other's in-flight upload.
+ *
+ * `flushing` is a plain module-level boolean, so it only coordinates flushes
+ * within this one tab/process. A second tab of this PWA has its own copy of
+ * this module and its own `flushing` flag, so two tabs can each read and
+ * upload the same outbox item concurrently. The consequence is bounded: the
+ * pipeline's `answerKey` dedup collapses the resulting duplicate capture into
+ * `duplicateOf` rather than a second card, so cross-tab races cost at most a
+ * wasted upload/transcription — they never lose a recording. Do not read this
+ * comment as a cross-tab guarantee.
  */
 export async function flush(
   upload: (item: OutboxItem) => Promise<void>,
