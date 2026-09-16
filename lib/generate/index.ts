@@ -63,7 +63,7 @@ const FORMS_SYSTEM = `Ты делаешь карточку-тренажёр фо
 export function toCardFields(g: GeneratedCard) {
   const orNull = (s: string) => (s.trim() === '' ? null : s)
   return {
-    promptText: g.prompt_ru,
+    promptText: orNull(g.prompt_ru),
     promptHint: orNull(g.prompt_hint),
     answerPl: g.answer_pl,
     examplePl: orNull(g.example_pl),

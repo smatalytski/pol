@@ -54,8 +54,17 @@ describe('toCardFields', () => {
     })
   })
 
+  // C5 (review finding): promptText used to pass g.prompt_ru through raw,
+  // unlike its four siblings — an empty prompt_ru (a real model output, not
+  // just a hypothetical) would produce a `status: 'ready'` card with a blank
+  // front instead of the null every other "no value" case uses.
+  it('maps an empty prompt_ru to null too, like its siblings', () => {
+    expect(toCardFields({ ...FULL, prompt_ru: '' }).promptText).toBeNull()
+  })
+
   it('keeps populated fields', () => {
     expect(toCardFields(FULL).examplePl).toBe('Zrobił to ze złośliwości.')
+    expect(toCardFields(FULL).promptText).toBe('злобный, ехидный')
   })
 })
 

@@ -114,6 +114,10 @@ FISZKI_MODEL=<gemini model id, see .env.example>
 GCP_VERTEX_LOCATION=global
 GCP_SPEECH_LOCATION=eu
 FISZKI_BACKUP_BUCKET=<project>-fiszki-backups
+# The new-card daily cap and "today" boundary in lib/review/queue.ts roll
+# over at server-local midnight. A default GCE Debian image runs UTC, which
+# would roll the cap over at 02:00 Warsaw time instead of midnight.
+TZ=Europe/Warsaw
 EOF
 sudo chmod 600 /etc/fiszki.env
 ```
@@ -273,7 +277,7 @@ thing genuinely new about this environment versus everything tested so far.
 | `SESSION_SECRET` | HMAC key for the session cookie |
 | `FISZKI_DB` | database path; `/mnt/fiszki/fiszki.db` on the VM |
 | `GOOGLE_CLOUD_PROJECT` | the GCP project for all three AI services |
-| `FISZKI_MODEL` | Gemini model ID (Pro tier) |
+| `FISZKI_MODEL` | Gemini model ID; default `gemini-3.8-flash` (newer generation over nominally-higher-tier `gemini-2.5-pro`, spec §5), named fallback `gemini-2.5-pro` if generation quality regresses |
 | `GCP_VERTEX_LOCATION` | Gemini location, default `global` |
 | `GCP_SPEECH_LOCATION` | Speech/TTS location, default `eu` — Polish requires it |
 | `FISZKI_BACKUP_BUCKET` | GCS bucket for snapshots; unset means local-only |

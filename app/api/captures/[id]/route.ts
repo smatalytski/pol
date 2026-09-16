@@ -13,8 +13,9 @@ import { captures } from '@/lib/db/schema'
  * going through lib/cards/service.ts for a lookup with no side effects.
  *
  * Deliberately does not touch `media`: audio is kept permanently per spec §4
- * even when its capture row is gone (lib/media/store.ts has no delete path at
- * all, by design — see its own comments), and this route does not add one.
+ * even when its capture row is gone (lib/media/store.ts's `putMedia` doc
+ * comment spells out the no-delete-path-by-design decision), and this route
+ * does not add one.
  * A no-op (200) on an unknown id, like the cards DELETE route, since deleting
  * something already gone is not an error.
  */
