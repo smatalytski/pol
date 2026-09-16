@@ -6,10 +6,11 @@ describe('strings', () => {
     const required = [
       'appName', 'review', 'add', 'images', 'cards', 'settings',
       'show', 'again', 'hard', 'good', 'easy', 'undo',
-      'doneForToday', 'nextDue', 'noCards', 'sessionReviewed', 'nextReviewAt',
-      'holdToRecord', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
+      'doneForToday', 'noCards', 'sessionReviewed', 'nextReviewAt', 'rateFailed',
+      'holdToRecord', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
       'dropImages', 'imagePrompt', 'addForms', 'suspend', 'unsuspend', 'save', 'needsInput', 'formsFailed',
-      'newPerDay', 'targetRetention', 'logIn', 'badPassword', 'passwordPlaceholder',
+      'saveFailed', 'chipSaveFailed',
+      'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
     ]
     for (const key of required) expect(t).toHaveProperty(key)
   })

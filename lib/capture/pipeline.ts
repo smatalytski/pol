@@ -1,7 +1,7 @@
-import { desc, eq, gt } from 'drizzle-orm'
+import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { captures } from '../db/schema'
+import { captures, cards } from '../db/schema'
 import { createCard } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
@@ -150,11 +150,30 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
     .run()
 }
 
+// Important review finding (A4): a swipe-to-delete on a chip with a finished
+// card soft-deletes the *card* (DELETE /api/cards/:id), but this list is
+// built from `captures`, which is untouched by that — so the chip stayed on
+// screen looking undeleted, and the /dodaj screen's `since` is pinned at
+// mount, so it would never roll out of the window on its own either. Left-
+// join `cards` and drop any capture whose card has been soft-deleted (a
+// capture with no card at all, `cardId IS NULL`, is unaffected and always
+// kept). The media blob is left alone either way — this only changes what's
+// listed, not what's stored.
 export function listCaptures(db: Db, since: number): CaptureView[] {
   return db
-    .select()
+    .select({
+      id: captures.id,
+      status: captures.status,
+      transcript: captures.transcript,
+      error: captures.error,
+      cardId: captures.cardId,
+      generationJson: captures.generationJson,
+      audioMediaId: captures.audioMediaId,
+      createdAt: captures.createdAt,
+    })
     .from(captures)
-    .where(gt(captures.createdAt, since))
+    .leftJoin(cards, eq(cards.id, captures.cardId))
+    .where(and(gt(captures.createdAt, since), or(isNull(captures.cardId), isNull(cards.deletedAt))))
     .orderBy(desc(captures.createdAt))
     .all()
     .map((c) => ({

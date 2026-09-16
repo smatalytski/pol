@@ -7,7 +7,13 @@ export class InvalidSchedulerStateError extends Error {
   }
 }
 
-const NUMBER_FIELDS = [
+// `satisfies`, not a `: readonly (keyof SchedulerState)[]` annotation: an
+// explicit annotation would widen `typeof NUMBER_FIELDS` to that same broad
+// array type, which would make `MissingNumberField` below vacuously `never`
+// no matter what the list actually contains. `satisfies` checks membership
+// without discarding the literal tuple type `as const` gives it, which the
+// exhaustiveness check depends on.
+export const NUMBER_FIELDS = [
   'due',
   'stability',
   'difficulty',
@@ -16,7 +22,17 @@ const NUMBER_FIELDS = [
   'reps',
   'lapses',
   'state',
-] as const
+] as const satisfies readonly (keyof SchedulerState)[]
+
+// Exhaustiveness check (unnamed-invariant finding, A5): every SchedulerState
+// field except the nullable `lastReview` (validated separately below) must
+// appear in NUMBER_FIELDS. TypeScript does not apply excess-property checks
+// to this kind of list, so nothing else stops a field added to
+// SchedulerState — e.g. by a ts-fsrs upgrade — from silently missing its
+// validation here. If that happens, `MissingNumberField` stops being
+// `never`, and the assignment below fails to typecheck.
+type MissingNumberField = Exclude<Exclude<keyof SchedulerState, 'lastReview'>, (typeof NUMBER_FIELDS)[number]>
+export const assertNoMissingNumberFields: MissingNumberField extends never ? true : never = true
 
 /**
  * Validates a value replayed back out of the append-only `reviews` log

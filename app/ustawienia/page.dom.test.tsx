@@ -24,7 +24,7 @@ describe('SettingsPage', () => {
     expect(screen.getByDisplayValue('0.87')).toBeTruthy()
   })
 
-  it('PUTs the edited value on blur and refreshes from the (validated) server response', async () => {
+  it('PUTs the edited value on blur and displays exactly what the server echoes back, not what was typed', async () => {
     const calls: Array<{ body: unknown }> = []
     vi.stubGlobal(
       'fetch',
@@ -32,10 +32,20 @@ describe('SettingsPage', () => {
         if (init?.method === 'PUT') {
           calls.push({ body: JSON.parse(init.body as string) })
           // Server-side validation is the real guard (spec: it must not be
-          // bypassable); this fixture just reflects a legitimate value back.
-          return Promise.resolve({ json: () => Promise.resolve({ newPerDay: 20, requestRetention: 0.9, audioGapSeconds: 5 }) }) as unknown as Promise<Response>
+          // bypassable); this fixture deliberately echoes back a DIFFERENT
+          // value (17, not the 20 that was typed) so the assertion below can
+          // only pass if the displayed value truly comes from
+          // `setSettings(await res.json())` rather than from the input
+          // merely retaining whatever the user typed.
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ newPerDay: 17, requestRetention: 0.9, audioGapSeconds: 5 }),
+          }) as unknown as Promise<Response>
         }
-        return Promise.resolve({ json: () => Promise.resolve({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 }) }) as unknown as Promise<Response>
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 }),
+        }) as unknown as Promise<Response>
       }),
     )
     render(<SettingsPage />)
@@ -45,7 +55,32 @@ describe('SettingsPage', () => {
       fireEvent.blur(input)
     })
     expect(calls).toEqual([{ body: { newPerDay: 20 } }])
-    expect(await screen.findByDisplayValue('20')).toBeTruthy()
+    expect(await screen.findByDisplayValue('17')).toBeTruthy()
+    expect(screen.queryByDisplayValue('20')).toBeNull()
+  })
+
+  it('shows an error and reverts to the last confirmed value when the server rejects the input', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: 'bad settings' }) }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<SettingsPage />)
+    const input = await screen.findByDisplayValue('10')
+    fireEvent.change(input, { target: { value: '999' } })
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    expect(await screen.findByText(t.settingsSaveFailed)).toBeTruthy()
+    expect(await screen.findByDisplayValue('10')).toBeTruthy()
+    expect(screen.queryByDisplayValue('999')).toBeNull()
   })
 
   it('renders nothing before settings have loaded', () => {

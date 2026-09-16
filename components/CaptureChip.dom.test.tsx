@@ -176,6 +176,38 @@ describe('CaptureChip', () => {
     expect(screen.queryByDisplayValue('wredny')).toBeNull() // collapsed after save
   })
 
+  // Important review finding (A3): save() never checked the response status.
+  it('shows an error and keeps the form open when the PATCH is rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (!init?.method) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                card: { promptText: null, promptHint: null, answerPl: 'złośliwy', examplePl: null, exampleRu: null, grammarNote: null },
+              }),
+          }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
+      }),
+    )
+    render(<CaptureChip item={captureItem({ cardId: 'card-1' })} onRetry={vi.fn()} onDelete={vi.fn()} />)
+    await act(async () => {
+      swipe(screen.getByRole('listitem'), 0)
+    })
+    const answerInput = await screen.findByDisplayValue('złośliwy')
+    fireEvent.change(answerInput, { target: { value: 'wredny' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: t.save }))
+    })
+    expect(await screen.findByText(t.chipSaveFailed)).toBeTruthy()
+    // Form stays open with the edit intact, rather than silently collapsing
+    // as if the save had succeeded.
+    expect(screen.getByDisplayValue('wredny')).toBeTruthy()
+  })
+
   it('does not throw if the card is gone by the time the chip is tapped (404)', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 404 }) as unknown as Promise<Response>))
     render(<CaptureChip item={captureItem({ cardId: 'gone' })} onRetry={vi.fn()} onDelete={vi.fn()} />)

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { cards, captures, media } from '../db/schema'
+import { deleteCard } from '../cards/service'
 import type { Generator } from '../generate'
 import type { Transcriber } from '../transcribe'
 import { createCapture, listCaptures, processCapture } from './pipeline'
@@ -194,5 +195,26 @@ describe('listCaptures', () => {
     const newer = createCapture(d.db, AUDIO, NOW)
     expect(listCaptures(d.db, 0).map((c) => c.id)).toEqual([newer, older])
     expect(listCaptures(d.db, NOW.getTime() - 5_000).map((c) => c.id)).toEqual([newer])
+  })
+
+  // Important review finding (A4): swipe-to-delete on a finished chip
+  // soft-deletes its card, not its capture row. Without filtering here, the
+  // chip stayed on screen looking undeleted — and /dodaj's `since` cursor is
+  // pinned at mount, so it would never age out on its own.
+  it('omits a capture whose card has been soft-deleted', async () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, id, NOW)
+    const view = listCaptures(d.db, 0).find((c) => c.id === id)!
+    expect(view.cardId).not.toBeNull()
+
+    deleteCard(d.db, view.cardId!, NOW)
+    expect(listCaptures(d.db, 0).find((c) => c.id === id)).toBeUndefined()
+  })
+
+  it('keeps a capture with no card at all (nothing to soft-delete)', () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW)
+    expect(listCaptures(d.db, 0).find((c) => c.id === id)).toBeDefined()
   })
 })

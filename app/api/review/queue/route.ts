@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { and, asc, eq, gt, isNull } from 'drizzle-orm'
+import { and, asc, gt } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { cards } from '@/lib/db/schema'
-import { buildQueue } from '@/lib/review/queue'
+import { buildQueue, REVIEWABLE } from '@/lib/review/queue'
 
 export async function GET() {
   const now = new Date()
@@ -15,21 +15,13 @@ export async function GET() {
   // account for new cards withheld by the daily cap, whose `due` is already
   // <= now but which resume tomorrow — that's a different kind of "next",
   // and spec doesn't ask for it here.)
-  // Soft delete (decided 2026-09-16): a distinct literal predicate from
-  // lib/review/queue.ts's REVIEWABLE, so it needs its own deleted_at filter —
-  // otherwise a deleted card's due date could still surface as "next review
-  // at" even though it appears nowhere else.
+  // Soft delete (decided 2026-09-16): shares REVIEWABLE with
+  // lib/review/queue.ts (rather than re-spelling its conditions) so a future
+  // fourth condition can't reach one dialect and not the other.
   const next = db
     .select({ due: cards.due })
     .from(cards)
-    .where(
-      and(
-        isNull(cards.suspendedAt),
-        isNull(cards.deletedAt),
-        eq(cards.status, 'ready'),
-        gt(cards.due, now.getTime()),
-      ),
-    )
+    .where(and(REVIEWABLE, gt(cards.due, now.getTime())))
     .orderBy(asc(cards.due))
     .limit(1)
     .get()

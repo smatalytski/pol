@@ -26,7 +26,11 @@ export function recordReview(
   durationMs: number | null,
   now: Date,
 ): SchedulerState {
-  const row = db.select().from(cards).where(eq(cards.id, cardId)).get()
+  const row = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.id, cardId), isNull(cards.deletedAt)))
+    .get()
   if (!row) throw new Error(`no such card: ${cardId}`)
 
   const before = stateOf(row)
@@ -51,8 +55,13 @@ export function recordReview(
 
 export function undoLastReview(db: Db, now: Date): { cardId: string } | null {
   const last = db
-    .select()
+    .select({
+      id: reviews.id,
+      cardId: reviews.cardId,
+      stateBefore: reviews.stateBefore,
+    })
     .from(reviews)
+    .innerJoin(cards, and(eq(cards.id, reviews.cardId), isNull(cards.deletedAt)))
     .where(isNull(reviews.undoneAt))
     .orderBy(desc(reviews.id))
     .limit(1)

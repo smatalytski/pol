@@ -91,7 +91,7 @@ const SELECTION = {
 // NULL AND status = 'ready'`), so SQLite can still use that index for this
 // query — no index migration needed. Authorized change to this otherwise
 // frozen module (task 17 brief).
-const REVIEWABLE = and(isNull(cards.suspendedAt), isNull(cards.deletedAt), eq(cards.status, 'ready'))
+export const REVIEWABLE = and(isNull(cards.suspendedAt), isNull(cards.deletedAt), eq(cards.status, 'ready'))
 
 export async function buildQueue(db: Db, now: Date): Promise<QueueItem[]> {
   const { newPerDay } = getSettings(db)

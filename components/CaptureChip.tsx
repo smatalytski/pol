@@ -73,6 +73,7 @@ export function CaptureChip({
   // just set. Same pattern as hooks/useHoldToRecord.ts's gesture refs.
   const pointerStartX = useRef<number | null>(null)
   const [fields, setFields] = useState<EditableFields | null>(null)
+  const [saveError, setSaveError] = useState(false)
 
   if (item.kind === 'outbox') {
     // No server row exists yet for this recording, so there is no id to
@@ -140,11 +141,16 @@ export function CaptureChip({
 
   async function save() {
     if (!fields || !capture.cardId) return
-    await fetch(`/api/cards/${capture.cardId}`, {
+    const res = await fetch(`/api/cards/${capture.cardId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(fields),
     })
+    if (!res.ok) {
+      setSaveError(true)
+      return
+    }
+    setSaveError(false)
     setFields(null)
   }
 
@@ -213,6 +219,7 @@ export function CaptureChip({
           <button onClick={() => void save()} className="self-start text-sm underline">
             {t.save}
           </button>
+          {saveError && <p className="text-sm text-red-600">{t.chipSaveFailed}</p>}
         </div>
       )}
     </li>

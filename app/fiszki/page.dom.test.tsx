@@ -218,4 +218,51 @@ describe('CardsPage (browse/edit)', () => {
     })
     expect(await screen.findByText(t.formsFailed)).toBeTruthy()
   })
+
+  // Important review finding (A3): patch()/the delete button ignored the
+  // response status entirely. Since the answer field is an uncontrolled
+  // `defaultValue` input, a rejected PATCH left the user's edit on screen
+  // looking saved.
+  it('shows an error when a PATCH is rejected, instead of silently reloading', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url === '/api/cards?q=') {
+          return Promise.resolve({ json: () => Promise.resolve({ cards: [cardRow()] }) }) as unknown as Promise<Response>
+        }
+        if (url === '/api/cards/c1' && init?.method === 'PATCH') {
+          return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: 'bad' }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+    render(<CardsPage />)
+    const input = await screen.findByDisplayValue('złośliwy')
+    fireEvent.change(input, { target: { value: 'wredny' } })
+    await act(async () => {
+      fireEvent.blur(input)
+    })
+    expect(await screen.findByText(t.saveFailed)).toBeTruthy()
+  })
+
+  it('shows an error when a DELETE is rejected, instead of silently reloading', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url === '/api/cards?q=') {
+          return Promise.resolve({ json: () => Promise.resolve({ cards: [cardRow()] }) }) as unknown as Promise<Response>
+        }
+        if (url === '/api/cards/c1' && init?.method === 'DELETE') {
+          return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+    render(<CardsPage />)
+    const button = await screen.findByText(t.deleteItem)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.saveFailed)).toBeTruthy()
+  })
 })

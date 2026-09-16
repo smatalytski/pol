@@ -9,6 +9,10 @@ export default function ReviewPage() {
   const [state, dispatch] = useReducer(reviewReducer, initialReviewState)
   const [nextDue, setNextDue] = useState<number | null>(null)
   const [reviewedCount, setReviewedCount] = useState(0)
+  // Important review finding (A3): a rejected rating POST was previously
+  // ignored outright — the optimistic UI had already advanced past the card,
+  // so the user had no way to know the rating never reached the server.
+  const [rateError, setRateError] = useState(false)
   // Distinguishes "still fetching the queue" from "fetched, and it's empty."
   // Without this, `card` is null and `reviewedCount` is 0 during the initial
   // fetch too, and the empty-queue screen (`t.noCards`) would flash on every
@@ -45,13 +49,18 @@ export default function ReviewPage() {
       const durationMs = Date.now() - shownAt.current
       dispatch({ type: 'rate' })
       setReviewedCount((n) => n + 1)
+      setRateError(false)
       void fetch(`/api/review/${card.id}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ rating, durationMs }),
-      }).finally(() => {
-        rateInFlight.current = false
       })
+        .then((res) => {
+          if (!res.ok) setRateError(true)
+        })
+        .finally(() => {
+          rateInFlight.current = false
+        })
     },
     [card],
   )
@@ -134,6 +143,7 @@ export default function ReviewPage() {
     }
     return (
       <div className="p-8 text-center">
+        {rateError && <p className="text-sm text-red-600">{t.rateFailed}</p>}
         <p className="text-xl">{t.doneForToday}</p>
         <p className="mt-2 text-sm text-neutral-500">
           {t.sessionReviewed}: {reviewedCount}
@@ -153,13 +163,18 @@ export default function ReviewPage() {
   }
 
   return (
-    <ReviewCard
-      card={card}
-      revealed={state.revealed}
-      canUndo={state.lastRated !== null}
-      onReveal={() => dispatch({ type: 'reveal' })}
-      onRate={rate}
-      onUndo={undo}
-    />
+    <>
+      {rateError && (
+        <p className="p-2 text-center text-sm text-red-600">{t.rateFailed}</p>
+      )}
+      <ReviewCard
+        card={card}
+        revealed={state.revealed}
+        canUndo={state.lastRated !== null}
+        onReveal={() => dispatch({ type: 'reveal' })}
+        onRate={rate}
+        onUndo={undo}
+      />
+    </>
   )
 }

@@ -15,10 +15,10 @@ export const t = {
   undo: 'cofnij',
 
   doneForToday: 'Na dziś koniec',
-  nextDue: 'Następna powtórka',
   noCards: 'Brak fiszek',
   sessionReviewed: 'Przejrzano',
   nextReviewAt: 'Kolejna powtórka',
+  rateFailed: 'nie udało się zapisać oceny',
 
   holdToRecord: 'przytrzymaj i mów',
   uploading: 'wysyłanie…',
@@ -37,9 +37,12 @@ export const t = {
   save: 'zapisz',
   needsInput: 'do uzupełnienia',
   formsFailed: 'nie udało się wygenerować form',
+  saveFailed: 'nie udało się zapisać zmian',
+  chipSaveFailed: 'nie udało się zapisać zmian',
 
   newPerDay: 'Nowe fiszki na dzień',
   targetRetention: 'Docelowa skuteczność',
+  settingsSaveFailed: 'nie udało się zapisać ustawień',
 
   logIn: 'wejdź',
   badPassword: 'złe hasło',

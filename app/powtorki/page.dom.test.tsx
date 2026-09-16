@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { fireEvent } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReviewPage from './page'
+import { t } from '@/i18n/pl'
 
 type QueueItem = {
   id: string
@@ -52,9 +53,9 @@ describe('ReviewPage', () => {
       }
       if (typeof url === 'string' && url.startsWith('/api/review/') && url !== '/api/review/undo' && init?.method === 'POST') {
         rateCalls.push(url)
-        return Promise.resolve({ json: () => Promise.resolve({ due: 123 }) } as Response)
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ due: 123 }) } as Response)
       }
-      return Promise.resolve({ json: () => Promise.resolve({}) } as Response)
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
     render(<ReviewPage />)
@@ -100,12 +101,12 @@ describe('ReviewPage', () => {
       if (url === '/api/review/undo' && init?.method === 'POST') {
         // A different card than the one this client rated — simulating a
         // second writer's review having become the globally-last row.
-        return Promise.resolve({ json: () => Promise.resolve({ undone: { cardId: 'z-other' } }) } as Response)
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ undone: { cardId: 'z-other' } }) } as Response)
       }
       if (typeof url === 'string' && url.startsWith('/api/review/') && init?.method === 'POST') {
-        return Promise.resolve({ json: () => Promise.resolve({ due: 123 }) } as Response)
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ due: 123 }) } as Response)
       }
-      return Promise.resolve({ json: () => Promise.resolve({}) } as Response)
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
     render(<ReviewPage />)
@@ -123,5 +124,32 @@ describe('ReviewPage', () => {
     // server's actual truth) replaces it. Card a must not linger.
     await waitFor(() => screen.getByText('CCC'))
     expect(screen.queryByText('AAA')).toBeNull()
+  })
+
+  // Important review finding (A3): the rating POST's response was never
+  // checked. The optimistic UI had already moved past the card by the time
+  // the rejection arrived, so the user had no way to know their rating never
+  // reached the server.
+  it('shows an error when the rating POST is rejected by the server', async () => {
+    global.fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/review/queue') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ cards: [card('a', 'AAA')], nextDue: null }),
+        } as Response)
+      }
+      if (typeof url === 'string' && url.startsWith('/api/review/') && init?.method === 'POST') {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    }) as unknown as typeof fetch
+
+    render(<ReviewPage />)
+    await waitFor(() => screen.getByText('AAA'))
+    fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'dobrze' }))
+    })
+    expect(await screen.findByText(t.rateFailed)).toBeTruthy()
   })
 })

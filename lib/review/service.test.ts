@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
-import { newState } from '../scheduler'
+import { deleteCard } from '../cards/service'
+import { newState, type SchedulerState } from '../scheduler'
 import { recordReview, undoLastReview } from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -42,6 +43,25 @@ describe('recordReview', () => {
     expect(row.due).toBeGreaterThan(NOW.getTime())
   })
 
+  // Unnamed invariant, A5: `recordReview` persists scheduler state by
+  // spreading a plain object (`set({ ...after })`) into a typed Drizzle
+  // `.set()`, which silently ignores any key that isn't a real column
+  // property name — and TypeScript's spread doesn't apply excess-property
+  // checks, so a renamed or added field (e.g. from a ts-fsrs upgrade) would
+  // stop persisting with no error anywhere. This asserts every key of the
+  // object `recordReview` actually returns survives a real round trip
+  // through the `cards` table, not just that the two objects are `.toEqual`
+  // each other in memory.
+  it('persists every key of the returned SchedulerState onto the re-read row (drift guard)', () => {
+    const { db } = createTestDb()
+    const id = seed(db)
+    const after = recordReview(db, id, 3, null, NOW)
+    const row = db.select().from(cards).where(eq(cards.id, id)).get()!
+    for (const key of Object.keys(after) as (keyof SchedulerState)[]) {
+      expect(row[key], `column ${key}`).toBe(after[key])
+    }
+  })
+
   it('appends a log row carrying the PRE-review state', () => {
     const { db } = createTestDb()
     const id = seed(db)
@@ -57,6 +77,14 @@ describe('recordReview', () => {
   it('throws on an unknown card rather than silently logging', () => {
     const { db } = createTestDb()
     expect(() => recordReview(db, 'ghost', 3, null, NOW)).toThrow(/ghost/)
+  })
+
+  it('throws on a soft-deleted card rather than silently advancing it', () => {
+    const { db } = createTestDb()
+    const id = seed(db)
+    deleteCard(db, id, NOW)
+    expect(() => recordReview(db, id, 3, null, NOW)).toThrow(new RegExp(id))
+    expect(db.select().from(reviews).all()).toHaveLength(0)
   })
 
   it('throws on a backwards clock and leaves the database untouched', () => {
@@ -106,6 +134,31 @@ describe('undoLastReview', () => {
 
   it('returns null when there is nothing to undo', () => {
     const { db } = createTestDb()
+    expect(undoLastReview(db, NOW)).toBeNull()
+  })
+
+  it('skips a deleted card and undoes the next-most-recent live review instead', () => {
+    const { db } = createTestDb()
+    const a = seed(db, 'a')
+    const b = seed(db, 'b')
+    const bBefore = db.select().from(cards).where(eq(cards.id, b)).get()!
+    recordReview(db, b, 3, null, NOW)
+    recordReview(db, a, 3, null, new Date(NOW.getTime() + 60_000))
+    deleteCard(db, a, new Date(NOW.getTime() + 120_000))
+
+    expect(undoLastReview(db, NOW)).toEqual({ cardId: b })
+    expect(db.select().from(cards).where(eq(cards.id, b)).get()).toEqual(bBefore)
+    // A's own review row is left alone: it belongs to a card the user can no
+    // longer see, so it must not be silently marked undone either.
+    const aLog = db.select().from(reviews).where(eq(reviews.cardId, a)).get()!
+    expect(aLog.undoneAt).toBeNull()
+  })
+
+  it('returns null when the only pending review belongs to a deleted card', () => {
+    const { db } = createTestDb()
+    const id = seed(db)
+    recordReview(db, id, 3, null, NOW)
+    deleteCard(db, id, NOW)
     expect(undoLastReview(db, NOW)).toBeNull()
   })
 

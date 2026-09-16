@@ -12,6 +12,12 @@ export default function CardsPage() {
   // sandbox produced live — but nothing surfaced it. Keyed by card id so one
   // row's failure doesn't paint an error on every row.
   const [formsError, setFormsError] = useState<Record<string, boolean>>({})
+  // Important review finding (A3): patch/delete on this page previously
+  // ignored the response status entirely — a rejected PATCH (or a failed
+  // DELETE) looked identical to a successful one, and since the fields are
+  // uncontrolled `defaultValue` inputs, a rejected edit stayed on screen as
+  // if it had been saved.
+  const [saveError, setSaveError] = useState(false)
 
   const load = useCallback(async (query: string) => {
     const res = await fetch(`/api/cards?q=${encodeURIComponent(query)}`)
@@ -23,11 +29,26 @@ export default function CardsPage() {
   }, [q, load])
 
   async function patch(id: string, body: Record<string, unknown>) {
-    await fetch(`/api/cards/${id}`, {
+    const res = await fetch(`/api/cards/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })
+    if (!res.ok) {
+      setSaveError(true)
+      return
+    }
+    setSaveError(false)
+    void load(q)
+  }
+
+  async function del(id: string) {
+    const res = await fetch(`/api/cards/${id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      setSaveError(true)
+      return
+    }
+    setSaveError(false)
     void load(q)
   }
 
@@ -54,6 +75,7 @@ export default function CardsPage() {
         className="rounded border p-3"
         placeholder={t.cards}
       />
+      {saveError && <p className="text-sm text-red-600">{t.saveFailed}</p>}
       <ul>
         {rows.map((c) => (
           <li key={c.id} className="flex flex-col gap-1 border-b py-3">
@@ -106,10 +128,7 @@ export default function CardsPage() {
               <button onClick={() => void patch(c.id, { suspendedAt: c.suspendedAt ? null : Date.now() })} className="underline">
                 {c.suspendedAt ? t.unsuspend : t.suspend}
               </button>
-              <button
-                onClick={() => void fetch(`/api/cards/${c.id}`, { method: 'DELETE' }).then(() => load(q))}
-                className="underline text-red-600"
-              >
+              <button onClick={() => void del(c.id)} className="underline text-red-600">
                 {t.deleteItem}
               </button>
             </div>
