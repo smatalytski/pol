@@ -23,6 +23,7 @@ export const cards = sqliteTable('cards', {
   status: text('status', { enum: ['ready', 'needs_input'] }).notNull(),
   parentCardId: text('parent_card_id'),
   suspendedAt: integer('suspended_at'),
+  deletedAt: integer('deleted_at'),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   due: integer('due').notNull(),

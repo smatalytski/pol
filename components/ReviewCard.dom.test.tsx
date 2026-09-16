@@ -94,6 +94,23 @@ describe('ReviewCard', () => {
     expect(screen.queryByLabelText(t.play)).toBeNull()
   })
 
+  // Decided 2026-09-16: pl_forms answers are Markdown (bold + pipe tables)
+  // and must render as real elements, not literal `**pies**` syntax.
+  it('renders a pl_forms answer through FormsTable instead of as literal Markdown', () => {
+    render(
+      <ReviewCard
+        card={{ ...card, type: 'pl_forms', promptText: 'dopełniacz l.mn.', answerPl: '**pies** → o **psie**' }}
+        revealed
+        canUndo={false}
+        onReveal={vi.fn()}
+        onRate={vi.fn()}
+        onUndo={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText('**pies** → o **psie**')).toBeNull()
+    expect(screen.getByText('pies').tagName).toBe('STRONG')
+  })
+
   it('offers a play control for the answer of ru_to_pl and image_to_pl cards', () => {
     const { rerender } = render(
       <ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,

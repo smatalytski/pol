@@ -98,4 +98,26 @@ describe('GET /api/review/queue', () => {
     const body = await res.json()
     expect(body.nextDue).toBeNull()
   })
+
+  // Soft delete (decided 2026-09-16): this route's `nextDue` query is a
+  // separate literal predicate from buildQueue's REVIEWABLE constant (it does
+  // not import lib/review/queue.ts's shared filter), so it needed its own
+  // `deleted_at IS NULL` fix rather than inheriting one from the queue.ts
+  // change. Without it, "next review at" would count a card the user can no
+  // longer see or review anywhere else.
+  it('does not let a soft-deleted future card set nextDue', async () => {
+    const future = NOW.getTime() + 3 * 24 * 60 * 60 * 1000
+    seedCard({
+      id: 'deleted-1',
+      due: future,
+      state: 2,
+      reps: 1,
+      lastReview: NOW.getTime() - 86_400_000,
+      deletedAt: NOW.getTime(),
+    })
+
+    const res = await GET()
+    const body = await res.json()
+    expect(body.nextDue).toBeNull()
+  })
 })

@@ -82,6 +82,23 @@ describe('buildQueue', () => {
     expect(await buildQueue(db, NOW)).toEqual([])
   })
 
+  // Soft delete (decided 2026-09-16): a deleted card must never be served,
+  // in either branch REVIEWABLE feeds — the fresh/new-card branch (state 0,
+  // exercised here the same way the suspended/needs_input test above does)
+  // and the due branch (state != 0, already due). Regression guard for the
+  // authorized REVIEWABLE change in lib/review/queue.ts.
+  it('excludes a soft-deleted card from the new-card branch', async () => {
+    const { db } = createTestDb()
+    insertCard(db, { id: 'gone', deletedAt: NOW.getTime() })
+    expect(await buildQueue(db, NOW)).toEqual([])
+  })
+
+  it('excludes a soft-deleted card from the due branch', async () => {
+    const { db } = createTestDb()
+    insertCard(db, { id: 'gone-due', due: NOW.getTime() - 1_000, state: 2, reps: 1, deletedAt: NOW.getTime() })
+    expect(await buildQueue(db, NOW)).toEqual([])
+  })
+
   it('caps how many new cards enter the session', async () => {
     const { db } = createTestDb()
     setSetting(db, 'newPerDay', '2')

@@ -129,6 +129,23 @@ export default function AddPage() {
     void fetch(`/api/captures/${id}/retry`, { method: 'POST' })
   }, [])
 
+  // Spec §4's "swipe to delete", wired once Task 17 added the routes it
+  // needs. An outbox chip never calls this (CaptureChip doesn't attach the
+  // gesture to it — see its own comment), so this only ever sees a `capture`
+  // item: one with a card is soft-deleted (DELETE /api/cards/:id), one
+  // without a card yet (still uploaded/transcribed/failed) has its capture
+  // row removed instead (DELETE /api/captures/:id) — there is no card to
+  // delete.
+  const deleteChip = useCallback(
+    (item: ChipItem) => {
+      if (item.kind === 'outbox') return
+      const { capture } = item
+      const url = capture.cardId ? `/api/cards/${capture.cardId}` : `/api/captures/${capture.id}`
+      void fetch(url, { method: 'DELETE' }).then(() => fetchCaptures())
+    },
+    [fetchCaptures],
+  )
+
   // Without a microphone this screen has no function at all, so say so plainly
   // rather than presenting a button that silently does nothing.
   if (micDenied) {
@@ -159,7 +176,7 @@ export default function AddPage() {
 
       <ul className="w-full">
         {chips.map((item) => (
-          <CaptureChip key={chipKey(item)} item={item} onRetry={retry} />
+          <CaptureChip key={chipKey(item)} item={item} onRetry={retry} onDelete={deleteChip} />
         ))}
       </ul>
     </div>

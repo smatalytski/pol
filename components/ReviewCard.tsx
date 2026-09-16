@@ -1,6 +1,7 @@
 'use client'
 import type { QueueItem } from '@/lib/review/queue'
 import type { RatingValue } from '@/lib/scheduler'
+import { FormsTable } from './FormsTable'
 import { t } from '@/i18n/pl'
 
 const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
@@ -45,7 +46,11 @@ export function ReviewCard({
 
         {revealed && (
           <div className="mt-6 flex flex-col items-center gap-2">
-            <p className="text-3xl font-semibold">{card.answerPl}</p>
+            {card.type === 'pl_forms' ? (
+              <FormsTable markdown={card.answerPl} />
+            ) : (
+              <p className="text-3xl font-semibold">{card.answerPl}</p>
+            )}
             {hasAnswerAudio(card.type) && (
               <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
             )}

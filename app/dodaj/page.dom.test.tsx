@@ -369,3 +369,61 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
     unmount()
   })
 })
+
+describe('AddPage chip deletion (spec §4: "swipe to delete", wired up once Task 17 added the routes)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  function swipeLeft(el: Element) {
+    fireEvent.pointerDown(el, { clientX: 200 })
+    fireEvent.pointerUp(el, { clientX: 80 })
+  }
+
+  it('soft-deletes the card when swiping a chip whose capture already has one', async () => {
+    const deleteCalls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({
+            json: () => Promise.resolve({ captures: [{ ...captureRow('c1', 'generated'), cardId: 'card-1' }] }),
+          }) as unknown as Promise<Response>
+        }
+        if (init?.method === 'DELETE') {
+          deleteCalls.push(url)
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+    render(<AddPage />)
+    const li = await screen.findByRole('listitem')
+    swipeLeft(li)
+    await waitFor(() => expect(deleteCalls).toEqual(['/api/cards/card-1']))
+  })
+
+  it('removes the capture (not a card) when swiping a chip whose capture has no card yet', async () => {
+    const deleteCalls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({
+            json: () => Promise.resolve({ captures: [captureRow('c2', 'failed')] }),
+          }) as unknown as Promise<Response>
+        }
+        if (init?.method === 'DELETE') {
+          deleteCalls.push(url)
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+    render(<AddPage />)
+    const li = await screen.findByRole('listitem')
+    swipeLeft(li)
+    await waitFor(() => expect(deleteCalls).toEqual(['/api/captures/c2']))
+  })
+})

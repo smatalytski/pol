@@ -76,7 +76,13 @@ const SELECTION = {
   grammarNote: cards.grammarNote,
 }
 
-const REVIEWABLE = and(isNull(cards.suspendedAt), eq(cards.status, 'ready'))
+// Soft delete (decided 2026-09-16, spec §7/§9): a deleted card must never be
+// served in a session, which is the whole point of deleting it. `isNull(deletedAt)`
+// is a strict tightening of the `cards_due` index predicate (`suspended_at IS
+// NULL AND status = 'ready'`), so SQLite can still use that index for this
+// query — no index migration needed. Authorized change to this otherwise
+// frozen module (task 17 brief).
+const REVIEWABLE = and(isNull(cards.suspendedAt), isNull(cards.deletedAt), eq(cards.status, 'ready'))
 
 export async function buildQueue(db: Db, now: Date): Promise<QueueItem[]> {
   const { newPerDay } = getSettings(db)

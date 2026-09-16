@@ -1,9 +1,10 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull, like, or, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { cards } from '../db/schema'
 import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
+import type { Generator } from '../generate'
 
 export type CardType = 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
 
@@ -63,17 +64,23 @@ export function findDuplicate(db: Db, input: DuplicateLookup): string | null {
   // spec §3 treats the card types as distinct. Without this scope, dropping a
   // photo of an already-dictated word would silently produce no new card, with
   // no way for the user to tell why.
+  //
+  // Soft delete (decided 2026-09-16): a soft-deleted card must NOT be found
+  // here. If it were, re-dictating a word you just deleted would silently
+  // resolve to the invisible deleted card instead of creating a fresh, visible
+  // one — indistinguishable, from the user's side, from the dictation being
+  // dropped on the floor.
   let existing = db
     .select({ id: cards.id })
     .from(cards)
-    .where(and(eq(cards.answerKey, key), eq(cards.type, input.type)))
+    .where(and(eq(cards.answerKey, key), eq(cards.type, input.type), isNull(cards.deletedAt)))
     .get()
 
   if (!existing && input.fallbackAnswerKey && input.fallbackAnswerKey !== key) {
     existing = db
       .select({ id: cards.id })
       .from(cards)
-      .where(and(eq(cards.answerKey, input.fallbackAnswerKey), eq(cards.type, input.type)))
+      .where(and(eq(cards.answerKey, input.fallbackAnswerKey), eq(cards.type, input.type), isNull(cards.deletedAt)))
       .get()
   }
 
@@ -115,4 +122,130 @@ export function createCard(
     })
     .run()
   return { cardId, duplicateOf: null }
+}
+
+export type CardRow = typeof cards.$inferSelect
+
+export type UpdateCardPatch = Partial<
+  Pick<
+    CardRow,
+    'promptText' | 'promptHint' | 'answerPl' | 'examplePl' | 'exampleRu' | 'grammarNote' | 'status' | 'suspendedAt'
+  >
+>
+
+/**
+ * Lists cards for the browse screen. Soft-deleted cards are excluded on both
+ * branches (the empty-query listing and the filtered search) — the browse
+ * screen is the one place a deleted card must never resurface, since that is
+ * the whole point of §9's "the card disappears everywhere".
+ */
+export function searchCards(db: Db, query: string, limit = 200): CardRow[] {
+  const q = `%${query.trim().toLowerCase()}%`
+  const rows = db.select().from(cards)
+  if (query.trim() === '') {
+    return rows.where(isNull(cards.deletedAt)).orderBy(desc(cards.createdAt)).limit(limit).all()
+  }
+  return rows
+    .where(
+      and(
+        isNull(cards.deletedAt),
+        or(
+          like(sql`lower(${cards.answerPl})`, q),
+          like(sql`lower(${cards.promptText})`, q),
+          like(cards.answerKey, q),
+        ),
+      ),
+    )
+    .orderBy(desc(cards.createdAt))
+    .limit(limit)
+    .all()
+}
+
+export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date): CardRow {
+  const current = db.select().from(cards).where(eq(cards.id, id)).get()
+  if (!current) throw new Error(`no such card: ${id}`)
+
+  const merged = { ...current, ...patch }
+  // A needs_input card becomes reviewable the moment it has a prompt, so fixing
+  // one by hand does not also require remembering to flip its status.
+  const status =
+    merged.status === 'needs_input' && (merged.promptText || merged.promptMediaId) ? 'ready' : merged.status
+
+  db.update(cards)
+    .set({
+      promptText: merged.promptText,
+      promptHint: merged.promptHint,
+      answerPl: merged.answerPl,
+      answerKey: answerKey(merged.answerPl),
+      examplePl: merged.examplePl,
+      exampleRu: merged.exampleRu,
+      grammarNote: merged.grammarNote,
+      status,
+      suspendedAt: merged.suspendedAt,
+      updatedAt: now.getTime(),
+    })
+    .where(eq(cards.id, id))
+    .run()
+
+  return db.select().from(cards).where(eq(cards.id, id)).get()!
+}
+
+/**
+ * Soft delete (decided 2026-09-16, spec §7/§9): sets `deleted_at` rather than
+ * removing the row, so `reviews` — the append-only log §7 depends on to
+ * optimize FSRS parameters later and to let a scheduler bug be recovered from
+ * by replay — survives. This supersedes an earlier version of this task's
+ * brief (and of spec §9) that had this function hard-delete the card and
+ * cascade its reviews; the decision note at the top of the task takes
+ * precedence over that stale text.
+ *
+ * Like the rest of this project's writes, `now` is injected rather than read
+ * from the clock here — the one deviation from the brief's literal
+ * `deleteCard(db, id): void` signature, which had no way to record a
+ * soft-delete timestamp at all.
+ *
+ * A no-op on an unknown id, like the DELETE route it backs: deleting
+ * something already gone should not be an error.
+ */
+export function deleteCard(db: Db, id: string, now: Date): void {
+  db.update(cards).set({ deletedAt: now.getTime() }).where(eq(cards.id, id)).run()
+}
+
+export async function createFormsCard(
+  db: Db,
+  generator: Generator,
+  parentId: string,
+  now: Date,
+): Promise<{ cardId: string; duplicateOf: string | null }> {
+  const parent = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.id, parentId), isNull(cards.deletedAt)))
+    .get()
+  if (!parent) throw new Error(`no such card: ${parentId}`)
+
+  const existing = db
+    .select({ id: cards.id })
+    .from(cards)
+    .where(and(eq(cards.parentCardId, parentId), eq(cards.type, 'pl_forms'), isNull(cards.deletedAt)))
+    .get()
+  if (existing) return { cardId: existing.id, duplicateOf: existing.id }
+
+  const forms = await generator.forms(parent.answerPl)
+  return createCard(
+    db,
+    {
+      type: 'pl_forms',
+      promptText: forms.prompt_pl,
+      promptHint: null,
+      promptMediaId: null,
+      answerPl: forms.answer_pl,
+      examplePl: null,
+      exampleRu: null,
+      grammarNote: null,
+      status: 'ready',
+      parentCardId: parentId,
+    },
+    now,
+  )
 }

@@ -15,10 +15,21 @@ export async function GET() {
   // account for new cards withheld by the daily cap, whose `due` is already
   // <= now but which resume tomorrow — that's a different kind of "next",
   // and spec doesn't ask for it here.)
+  // Soft delete (decided 2026-09-16): a distinct literal predicate from
+  // lib/review/queue.ts's REVIEWABLE, so it needs its own deleted_at filter —
+  // otherwise a deleted card's due date could still surface as "next review
+  // at" even though it appears nowhere else.
   const next = db
     .select({ due: cards.due })
     .from(cards)
-    .where(and(isNull(cards.suspendedAt), eq(cards.status, 'ready'), gt(cards.due, now.getTime())))
+    .where(
+      and(
+        isNull(cards.suspendedAt),
+        isNull(cards.deletedAt),
+        eq(cards.status, 'ready'),
+        gt(cards.due, now.getTime()),
+      ),
+    )
     .orderBy(asc(cards.due))
     .limit(1)
     .get()
