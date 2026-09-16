@@ -23,8 +23,9 @@ service account in production.
 
 ## Deploying to the VM
 
-A Compute Engine VM in `europe-west*` — the region matters, because Polish
-Speech-to-Text is served from the `eu` endpoint.
+A Compute Engine VM in a European region — it matters, because Polish
+Speech-to-Text is served from the `eu` multi-region endpoint. `europe-west1`
+and `europe-central2` (Warsaw) are both fine.
 
 The steps below are manual (run them yourself from a workstation with
 `gcloud` and `tailscale` installed and `gcloud auth login`'d as a project
@@ -42,17 +43,38 @@ gcloud storage buckets create gs://<project>-fiszki-backups --location=europe-we
 # VM's attached identity is the credential.
 gcloud iam service-accounts create fiszki --display-name="Fiszki app"
 
-gcloud projects add-iam-policy-binding <project> \
-  --member="serviceAccount:fiszki@<project>.iam.gserviceaccount.com" --role=roles/aiplatform.user
-gcloud projects add-iam-policy-binding <project> \
-  --member="serviceAccount:fiszki@<project>.iam.gserviceaccount.com" --role=roles/speech.client
-gcloud projects add-iam-policy-binding <project> \
-  --member="serviceAccount:fiszki@<project>.iam.gserviceaccount.com" --role=roles/cloudtts.client
+SA="serviceAccount:fiszki@<project>.iam.gserviceaccount.com"
+
+gcloud projects add-iam-policy-binding <project> --member="$SA" --role=roles/aiplatform.user
+gcloud projects add-iam-policy-binding <project> --member="$SA" --role=roles/speech.client
 gcloud storage buckets add-iam-policy-binding gs://<project>-fiszki-backups \
-  --member="serviceAccount:fiszki@<project>.iam.gserviceaccount.com" --role=roles/storage.objectCreator
+  --member="$SA" --role=roles/storage.objectCreator
+gcloud storage buckets add-iam-policy-binding gs://<project>-fiszki-backups \
+  --member="$SA" --role=roles/storage.objectViewer
 ```
 
-Exactly those four roles. Nothing else.
+Exactly those four bindings. Nothing else. Two of them are not obvious, and both
+were learned from a real deploy rather than from the docs:
+
+**There is no Cloud Text-to-Speech role.** An earlier version of this file told
+you to grant `roles/cloudtts.client`, which does not exist —
+`gcloud projects add-iam-policy-binding` rejects it with
+`INVALID_ARGUMENT: Role roles/cloudtts.client is not supported for this
+resource`, and `gcloud iam roles list` finds no text-to-speech role at all.
+Synthesis is not gated by per-resource IAM: with the API enabled, any
+authenticated caller in the project can synthesize. Confirmed the hard way —
+Cloud TTS was the one provider that passed `npm run check-providers` on a
+service account holding *zero* roles, while Speech-to-Text and Gemini both
+returned `PERMISSION_DENIED`.
+
+**`objectCreator` alone is not enough to upload a backup.** It looks like it
+should be — the script only ever creates objects — but `gcloud storage cp`
+issues an existence `GET` on the destination first, so with creator-only
+access it fails with `403 ... does not have storage.objects.get access`, before
+writing anything. `objectViewer` is the minimal addition that fixes it; it adds
+read, not delete, so a compromised VM still cannot erase your backup history.
+`roles/storage.objectUser` would also work and is one binding instead of two,
+but it grants delete as well, which defeats the point of an offsite copy.
 
 ### 2. Create the VM and its data disk
 
@@ -68,7 +90,7 @@ gcloud compute instances create fiszki \
 Two things about that command are load-bearing. `--service-account` with
 `--scopes=cloud-platform` is what makes the app keyless — the metadata server
 supplies credentials for Gemini, Speech-to-Text and Text-to-Speech, scoped
-down to the three roles actually granted above. And `auto-delete=no` on the
+down to the bindings actually granted above. And `auto-delete=no` on the
 data disk means the database outlives the VM — delete or rebuild the VM and
 the disk survives; only deleting the disk itself loses data. The boot disk is
 disposable, the data disk is not.
@@ -148,10 +170,21 @@ off at the scheduled time.
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --ssh
-sudo tailscale serve --bg https / http://localhost:3000
+sudo tailscale up --ssh --hostname=fiszki
+# Enable HTTPS for the tailnet ONCE, before the next line:
+#   https://login.tailscale.com/admin/dns -> "Enable HTTPS"
+sudo tailscale serve --bg http://localhost:3000
 tailscale serve status
 ```
+
+Two notes on that `serve` line. The older `serve --bg https / http://localhost:3000`
+form is gone; today's CLI rejects it and prints the shorter replacement. And
+`serve` needs tailnet HTTPS turned on first, because it provisions a real
+certificate for `<host>.<tailnet>.ts.net`. If HTTPS is off, `serve` does not
+fail with a clear message — it simply hangs waiting for a certificate it can
+never get, and `tailscale serve status` keeps reporting `No serve config`.
+Check with `tailscale status --json | grep CertDomains`: `null` means HTTPS is
+still disabled.
 
 Do not open 80 or 443 in the VM's firewall. There is no firewall rule to add
 here — the point is the absence of one. Tailscale's `serve` gives a real
@@ -183,8 +216,19 @@ script is that check, kept instead of thrown away, so it can be re-run after
 every deploy. It needs ADC and `GOOGLE_CLOUD_PROJECT`/`FISZKI_MODEL` in the
 environment (it reads `.env.local` itself if present, since a standalone
 script does not get Next.js's automatic env loading); on the VM,
-`source /etc/fiszki.env` first, or run it via `sudo -E ... EnvironmentFile`-style
-export.
+`source /etc/fiszki.env` first — and note that `/etc/fiszki.env` is mode 600
+and root-owned, so `sudo -u fiszki ... $(grep ... /etc/fiszki.env)` fails on the
+`grep`, not on the app. Load it as root, then drop privileges:
+
+```bash
+sudo bash -c 'set -a; . /etc/fiszki.env; set +a; cd /opt/fiszki; \
+  exec sudo -E -u fiszki npm run check-providers'
+```
+
+A partially-loaded environment is worth spotting quickly, because it fails in a
+misleading way: with no `GOOGLE_CLOUD_PROJECT` or `FISZKI_MODEL`, Speech-to-Text
+and Gemini report *"is not set"* while Cloud TTS still passes, which looks like
+two broken providers rather than one unreadable file.
 
 ## Backup
 
