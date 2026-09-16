@@ -43,9 +43,20 @@ describe('scheduler', () => {
     expect(s.due - days(20).getTime()).toBeGreaterThan(14 * 86_400_000)
   })
 
-  it('round-trips through a plain object without loss', () => {
+  // B4 (test-integrity finding): `s` is already flat primitives, so
+  // `{ ...s }` crosses no real boundary — the original assertion would pass
+  // even with serialization completely broken (it never calls JSON at all).
+  // Route it through JSON.stringify/parse instead — the actual boundary
+  // `reviews.state_before` crosses in lib/review/service.ts — so a value
+  // that doesn't survive that boundary losslessly (e.g. NaN/Infinity
+  // silently becoming `null`) is caught directly, and a further rating
+  // applied on the revived state still produces the same result as one
+  // applied on the original.
+  it('round-trips through JSON.stringify/parse without loss', () => {
     const s = applyRating(newState(T0), HARD, T0)
-    expect(applyRating({ ...s }, GOOD, days(1))).toEqual(applyRating(s, GOOD, days(1)))
+    const revived = JSON.parse(JSON.stringify(s))
+    expect(revived).toEqual(s)
+    expect(applyRating(revived, GOOD, days(1))).toEqual(applyRating(s, GOOD, days(1)))
   })
 
   it('throws if now is before the last review, instead of producing NaN state', () => {

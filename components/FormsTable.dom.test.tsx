@@ -4,9 +4,17 @@ import { render, screen } from '@testing-library/react'
 import { FormsTable } from './FormsTable'
 
 describe('FormsTable', () => {
+  // B6 (test-integrity finding): `queryByText('**pies**')` can never match
+  // anything either way — a correctly-parsed bold segment renders as just
+  // "pies" (no asterisks) inside a <strong>, and even a totally broken
+  // parser that left the markdown unparsed would render the whole string
+  // "**pies** → o **psie**" as one run, which doesn't equal the substring
+  // "**pies**" under queryByText's exact-match default. Assert directly on
+  // the rendered text instead: no literal `**` survives anywhere, and the
+  // two bold words are the only <strong> elements.
   it('renders bold spans as <strong>, not literal asterisks', () => {
-    render(<FormsTable markdown="**pies** → o **psie**" />)
-    expect(screen.queryByText('**pies**')).toBeNull()
+    const { container } = render(<FormsTable markdown="**pies** → o **psie**" />)
+    expect(container.textContent).not.toContain('**')
     const strongs = screen.getAllByText(/pies|psie/)
     expect(strongs.map((el) => el.tagName)).toEqual(['STRONG', 'STRONG'])
   })

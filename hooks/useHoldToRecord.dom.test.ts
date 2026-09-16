@@ -91,19 +91,18 @@ describe('useHoldToRecord', () => {
     expect(calls.n).toBe(1)
   })
 
-  it('does nothing on stop when not recording', async () => {
-    const { factory } = fakeFactory()
-    const { result } = renderHook(() => useHoldToRecord({ factory, onRecorded: vi.fn(), minMs: 0 }))
-    await act(async () => { result.current.stop() })
-    expect(result.current.recording).toBe(false)
-  })
-
-  // A bare `stop()` with no prior `start()` is exercised above, but
-  // `recording` starts `false` and stays `false` there regardless of whether
-  // `stop()` does anything at all — that assertion can't fail even if `stop`
-  // were broken. This one proves it by driving a real start/stop cycle first,
-  // then firing a second, unmatched `stop()` and checking with a spy that it
-  // does not tear the (already-gone) recorder down a second time.
+  // B6 (test-integrity finding): a "does nothing on stop when not recording"
+  // test used to live here, asserting only `recording === false` after a
+  // bare `stop()`. `recording` starts `false` and stays `false` regardless
+  // of whether `stop()`'s early-return guard does anything at all — every
+  // side effect that guard skips (no handle to tear down, `start()` resets
+  // the one flag it touches on its very next call) is already unobservable
+  // by construction, so no assertion on this hook's public surface can ever
+  // turn red if that guard were deleted. Deleted rather than kept beside the
+  // test below, which drives a real start/stop cycle first, then fires a
+  // second, unmatched `stop()` and checks with a spy that it does not tear
+  // the (already-gone) recorder down a second time — an assertion that
+  // actually can fail.
   it('does not double-tear-down the recorder on a second, unmatched stop', async () => {
     const { factory, stop } = fakeFactory()
     const { result } = renderHook(() => useHoldToRecord({ factory, onRecorded: vi.fn(), minMs: 0 }))

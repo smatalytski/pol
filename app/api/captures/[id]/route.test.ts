@@ -44,11 +44,17 @@ describe('DELETE /api/captures/:id', () => {
   // The core self-review requirement: a capture with no cardId (still
   // uploaded/transcribed/failed — swiping this chip away is the only way to
   // get rid of it, since there is no card yet to soft-delete instead).
-  it('removes a capture that has no card yet, without erroring', async () => {
+  // B3 (test-integrity finding): seeding only one row meant a lost `WHERE`
+  // on this table-wide `db.delete(captures)` — wiping every in-flight
+  // capture, not just the one requested — would leave this test green.
+  // Seeding a second row and asserting it survives closes that gap.
+  it('removes only the requested capture, leaving other in-flight captures untouched', async () => {
     seedCapture({ id: 'cap-1', status: 'failed', error: 'boom' })
+    seedCapture({ id: 'cap-2', status: 'uploaded' })
     const res = await del('cap-1')
     expect(res.status).toBe(200)
     expect(db.select().from(captures).where(eq(captures.id, 'cap-1')).get()).toBeUndefined()
+    expect(db.select().from(captures).where(eq(captures.id, 'cap-2')).get()).toBeDefined()
   })
 
   it('is a no-op, not a 404, on an unknown id', async () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CardsPage from './page'
 import type { CardRow } from '@/lib/cards/service'
@@ -144,23 +144,39 @@ describe('CardsPage (browse/edit)', () => {
   // editable <input> at all.
   const FORMS_MARKDOWN = '| a | b |\n|---|---|\n| 1 | 2 |'
 
+  // B1 (test-integrity finding): the original version of both tests below
+  // was vacuous. `queryByDisplayValue(FORMS_MARKDOWN)` can never match
+  // anything: an <input>'s own value-sanitization strips CR/LF from
+  // FORMS_MARKDOWN before comparison, so the query fails to find a match
+  // whether the answer renders as a FormsTable (correct) or as the very
+  // editable <input> that would destroy the table (the bug). And the PATCH
+  // test never fired a blur at all, so it could only ever pass. Rewritten to
+  // assert there is no editable field to hold the answer (only the row's
+  // unrelated promptText textbox exists) and to actually fire a blur and
+  // check no PATCH follows.
   it('renders a pl_forms answer read-only through FormsTable, never as an editable <input>', async () => {
     stubFetch(() => [cardRow({ type: 'pl_forms', answerPl: FORMS_MARKDOWN })])
     render(<CardsPage />)
     const table = await screen.findByRole('table')
     expect(table).toBeTruthy()
-    // Nothing anywhere on the row holds the raw Markdown as an editable
-    // value — that's the whole point (an <input>'s value-sanitization would
-    // silently flatten its newlines the moment it round-trips through one).
-    // A separate, unrelated promptText input existing on the same row (added
-    // for the needs_input fix) is fine and expected; it is not the answer.
-    expect(screen.queryByDisplayValue(FORMS_MARKDOWN)).toBeNull()
+    const row = within(table.closest('li')!)
+    // The only text input on a pl_forms row is the unrelated promptText
+    // field (added for the needs_input fix) — there is no editable field
+    // anywhere that could hold, and flatten, the answer's raw Markdown.
+    expect(row.queryAllByRole('textbox')).toHaveLength(1)
   })
 
   it('never PATCHes a pl_forms row on blur, since there is no editable answer field to blur', async () => {
     const calls = stubFetch(() => [cardRow({ type: 'pl_forms', answerPl: FORMS_MARKDOWN })])
     render(<CardsPage />)
-    await screen.findByRole('table')
+    const table = await screen.findByRole('table')
+    // The only field on the row is promptText; blurring it (unchanged) must
+    // not PATCH anything — there is no way to PATCH the flattened Markdown,
+    // since no field holding it exists to blur in the first place.
+    const promptInput = within(table.closest('li')!).getByRole('textbox')
+    await act(async () => {
+      fireEvent.blur(promptInput)
+    })
     expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
   })
 
