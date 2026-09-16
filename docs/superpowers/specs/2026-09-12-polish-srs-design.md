@@ -209,6 +209,12 @@ where the dictated word was inflected mid-sentence.
 
 For `pl_forms`, a second prompt returns a compact form table as Markdown.
 
+That Markdown needs rendering, and nothing in the original plan did it — a forms
+card would otherwise display `**pies** → o **psie**` literally. A **small
+hand-rolled renderer** covers what the generator actually emits (bold, and pipe
+tables) in a few dozen testable lines, rather than adding a Markdown dependency
+for one card type on a phone-first app. Decided 2026-09-16.
+
 The raw model response is stored on the capture row for debugging and
 regeneration.
 
@@ -305,6 +311,13 @@ fields — a pure function over data, and therefore directly unit-testable.
 
 Target retention defaults to 0.9 and lives in settings.
 
+Deleting a card is therefore a **soft** delete (§9): it sets `deleted_at` and the
+card vanishes from every query, but its rows in `reviews` remain. A hard delete
+cascading the reviews away would quietly contradict this section — the history
+exists precisely so it can be replayed later, and a card you deleted is still a
+card you once rated. Decided 2026-09-16, resolving a conflict between this
+section and §9's original wording.
+
 Every review is written to an append-only `reviews` table with a JSON snapshot
 of the pre-review scheduler state. This costs nothing now and means FSRS
 parameters can later be optimized against real history rather than guessed at,
@@ -346,6 +359,7 @@ CREATE TABLE cards (
                                    -- resolves; in-flight state lives on `captures`
   parent_card_id  TEXT REFERENCES cards(id),
   suspended_at    INTEGER,
+  deleted_at      INTEGER,        -- soft delete; see §9
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
 
@@ -425,7 +439,7 @@ words.
 | `POST /api/review/undo` | revert the last review |
 | `POST /api/cards` | create a card manually |
 | `PATCH /api/cards/:id` | edit fields, suspend, unsuspend |
-| `DELETE /api/cards/:id` | delete, cascading its reviews |
+| `DELETE /api/cards/:id` | **soft** delete — sets `deleted_at`; the card disappears everywhere but its reviews survive |
 | `POST /api/cards/:id/formy` | generate the `pl_forms` child card |
 | `POST /api/images` | multipart images in, `image_to_pl` cards out |
 | `GET /api/cards/:id/audio?part=answer` | the cached TTS clip for a card's Polish answer or Russian prompt, synthesizing it on first request |
