@@ -73,18 +73,21 @@ describe('createCard', () => {
       expect(db.select().from(cards).all()).toHaveLength(1)
     })
 
-    it('does not consult the fallback when the primary key already matched', () => {
+    it('lets the primary key win when both the primary AND fallback keys match different existing cards', () => {
+      // A test that only ever gives the fallback a key matching nothing can't
+      // tell "primary always wins" apart from "whichever query runs last
+      // wins" — both implementations pass it, since the fallback never finds
+      // anything either way. Seeding a real card under EACH key is the only
+      // way to distinguish them: if the implementation queried both and let
+      // the later (fallback) query's match win, this would wrongly resolve to
+      // `fallbackMatch.cardId` instead of `primaryMatch.cardId`.
       const { db } = createTestDb()
-      const first = createCard(db, input({ answerPl: 'złośliwy' }), NOW)
-      // A fallback key that (if consulted) would point at nothing sensible —
-      // proves the primary match short-circuits before the fallback is even read.
-      const second = createCard(
-        db,
-        input({ answerPl: 'złośliwy', fallbackAnswerKey: 'this-key-matches-no-card' }),
-        NOW,
-      )
-      expect(second).toEqual({ cardId: first.cardId, duplicateOf: first.cardId })
-      expect(db.select().from(cards).all()).toHaveLength(1)
+      const primaryMatch = createCard(db, input({ answerPl: 'złośliwy' }), NOW)
+      const fallbackMatch = createCard(db, input({ answerPl: 'zloslivy' }), NOW)
+      const result = createCard(db, input({ answerPl: 'złośliwy', fallbackAnswerKey: 'zloslivy' }), NOW)
+      expect(result).toEqual({ cardId: primaryMatch.cardId, duplicateOf: primaryMatch.cardId })
+      expect(result.duplicateOf).not.toBe(fallbackMatch.cardId)
+      expect(db.select().from(cards).all()).toHaveLength(2)
     })
 
     it('creates a fresh card when neither the primary nor the fallback key matches anything', () => {

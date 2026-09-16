@@ -114,6 +114,15 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
     now,
   )
 
+  // The card-insert (inside createCard, above) and this capture update used to
+  // be one db.transaction — extracting createCard into a Db-scoped helper
+  // (shared with the non-transactional image route) dropped that atomicity
+  // guarantee, with no `tx` handle threaded through. That's safe, not just
+  // convenient: if the process dies between the two statements, this capture
+  // is left with cardId still null, so a retry re-enters processCapture from
+  // the top, calls generator.fromPolish again, and createCard's own primary
+  // lookup finds the card just inserted rather than duplicating it — the same
+  // path 'retrying a failed capture creates exactly one card' already covers.
   db.update(captures)
     .set({
       status: 'generated',

@@ -98,13 +98,18 @@ describe('POST /api/images', () => {
     }
   })
 
-  it('surfaces the existing card as a duplicate instead of creating a second one', async () => {
+  it('surfaces the existing card as a duplicate instead of creating a second one, storing no media for the duplicate', async () => {
     fromImageMock.mockResolvedValue(generated('kot'))
     const res = await post([await pngFile('a.png'), await pngFile('b.png')])
     const body = await res.json()
     expect(body.results[0].duplicateOf).toBeNull()
     expect(body.results[1].duplicateOf).toBe(body.results[0].cardId)
     expect(db.select().from(cards).all()).toHaveLength(1)
+    // The second photo's webp must never be stored: it duplicates the first
+    // photo's card, so there is nothing for that blob to belong to. Storing it
+    // anyway would be indistinguishable from a leak (an orphaned media row
+    // with no card pointing at it) that no delete path can ever clean up.
+    expect(db.select().from(media).all()).toHaveLength(1)
   })
 
   it('does not abort the batch when one image fails generation — the others still land as cards', async () => {
@@ -121,6 +126,9 @@ describe('POST /api/images', () => {
     expect(body.results[1].error).toBeTruthy()
     expect(body.results[2]).toMatchObject({ name: 'c.png', answerPl: 'pies' })
     expect(db.select().from(cards).all()).toHaveLength(2)
+    // Generation runs BEFORE putMedia, so the file whose generation rejected
+    // never reaches storage either — no orphaned blob for b.png.
+    expect(db.select().from(media).all()).toHaveLength(2)
   })
 
   it('produces a clean per-file error, not a 500, when sharp cannot decode the upload', async () => {
