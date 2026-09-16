@@ -33,21 +33,30 @@ export default function SettingsPage() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch),
     })
+    // Cross-field clobber guard (re-review finding on A3): only ever touch
+    // the draft(s) for the field(s) this specific `save()` call actually
+    // sent. Each input's onBlur calls `save` with just its own key — without
+    // this scoping, blurring field A (an async PUT) while the user is
+    // already mid-edit on field B, then having A's response land, would
+    // overwrite B's uncommitted draft with the server's stale pre-edit
+    // value, silently discarding it. That is exactly the class of bug A3
+    // was written to close, just reintroduced across two fields instead of
+    // one.
     if (!res.ok) {
       setError(true)
-      // Revert the drafts to the last confirmed value rather than leaving
-      // the rejected input on screen.
+      // Revert only the just-attempted field's draft to the last confirmed
+      // value, rather than leaving the rejected input on screen.
       if (settings) {
-        setNewPerDayDraft(String(settings.newPerDay))
-        setRetentionDraft(String(settings.requestRetention))
+        if ('newPerDay' in patch) setNewPerDayDraft(String(settings.newPerDay))
+        if ('requestRetention' in patch) setRetentionDraft(String(settings.requestRetention))
       }
       return
     }
     setError(false)
     const s = (await res.json()) as Settings
     setSettings(s)
-    setNewPerDayDraft(String(s.newPerDay))
-    setRetentionDraft(String(s.requestRetention))
+    if ('newPerDay' in patch) setNewPerDayDraft(String(s.newPerDay))
+    if ('requestRetention' in patch) setRetentionDraft(String(s.requestRetention))
   }
 
   if (!settings) return null

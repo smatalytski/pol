@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SettingsPage from './page'
 import { t } from '@/i18n/pl'
@@ -81,6 +81,57 @@ describe('SettingsPage', () => {
     expect(await screen.findByText(t.settingsSaveFailed)).toBeTruthy()
     expect(await screen.findByDisplayValue('10')).toBeTruthy()
     expect(screen.queryByDisplayValue('999')).toBeNull()
+  })
+
+  // Re-review finding on A3: save()'s success branch used to reset BOTH
+  // drafts from every successful PUT, regardless of which field's onBlur
+  // fired it. Blur field A (an async PUT in flight), then start editing
+  // field B before A's response lands — A's stale, pre-edit response must
+  // not overwrite B's uncommitted draft.
+  it('does not clobber an in-progress edit on one field when the other field\'s PUT resolves later', async () => {
+    let resolvePut: () => void = () => {}
+    const putGate = new Promise<void>((resolve) => {
+      resolvePut = resolve
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          // Echoes back the server's PRE-edit requestRetention (0.9) — the
+          // value from before the user started typing into that field —
+          // alongside the newPerDay this PUT actually changed.
+          return putGate.then(() => ({
+            ok: true,
+            json: () => Promise.resolve({ newPerDay: 20, requestRetention: 0.9, audioGapSeconds: 5 }),
+          })) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<SettingsPage />)
+    const newPerDayInput = await screen.findByDisplayValue('10')
+    const retentionInput = screen.getByDisplayValue('0.9')
+
+    // Blur field A (newPerDay) — its PUT is in flight but gated, not resolved yet.
+    fireEvent.change(newPerDayInput, { target: { value: '20' } })
+    fireEvent.blur(newPerDayInput)
+
+    // While A's PUT is still pending, start editing field B without blurring it.
+    fireEvent.change(retentionInput, { target: { value: '0.95' } })
+
+    // Now let A's PUT resolve.
+    await act(async () => {
+      resolvePut()
+      await putGate
+    })
+
+    // B's uncommitted edit must survive — not be silently overwritten by A's
+    // stale, pre-edit response.
+    await waitFor(() => expect(screen.getByDisplayValue('0.95')).toBeTruthy())
+    expect(screen.queryByDisplayValue('0.9')).toBeNull()
   })
 
   it('renders nothing before settings have loaded', () => {
