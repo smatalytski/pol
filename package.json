@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "node --experimental-strip-types scripts/migrate.ts"
+    "migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "check-providers": "tsx scripts/check-providers.ts"
   },
   "dependencies": {
     "@google-cloud/speech": "^8.1.0",
@@ -45,6 +46,7 @@
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5",
     "vitest": "^5.0.0"
   }

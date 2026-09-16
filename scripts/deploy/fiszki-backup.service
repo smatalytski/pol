@@ -1,0 +1,19 @@
+[Unit]
+Description=Fiszki backup snapshot, uploaded off the VM
+# Same reasoning as fiszki.service: don't take a snapshot of an empty
+# database because the data disk hadn't mounted yet.
+After=network-online.target mnt-fiszki.mount
+Wants=network-online.target
+RequiresMountsFor=/mnt/fiszki
+
+[Service]
+Type=oneshot
+User=fiszki
+WorkingDirectory=/opt/fiszki
+# Same file the app unit reads. FISZKI_BACKUP_BUCKET lives in it too (see the
+# README's environment table) — fiszki.service simply never looks at that
+# var, so sharing the file costs nothing and avoids a second place to keep in
+# sync. It is deliberately not in .env.example: backup.sh, not the Next.js
+# app, is what reads it.
+EnvironmentFile=/etc/fiszki.env
+ExecStart=/opt/fiszki/scripts/backup.sh /mnt/fiszki/backups

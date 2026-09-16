@@ -1,0 +1,25 @@
+[Unit]
+Description=Fiszki app
+# network-online.target alone only says the network is up, not that the data
+# disk is mounted. RequiresMountsFor is the explicit dependency: systemd
+# resolves /mnt/fiszki to its backing mount unit (mnt-fiszki.mount, from
+# /etc/fstab) and orders and requires it automatically, so this unit can only
+# start once that filesystem is actually mounted. After= alone would just
+# order startup later without requiring the mount to have succeeded — a
+# failed or slow mount would still let the app start against an empty
+# directory on the boot disk and quietly serve an empty deck.
+After=network-online.target mnt-fiszki.mount
+Wants=network-online.target
+RequiresMountsFor=/mnt/fiszki
+
+[Service]
+Type=simple
+User=fiszki
+WorkingDirectory=/opt/fiszki
+EnvironmentFile=/etc/fiszki.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
