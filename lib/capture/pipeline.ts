@@ -1,10 +1,10 @@
 import { desc, eq, gt } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { cards, captures } from '../db/schema'
+import { captures } from '../db/schema'
+import { createCard } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
-import { newState } from '../scheduler'
 import { toCardFields, type Generator } from '../generate'
 import type { Transcriber } from '../transcribe'
 
@@ -87,69 +87,42 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
     : // Generation is down. Keep the word; the prompt is filled in later by hand.
       { promptText: null, promptHint: null, answerPl: transcript, examplePl: null, exampleRu: null, grammarNote: null }
 
-  const key = answerKey(fields.answerPl)
-  let existing = db.select({ id: cards.id }).from(cards).where(eq(cards.answerKey, key)).get()
-
-  // Best-effort second lookup, success path only: a word that first landed as `needs_input`
+  // Best-effort second key, success path only: a word that first landed as `needs_input`
   // is keyed by its raw transcript, but a later successful re-dictation is keyed by the
-  // diacritic-restored answer_pl, so the primary lookup above would otherwise miss it and
-  // silently fork the word into a second card while orphaning the first. This is NOT a
-  // guarantee — a differently-mangled second transcript still misses — but a re-dictation is
-  // usually mangled the same way the first one was, so it catches the common case at near
-  // zero cost. When both keys would match, the generated-answer match above already won,
-  // since we only fall through to this check when it found nothing.
-  if (!existing && generated) {
-    const transcriptKey = answerKey(transcript)
-    if (transcriptKey !== key) {
-      existing = db.select({ id: cards.id }).from(cards).where(eq(cards.answerKey, transcriptKey)).get()
-    }
-  }
+  // diacritic-restored answer_pl, so a lookup on answer_pl's key alone would otherwise miss
+  // it and silently fork the word into a second card while orphaning the first. This is NOT
+  // a guarantee — a differently-mangled second transcript still misses — but a re-dictation
+  // is usually mangled the same way the first one was, so it catches the common case at near
+  // zero cost. `createCard` only consults this fallback when its primary lookup (on
+  // answerKey(fields.answerPl)) finds nothing, so a genuine match on the generated answer
+  // always wins.
+  const { cardId, duplicateOf } = createCard(
+    db,
+    {
+      type: 'ru_to_pl',
+      promptText: fields.promptText,
+      promptHint: fields.promptHint,
+      promptMediaId: null,
+      answerPl: fields.answerPl,
+      examplePl: fields.examplePl,
+      exampleRu: fields.exampleRu,
+      grammarNote: fields.grammarNote,
+      status: generated ? 'ready' : 'needs_input',
+      parentCardId: null,
+      fallbackAnswerKey: generated ? answerKey(transcript) : undefined,
+    },
+    now,
+  )
 
-  if (existing) {
-    db.update(captures)
-      .set({
-        status: 'generated',
-        cardId: existing.id,
-        generationJson: JSON.stringify({ ...generated, duplicateOf: existing.id }),
-        error: generationError,
-      })
-      .where(eq(captures.id, captureId))
-      .run()
-    return
-  }
-
-  const cardId = randomUUID()
-  db.transaction((tx) => {
-    tx.insert(cards)
-      .values({
-        id: cardId,
-        type: 'ru_to_pl',
-        promptText: fields.promptText,
-        promptHint: fields.promptHint,
-        promptMediaId: null,
-        answerPl: fields.answerPl,
-        answerKey: key,
-        examplePl: fields.examplePl,
-        exampleRu: fields.exampleRu,
-        grammarNote: fields.grammarNote,
-        status: generated ? 'ready' : 'needs_input',
-        parentCardId: null,
-        suspendedAt: null,
-        createdAt: now.getTime(),
-        updatedAt: now.getTime(),
-        ...newState(now),
-      })
-      .run()
-    tx.update(captures)
-      .set({
-        status: 'generated',
-        cardId,
-        generationJson: generated ? JSON.stringify(generated) : null,
-        error: generationError,
-      })
-      .where(eq(captures.id, captureId))
-      .run()
-  })
+  db.update(captures)
+    .set({
+      status: 'generated',
+      cardId,
+      generationJson: generated ? JSON.stringify({ ...generated, duplicateOf }) : JSON.stringify({ duplicateOf }),
+      error: generationError,
+    })
+    .where(eq(captures.id, captureId))
+    .run()
 }
 
 export function listCaptures(db: Db, since: number): CaptureView[] {
