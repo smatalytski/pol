@@ -36,6 +36,7 @@ export const t = {
   unsuspend: 'przywróć',
   save: 'zapisz',
   needsInput: 'do uzupełnienia',
+  formsFailed: 'nie udało się wygenerować form',
 
   newPerDay: 'Nowe fiszki na dzień',
   targetRetention: 'Docelowa skuteczność',

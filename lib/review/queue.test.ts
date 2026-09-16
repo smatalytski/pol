@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
 import { newState } from '../scheduler'
@@ -128,6 +129,35 @@ describe('buildQueue', () => {
     // to that yet in this test); it must not be re-served as new, and one of
     // the genuinely-unintroduced n1..n4 must fill the slot instead.
     expect(served.map((c) => c.id)).not.toContain('n0')
+  })
+
+  // Important review finding: `newCardsIntroducedToday` is a plain
+  // `count(distinct reviews.card_id)` with no join back to `cards`, so a
+  // card's review still counts toward the daily cap even after the card
+  // itself is soft-deleted. Combined with the (correct) `findDuplicate`
+  // decision that a soft-deleted card doesn't absorb a re-dictation,
+  // delete-then-re-dictate silently consumes TWO of `newPerDay`'s slots for
+  // one surviving card, with no visible signal — the only symptom is the
+  // day's new material running out early.
+  it('does not count a soft-deleted card toward the daily new-card cap', async () => {
+    const { db } = createTestDb()
+    setSetting(db, 'newPerDay', '2')
+    for (let i = 0; i < 5; i++) insertCard(db, { id: `n${i}` })
+    db.insert(reviews)
+      .values({
+        cardId: 'n0',
+        rating: 3,
+        reviewedAt: startOfLocalDay(NOW) + 3_600_000,
+        durationMs: null,
+        stateBefore: JSON.stringify({ state: 0 }),
+        undoneAt: null,
+      })
+      .run()
+    db.update(cards).set({ deletedAt: NOW.getTime() }).where(eq(cards.id, 'n0')).run()
+
+    expect(newCardsIntroducedToday(db, NOW)).toBe(0)
+    const served = (await buildQueue(db, NOW)).filter((c) => c.isNew)
+    expect(served).toHaveLength(2)
   })
 
   it('re-offers a card as new once its earlier introduction today was undone', async () => {

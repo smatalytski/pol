@@ -61,6 +61,16 @@ describe('POST /api/cards', () => {
     expect(res.status).toBe(400)
   })
 
+  // Minor review finding: this route hardcodes parentCardId: null, so a
+  // pl_forms card created through it would have no origin — contrary to
+  // spec §3 ("a pl_forms card records its origin in parent_card_id... they
+  // are never generated automatically" through any path but the formy
+  // route). Reject the type here instead of silently accepting an orphan.
+  it('rejects pl_forms — it has no parent link through this manual-create route', async () => {
+    const res = await post({ type: 'pl_forms', promptText: null, promptHint: null, answerPl: 'x' })
+    expect(res.status).toBe(400)
+  })
+
   it('deduplicates a manually-created card the same way capture does', async () => {
     const body = { type: 'ru_to_pl' as const, promptText: null, promptHint: null, answerPl: 'cześć' }
     const first = await (await post(body)).json()

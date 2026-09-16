@@ -140,6 +140,19 @@ describe('searchCards', () => {
     expect(searchCards(db, 'złoś')).toHaveLength(0)
     expect(searchCards(db, '')).toHaveLength(0)
   })
+
+  // Minor review finding: SQLite's built-in `lower()`/LIKE fold ASCII only —
+  // 'Хитрый' LIKE '%хитр%' is 0 in real SQLite — so a capitalized Russian
+  // prompt (the primary prompt language) was unfindable by a lowercase query.
+  // The existing "ignores case" test above can't catch this: its fixture is
+  // already lowercase Polish (and Polish's Ł/ł DOES fold correctly even in
+  // ASCII-only LIKE, since SQLite's lower() happens to handle Latin-1
+  // supplement letters — Cyrillic is the gap).
+  it('finds a capitalized Russian prompt by a lowercase query', () => {
+    const { db } = createTestDb()
+    createCard(db, input({ answerPl: 'przebiegły', promptText: 'Хитрый' }), NOW)
+    expect(searchCards(db, 'хитр').map((c) => c.answerPl)).toEqual(['przebiegły'])
+  })
 })
 
 describe('updateCard', () => {
@@ -184,6 +197,18 @@ describe('updateCard', () => {
     const { db } = createTestDb()
     expect(() => updateCard(db, 'ghost', { answerPl: 'x' }, NOW)).toThrow(/ghost/)
   })
+
+  // Important review finding: this was the one card-select in the file left
+  // without the deleted_at filter. Without it, PATCH /api/cards/<deleted id>
+  // returned 200 and silently wrote fields — including the needs_input →
+  // ready promotion — to an invisible row, instead of behaving like every
+  // other lookup here and treating a soft-deleted card as gone.
+  it('throws on a soft-deleted card, the same as an unknown one', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    deleteCard(db, cardId, NOW)
+    expect(() => updateCard(db, cardId, { answerPl: 'x' }, NOW)).toThrow(new RegExp(cardId))
+  })
 })
 
 // Soft delete (decided 2026-09-16): DELETE /api/cards/:id must set `deleted_at`
@@ -211,6 +236,36 @@ describe('deleteCard', () => {
     const { db } = createTestDb()
     expect(() => deleteCard(db, 'ghost', NOW)).not.toThrow()
   })
+
+  // Important review finding: deleting a word must also retire its pl_forms
+  // conjugation/declension drill — otherwise you delete a word and keep being
+  // drilled on it, which feels identical to a deleted card reappearing.
+  // createFormsCard already treats parent_card_id as authoritative in the
+  // other direction (idempotent lookup by parent); deleteCard must honor the
+  // same link.
+  it('cascades to the pl_forms child it owns', async () => {
+    const { db } = createTestDb()
+    const generator = {
+      forms: vi.fn().mockResolvedValue({ prompt_pl: 'przyzwyczaić się — formy', answer_pl: '| … |' }),
+    } as unknown as Generator
+    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
+    const child = await createFormsCard(db, generator, parent.cardId, NOW)
+
+    deleteCard(db, parent.cardId, NOW)
+
+    const parentRow = db.select().from(cards).where(eq(cards.id, parent.cardId)).get()!
+    const childRow = db.select().from(cards).where(eq(cards.id, child.cardId)).get()!
+    expect(parentRow.deletedAt).toBe(NOW.getTime())
+    expect(childRow.deletedAt).toBe(NOW.getTime())
+  })
+
+  it('does not delete an unrelated card that merely shares no parent link', () => {
+    const { db } = createTestDb()
+    const a = createCard(db, input({ answerPl: 'jeden' }), NOW)
+    const b = createCard(db, input({ answerPl: 'dwa' }), NOW)
+    deleteCard(db, a.cardId, NOW)
+    expect(db.select().from(cards).where(eq(cards.id, b.cardId)).get()!.deletedAt).toBeNull()
+  })
 })
 
 // Decision required by the task brief: "should a soft-deleted card still
@@ -237,7 +292,24 @@ describe('findDuplicate and soft delete', () => {
     expect(searchCards(db, 'złoś').map((c) => c.id)).toEqual([second.cardId])
   })
 
-  it('still consults the fallback key, skipping a deleted primary match', () => {
+  // Minor review finding: the single test below only ever asserted
+  // `toBeNull()`, which would pass identically if the fallback lookup were
+  // removed from findDuplicate entirely — it can't tell "fallback correctly
+  // skipped a deleted match" apart from "fallback never ran at all". Split
+  // into two: one proves the fallback path is still live by giving it a
+  // real, non-deleted match to find; the other keeps the original assertion
+  // that a deleted match under the fallback key is skipped.
+  it('still finds a live card via the fallback key when the primary lookup finds nothing', () => {
+    const { db } = createTestDb()
+    const first = createCard(db, input({ answerPl: 'zloslivy' }), NOW)
+    // Primary lookup is on answerKey('złośliwy'), which matches nothing;
+    // the fallback key 'zloslivy' is what actually finds `first`.
+    expect(
+      findDuplicate(db, { type: 'ru_to_pl', answerPl: 'złośliwy', fallbackAnswerKey: 'zloslivy' }),
+    ).toBe(first.cardId)
+  })
+
+  it('skips a fallback match when that card has been soft-deleted', () => {
     const { db } = createTestDb()
     const first = createCard(db, input({ answerPl: 'zloslivy' }), NOW)
     deleteCard(db, first.cardId, NOW)
@@ -293,5 +365,18 @@ describe('createFormsCard', () => {
     const second = await createFormsCard(db, generator, parent.cardId, NOW)
     expect(second.cardId).not.toBe(first.cardId)
     expect(second.duplicateOf).toBeNull()
+  })
+
+  // Important review finding: nothing stopped a pl_forms card from being
+  // used as the *parent* of another forms request — one tap would send a
+  // whole Markdown table to generator.forms() as a "lemma", burning a model
+  // call and inserting a nonsense grandchild. Rejected here, not just hidden
+  // in the UI, because the route is reachable directly (e.g. by curl).
+  it('refuses to generate forms for a pl_forms parent', async () => {
+    const { db } = createTestDb()
+    const word = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
+    const forms = await createFormsCard(db, generator, word.cardId, NOW)
+    await expect(createFormsCard(db, generator, forms.cardId, NOW)).rejects.toThrow(/pl_forms/)
+    expect(generator.forms).not.toHaveBeenCalledWith('| … |')
   })
 })

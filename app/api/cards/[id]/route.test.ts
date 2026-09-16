@@ -103,6 +103,18 @@ describe('PATCH /api/cards/:id', () => {
     const res = await patch('c5', { suspendedAt: 'not-a-number' })
     expect(res.status).toBe(400)
   })
+
+  // Important review finding: updateCard's own lookup lacked the deleted_at
+  // filter, so PATCHing a deleted card's id silently succeeded and wrote
+  // fields to an invisible row. Fixed in lib/cards/service.ts; this pins the
+  // route-level behavior (an unhandled throw, same as every other "no such
+  // card" error path in this codebase — see app/api/review/[cardId]/route.ts,
+  // which has the same no-catch convention).
+  it('does not silently succeed when PATCHing a soft-deleted card', async () => {
+    seedCard({ id: 'c7' })
+    await del('c7')
+    await expect(patch('c7', { answerPl: 'x' })).rejects.toThrow(/no such card/)
+  })
 })
 
 describe('DELETE /api/cards/:id', () => {

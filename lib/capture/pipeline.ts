@@ -87,6 +87,22 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
     : // Generation is down. Keep the word; the prompt is filled in later by hand.
       { promptText: null, promptHint: null, answerPl: transcript, examplePl: null, exampleRu: null, grammarNote: null }
 
+  // Authorized addition (Task 17 review, critical finding): re-read the
+  // capture row immediately before creating a card. `DELETE
+  // /api/captures/:id` (spec §4's swipe-to-delete on a chip with no card yet)
+  // can land while `generator.fromPolish`, just awaited above, was in
+  // flight — and that window is not a corner case: `status` was set to
+  // 'transcribed' before this await, so "the transcript just appeared and
+  // it's wrong" is exactly when a user is likely to swipe. Without this
+  // check, `createCard` below would still run after the capture is gone,
+  // producing a live, reviewable card the user has no way to know exists —
+  // the chip that would have shown it is already gone, and /dodaj only ever
+  // asks the server for captures from the last 60 seconds. Same pattern as
+  // the authorized `deleted_at` check in lib/review/queue.ts: a stale read
+  // from before an await is never trusted for a decision that creates
+  // something durable.
+  if (!db.select({ id: captures.id }).from(captures).where(eq(captures.id, captureId)).get()) return
+
   // Best-effort second key, success path only: a word that first landed as `needs_input`
   // is keyed by its raw transcript, but a later successful re-dictation is keyed by the
   // diacritic-restored answer_pl, so a lookup on answer_pl's key alone would otherwise miss

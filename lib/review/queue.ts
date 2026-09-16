@@ -54,11 +54,20 @@ function introducedTodayPredicate(now: Date) {
   )
 }
 
-/** A card counts as introduced today if its first (non-undone) review today was from State.New. */
+/**
+ * A card counts as introduced today if its first (non-undone) review today
+ * was from State.New. Joined to `cards` and filtered to non-deleted rows
+ * (important review finding): without the join, a soft-deleted card's
+ * earlier review still consumed one of `newPerDay`'s slots forever, and
+ * combined with `findDuplicate` correctly refusing to resurrect a deleted
+ * card on re-dictation, a single delete-then-re-dictate silently burned two
+ * slots for one surviving card.
+ */
 export function newCardsIntroducedToday(db: Db, now: Date): number {
   const row = db
     .select({ n: sql<number>`count(distinct ${reviews.cardId})` })
     .from(reviews)
+    .innerJoin(cards, and(eq(cards.id, reviews.cardId), isNull(cards.deletedAt)))
     .where(introducedTodayPredicate(now))
     .get()
   return row?.n ?? 0

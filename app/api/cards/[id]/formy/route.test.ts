@@ -22,6 +22,7 @@ const { POST } = await import('./route')
 const { db } = await import('@/lib/db/client')
 const { cards } = await import('@/lib/db/schema')
 const { newState } = await import('@/lib/scheduler')
+const { GenerationError } = await import('@/lib/generate')
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -77,5 +78,20 @@ describe('POST /api/cards/:id/formy', () => {
     const second = await (await post('parent-2')).json()
     expect(second.cardId).toBe(first.cardId)
     expect(formsMock).toHaveBeenCalledTimes(1)
+  })
+
+  // Important review finding: a GenerationError became an unhandled 500 with
+  // no body the client could show — and this is not a rare edge case, it's
+  // the exact failure this task's own sandbox produced when live-verifying
+  // this route (network blocked, so generation always fails there).
+  it('surfaces a generation failure as a client error instead of an unhandled 500', async () => {
+    seedCard({ id: 'parent-3' })
+    formsMock.mockRejectedValueOnce(new GenerationError('generation request failed: network unreachable'))
+    const res = await post('parent-3')
+    expect(res.status).toBe(502)
+    const body = await res.json()
+    expect(body.error).toMatch(/generation request failed/)
+    // No half-made pl_forms child left behind by the failed attempt.
+    expect(db.select().from(cards).all()).toHaveLength(1)
   })
 })

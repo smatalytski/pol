@@ -8,8 +8,13 @@ export async function GET(req: Request) {
   return NextResponse.json({ cards: searchCards(db, q) })
 }
 
+// Minor review finding: this route hardcodes parentCardId: null, so
+// 'pl_forms' is deliberately excluded here — a pl_forms card created through
+// it would have no origin, contrary to spec §3 ("a pl_forms card records its
+// origin in parent_card_id"). The only path to a pl_forms card is
+// POST /api/cards/:id/formy.
 const Body = z.object({
-  type: z.enum(['ru_to_pl', 'image_to_pl', 'pl_forms']),
+  type: z.enum(['ru_to_pl', 'image_to_pl']),
   promptText: z.string().nullable(),
   promptHint: z.string().nullable(),
   answerPl: z.string().min(1),

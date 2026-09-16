@@ -8,7 +8,7 @@ describe('strings', () => {
       'show', 'again', 'hard', 'good', 'easy', 'undo',
       'doneForToday', 'nextDue', 'noCards', 'sessionReviewed', 'nextReviewAt',
       'holdToRecord', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
-      'dropImages', 'imagePrompt', 'addForms', 'suspend', 'unsuspend', 'save', 'needsInput',
+      'dropImages', 'imagePrompt', 'addForms', 'suspend', 'unsuspend', 'save', 'needsInput', 'formsFailed',
       'newPerDay', 'targetRetention', 'logIn', 'badPassword', 'passwordPlaceholder',
     ]
     for (const key of required) expect(t).toHaveProperty(key)

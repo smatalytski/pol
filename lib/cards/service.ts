@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, like, or, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { cards } from '../db/schema'
@@ -140,29 +140,36 @@ export type UpdateCardPatch = Partial<
  * the whole point of §9's "the card disappears everywhere".
  */
 export function searchCards(db: Db, query: string, limit = 200): CardRow[] {
-  const q = `%${query.trim().toLowerCase()}%`
-  const rows = db.select().from(cards)
-  if (query.trim() === '') {
-    return rows.where(isNull(cards.deletedAt)).orderBy(desc(cards.createdAt)).limit(limit).all()
-  }
-  return rows
-    .where(
-      and(
-        isNull(cards.deletedAt),
-        or(
-          like(sql`lower(${cards.answerPl})`, q),
-          like(sql`lower(${cards.promptText})`, q),
-          like(cards.answerKey, q),
-        ),
-      ),
-    )
-    .orderBy(desc(cards.createdAt))
-    .limit(limit)
-    .all()
+  // Filters in JS, not SQL (minor review finding): SQLite's built-in
+  // `lower()`/LIKE fold ASCII only, so 'Хитрый' LIKE '%хитр%' is false in
+  // real SQLite — a capitalized Russian prompt (the primary prompt language)
+  // would be unfindable by a lowercase query. JS's String.toLowerCase() is
+  // Unicode-aware. The personal-scale data volume here makes fetching every
+  // non-deleted row and filtering in-process the right tradeoff over a more
+  // "efficient" query that is quietly wrong for half the app's content.
+  const q = query.trim().toLowerCase()
+  const rows = db.select().from(cards).where(isNull(cards.deletedAt)).orderBy(desc(cards.createdAt)).all()
+  if (q === '') return rows.slice(0, limit)
+  const matches = rows.filter(
+    (c) =>
+      c.answerPl.toLowerCase().includes(q) ||
+      (c.promptText?.toLowerCase().includes(q) ?? false) ||
+      c.answerKey.toLowerCase().includes(q),
+  )
+  return matches.slice(0, limit)
 }
 
 export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date): CardRow {
-  const current = db.select().from(cards).where(eq(cards.id, id)).get()
+  // Soft delete (important review finding): a deleted card must be treated
+  // as gone here too, the same as every other lookup in this file — without
+  // this filter, PATCHing a deleted id's route returned 200 and silently
+  // wrote fields (including the needs_input -> ready promotion below) to an
+  // invisible row.
+  const current = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.id, id), isNull(cards.deletedAt)))
+    .get()
   if (!current) throw new Error(`no such card: ${id}`)
 
   const merged = { ...current, ...patch }
@@ -206,9 +213,19 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
  *
  * A no-op on an unknown id, like the DELETE route it backs: deleting
  * something already gone should not be an error.
+ *
+ * Cascades to the card's `pl_forms` child, if it has one (important review
+ * finding): `createFormsCard` already treats `parent_card_id` as
+ * authoritative in the other direction (its idempotent lookup is scoped by
+ * parent), so deleting the parent while leaving the child `ready` would keep
+ * drilling a word the user just told the app to forget — indistinguishable,
+ * from the user's side, from the delete not having worked at all.
  */
 export function deleteCard(db: Db, id: string, now: Date): void {
-  db.update(cards).set({ deletedAt: now.getTime() }).where(eq(cards.id, id)).run()
+  db.update(cards)
+    .set({ deletedAt: now.getTime() })
+    .where(or(eq(cards.id, id), eq(cards.parentCardId, id)))
+    .run()
 }
 
 export async function createFormsCard(
@@ -223,6 +240,13 @@ export async function createFormsCard(
     .where(and(eq(cards.id, parentId), isNull(cards.deletedAt)))
     .get()
   if (!parent) throw new Error(`no such card: ${parentId}`)
+  // Important review finding: a pl_forms card's answer is a Markdown table,
+  // never a lemma, and forms-of-forms has no meaning under spec §3's card
+  // model. Rejected here (not just hidden behind a button in app/fiszki) so
+  // this can't be triggered by a direct request to the route either.
+  if (parent.type === 'pl_forms') {
+    throw new Error(`cannot generate forms for a pl_forms card: ${parentId}`)
+  }
 
   const existing = db
     .select({ id: cards.id })

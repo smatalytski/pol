@@ -158,6 +158,33 @@ describe('processCapture', () => {
     expect(d.db.select().from(cards).all()).toHaveLength(1)
     expect(d.transcriber.transcribe).toHaveBeenCalledTimes(1)
   })
+
+  // Critical race from review: DELETE /api/captures/:id (swipe-to-delete on a
+  // chip with no card yet) can land while this exact function is mid-flight —
+  // transcription has already landed (status: 'transcribed', set BEFORE this
+  // await) when the word turns out to be wrong, which is precisely when a
+  // user is most likely to swipe. Without a re-check, `createCard` below
+  // still runs after the capture row is gone, producing a live, reviewable
+  // card for a capture the user just told the app to forget — and the chip
+  // never comes back, since /dodaj only requests captures from the last 60s.
+  it('creates no card if the capture is deleted while generation is in flight (simulates a mid-pipeline swipe-delete)', async () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW)
+    // Overriding the mock after construction, rather than passing it into
+    // `deps()`, so the mock's closure can reference `id` without a `var`
+    // hoisting trick.
+    d.generator.fromPolish = vi.fn().mockImplementation(async () => {
+      // The user swiped the chip away right as generation was in flight —
+      // exactly the window this test exercises.
+      d.db.delete(captures).where(eq(captures.id, id)).run()
+      return GENERATED
+    })
+
+    await processCapture(d, id, NOW)
+
+    expect(d.db.select().from(cards).all()).toHaveLength(0)
+    expect(d.db.select().from(captures).where(eq(captures.id, id)).all()).toHaveLength(0)
+  })
 })
 
 describe('listCaptures', () => {
