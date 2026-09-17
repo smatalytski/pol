@@ -4,7 +4,7 @@ import type { Db } from '../db/client'
 import { cards } from '../db/schema'
 import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
-import type { Generator } from '../generate'
+import { toCardFields, type Generator } from '../generate'
 
 export type CardType = 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
 
@@ -272,4 +272,53 @@ export async function createFormsCard(
     },
     now,
   )
+}
+
+/**
+ * Repairs a card stranded by a failed generation. A transient Vertex 429 is
+ * enough to produce one: the capture pipeline deliberately keeps the word and
+ * marks the card `needs_input` rather than losing the dictation, but neither
+ * of the other recovery routes actually repairs it — `processCapture` returns
+ * early once a capture has a card, and re-dictating dedups into the stranded
+ * card without writing the new prompt. That left hand-typing the Russian as
+ * the only fix, which assumes the user already knows the very thing the card
+ * exists to teach them.
+ *
+ * In that state `answer_pl` holds the raw transcript, so it is what goes back
+ * to the model.
+ */
+export async function regenerateCard(
+  db: Db,
+  generator: Generator,
+  id: string,
+  now: Date,
+): Promise<{ card: CardRow; duplicateOf: string | null }> {
+  const card = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.id, id), isNull(cards.deletedAt)))
+    .get()
+  if (!card) throw new Error(`no such card: ${id}`)
+  // Restricted to needs_input (not merely hidden behind a button in
+  // app/fiszki), so a direct request cannot re-roll a card whose content is
+  // already good — this function overwrites every generated field.
+  if (card.status !== 'needs_input') {
+    throw new Error(`can only regenerate a needs_input card: ${id}`)
+  }
+
+  const fields = toCardFields(await generator.fromPolish(card.answerPl))
+
+  // Writing the normalized answer is the point of regenerating at all: it
+  // restores diacritics a mangled transcript lost. But it also re-keys the
+  // card, so when a live card of the same type already owns that key, keep
+  // this card's answer and report the clash instead of forking the deck into
+  // two cards sharing one answer_key. The prompt and examples are still
+  // written — they are what the card was missing.
+  const owner = findDuplicate(db, { type: card.type, answerPl: fields.answerPl })
+  const duplicateOf = owner !== null && owner !== id ? owner : null
+
+  return {
+    card: updateCard(db, id, duplicateOf ? { ...fields, answerPl: card.answerPl } : fields, now),
+    duplicateOf,
+  }
 }

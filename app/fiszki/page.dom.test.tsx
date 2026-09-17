@@ -86,6 +86,91 @@ describe('CardsPage (browse/edit)', () => {
     expect(patchCall?.body).toEqual({ answerPl: 'wredny' })
   })
 
+  // A transient Vertex 429 strands a card as needs_input, and neither retry
+  // (processCapture returns early once a capture has a card) nor re-dictation
+  // (it dedups into the stranded card) repairs it. This button is the repair.
+  it('offers "wygeneruj ponownie" only on a needs_input row', async () => {
+    stubFetch(() => [
+      cardRow({ id: 'ready-1', status: 'ready' }),
+      cardRow({ id: 'stranded-1', status: 'needs_input', promptText: null }),
+    ])
+    render(<CardsPage />)
+    await screen.findByText(t.needsInput)
+    expect(screen.getAllByText(t.regenerate)).toHaveLength(1)
+    const row = screen.getByText(t.needsInput).closest('li')!
+    expect(within(row).getByText(t.regenerate)).toBeTruthy()
+  })
+
+  it('POSTs to the regeneruj route when "wygeneruj ponownie" is clicked', async () => {
+    const calls = stubFetch(() => [cardRow({ status: 'needs_input', promptText: null })])
+    render(<CardsPage />)
+    const button = await screen.findByText(t.regenerate)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(calls.some((c) => c.url === '/api/cards/c1/regeneruj' && c.method === 'POST')).toBe(true)
+  })
+
+  // The expected failure for this button specifically: the same rate limit
+  // that stranded the card can reject the repair too, and it must say so
+  // rather than look like a dead button.
+  it('shows an error when regeneration fails, instead of silently doing nothing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url === '/api/cards?q=') {
+          return Promise.resolve({
+            json: () => Promise.resolve({ cards: [cardRow({ status: 'needs_input', promptText: null })] }),
+          }) as unknown as Promise<Response>
+        }
+        if (url === '/api/cards/c1/regeneruj' && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: false,
+            status: 502,
+            json: () => Promise.resolve({ error: '429 RESOURCE_EXHAUSTED' }),
+          }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+    render(<CardsPage />)
+    const button = await screen.findByText(t.regenerate)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.regenerateFailed)).toBeTruthy()
+  })
+
+  // The regenerated answer can collide with a card that already exists (the
+  // normalized answer re-keys the card). The server then keeps this card's
+  // answer and reports the clash; the row has to say so, or the answer
+  // silently staying mangled looks like the repair half-worked.
+  it('tells you when the regenerated word already exists in the deck', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url === '/api/cards?q=') {
+          return Promise.resolve({
+            json: () => Promise.resolve({ cards: [cardRow({ status: 'needs_input', promptText: null })] }),
+          }) as unknown as Promise<Response>
+        }
+        if (url === '/api/cards/c1/regeneruj' && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ card: cardRow({ status: 'ready' }), duplicateOf: 'other-card' }),
+          }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+    render(<CardsPage />)
+    const button = await screen.findByText(t.regenerate)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.regenerateDuplicate)).toBeTruthy()
+  })
+
   it('POSTs to the formy route when "dodaj formy" is clicked', async () => {
     const calls = stubFetch(() => [cardRow()])
     render(<CardsPage />)

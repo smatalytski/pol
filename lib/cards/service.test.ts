@@ -4,7 +4,7 @@ import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
 import { createCard, type CreateCardInput } from './service'
 import type { Generator } from '../generate'
-import { createFormsCard, deleteCard, findDuplicate, searchCards, updateCard } from './service'
+import { createFormsCard, deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -378,5 +378,77 @@ describe('createFormsCard', () => {
     const forms = await createFormsCard(db, generator, word.cardId, NOW)
     await expect(createFormsCard(db, generator, forms.cardId, NOW)).rejects.toThrow(/pl_forms/)
     expect(generator.forms).not.toHaveBeenCalledWith('| … |')
+  })
+})
+
+describe('regenerateCard', () => {
+  // What a successful generation looks like: the model restores diacritics and
+  // drops the dictation's sentence punctuation, which is why `answer_pl` here
+  // differs from the transcript the card was stranded with.
+  const generated = {
+    prompt_ru: '\u0437\u0434\u043e\u0440\u043e\u0432 \u043a\u0430\u043a \u0431\u044b\u043a',
+    prompt_hint: '\u0438\u0434\u0438\u043e\u043c\u0430',
+    answer_pl: 'zdr\u00f3w jak ryba',
+    example_pl: 'Czuj\u0119 si\u0119 zdr\u00f3w jak ryba.',
+    example_ru: '\u0427\u0443\u0432\u0441\u0442\u0432\u0443\u044e \u0441\u0435\u0431\u044f \u0437\u0434\u043e\u0440\u043e\u0432\u044b\u043c.',
+    grammar_note: '\u043a\u0440\u0430\u0442\u043a\u0430\u044f \u0444\u043e\u0440\u043c\u0430',
+  }
+  const gen = () => ({ fromPolish: vi.fn().mockResolvedValue(generated) }) as unknown as Generator
+
+  const stranded = (over: Partial<CreateCardInput> = {}) =>
+    input({ status: 'needs_input', promptText: null, answerPl: 'Zdr\u00f3w jak ryba.', ...over })
+
+  it('regenerates from the stored transcript and promotes the card to ready', async () => {
+    const { db } = createTestDb()
+    const generator = gen()
+    const { cardId } = createCard(db, stranded(), NOW)
+    const { card } = await regenerateCard(db, generator, cardId, NOW)
+    expect(generator.fromPolish).toHaveBeenCalledWith('Zdr\u00f3w jak ryba.')
+    expect(card.status).toBe('ready')
+    expect(card.promptText).toBe(generated.prompt_ru)
+    expect(card.promptHint).toBe(generated.prompt_hint)
+    expect(card.examplePl).toBe(generated.example_pl)
+    expect(card.exampleRu).toBe(generated.example_ru)
+    expect(card.grammarNote).toBe(generated.grammar_note)
+  })
+
+  // The point of writing the normalized answer at all: a transcript that lost
+  // its diacritics leaves a misspelled answer that only regeneration can fix.
+  it('writes the normalized answer and re-keys the card', async () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, stranded({ answerPl: 'Zdrow jak ryba.' }), NOW)
+    const { card, duplicateOf } = await regenerateCard(db, gen(), cardId, NOW)
+    expect(duplicateOf).toBeNull()
+    expect(card.answerPl).toBe('zdr\u00f3w jak ryba')
+    expect(card.answerKey).toBe('zdr\u00f3w jak ryba')
+  })
+
+  // A live card of the same type already owns the regenerated key. Rewriting
+  // the answer would fork the deck into two cards with one key, so the answer
+  // stays put and the caller is told which card it clashed with — the prompt
+  // and examples are still worth having.
+  it('keeps the original answer when the regenerated one collides with a live card', async () => {
+    const { db } = createTestDb()
+    const existing = createCard(db, input({ answerPl: 'zdr\u00f3w jak ryba' }), NOW)
+    const { cardId } = createCard(db, stranded({ answerPl: 'Zdrow jak ryba.' }), NOW)
+    const { card, duplicateOf } = await regenerateCard(db, gen(), cardId, NOW)
+    expect(duplicateOf).toBe(existing.cardId)
+    expect(card.answerPl).toBe('Zdrow jak ryba.')
+    expect(card.answerKey).toBe('zdrow jak ryba')
+    expect(card.promptText).toBe(generated.prompt_ru)
+    expect(card.status).toBe('ready')
+  })
+
+  it('refuses a card that is not needs_input', async () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    await expect(regenerateCard(db, gen(), cardId, NOW)).rejects.toThrow(/needs_input/)
+  })
+
+  it('refuses a soft-deleted card', async () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, stranded(), NOW)
+    deleteCard(db, cardId, NOW)
+    await expect(regenerateCard(db, gen(), cardId, NOW)).rejects.toThrow(/no such card/)
   })
 })

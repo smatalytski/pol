@@ -18,6 +18,10 @@ export default function CardsPage() {
   // uncontrolled `defaultValue` inputs, a rejected edit stayed on screen as
   // if it had been saved.
   const [saveError, setSaveError] = useState(false)
+  // Keyed by card id, same reasoning as formsError: one row's failed repair
+  // must not paint an error on every other row.
+  const [regenError, setRegenError] = useState<Record<string, boolean>>({})
+  const [regenDuplicate, setRegenDuplicate] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async (query: string) => {
     const res = await fetch(`/api/cards?q=${encodeURIComponent(query)}`)
@@ -64,6 +68,28 @@ export default function CardsPage() {
       delete rest[id]
       return rest
     })
+    void load(q)
+  }
+
+  // A card is `needs_input` only because generation failed — most likely a
+  // transient Vertex 429. Neither other recovery route repairs it (retry
+  // returns early once a capture has a card; re-dictation dedups into this
+  // card without writing the prompt), and hand-editing assumes you already
+  // know the Russian the card exists to teach you.
+  async function regenerate(id: string) {
+    const res = await fetch(`/api/cards/${id}/regeneruj`, { method: 'POST' })
+    if (!res.ok) {
+      setRegenError((prev) => ({ ...prev, [id]: true }))
+      return
+    }
+    const { duplicateOf } = (await res.json()) as { duplicateOf: string | null }
+    setRegenError((prev) => {
+      if (!(id in prev)) return prev
+      const rest = { ...prev }
+      delete rest[id]
+      return rest
+    })
+    setRegenDuplicate((prev) => ({ ...prev, [id]: duplicateOf !== null }))
     void load(q)
   }
 
@@ -125,6 +151,11 @@ export default function CardsPage() {
                   {t.addForms}
                 </button>
               )}
+              {c.status === 'needs_input' && (
+                <button onClick={() => void regenerate(c.id)} className="underline">
+                  {t.regenerate}
+                </button>
+              )}
               <button onClick={() => void patch(c.id, { suspendedAt: c.suspendedAt ? null : Date.now() })} className="underline">
                 {c.suspendedAt ? t.unsuspend : t.suspend}
               </button>
@@ -133,6 +164,8 @@ export default function CardsPage() {
               </button>
             </div>
             {formsError[c.id] && <p className="text-sm text-red-600">{t.formsFailed}</p>}
+            {regenError[c.id] && <p className="text-sm text-red-600">{t.regenerateFailed}</p>}
+            {regenDuplicate[c.id] && <p className="text-sm text-amber-600">{t.regenerateDuplicate}</p>}
           </li>
         ))}
       </ul>
