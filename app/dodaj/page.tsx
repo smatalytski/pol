@@ -181,7 +181,10 @@ export default function AddPage() {
 
   return (
     <div className="flex flex-col">
-      <ul className="w-full">
+      {/* Bottom padding reserves the height of the fixed bar below, so the
+          last chip can still be read and swiped instead of sitting under the
+          button. */}
+      <ul className="w-full pb-52">
         {chips.map((item) => (
           <CaptureChip
             key={chipKey(item)}
@@ -195,15 +198,21 @@ export default function AddPage() {
 
       {/* One-handed use: a thumb reaches the bottom of a phone screen, not the
           top, and this list grows downward — so a button above it drifts
-          further out of reach the longer a session runs. Sticky rather than
-          fixed, so it sits below a short list instead of floating over it, and
-          stays put once the list is long enough to scroll. The inset padding
-          keeps it clear of the home indicator / gesture bar, and the opaque
-          background stops chips showing through as they scroll underneath.
-          Nav is at the top of the shell (components/Nav.tsx), so nothing
-          collides down here. */}
+          further out of reach the longer a session runs.
+          
+          Fixed, not sticky. `sticky bottom-0` shipped first and did not work:
+          sticky only pins an element once its container overflows the
+          viewport, and nothing in the shell constrains height, so with a few
+          chips the page was shorter than the screen and the button sat right
+          under them — near the top, exactly where it started. Fixed anchors it
+          to the viewport whatever the list is doing; `left-0 right-0` plus the
+          inner max-w-xl re-centres it, because a fixed element ignores the
+          shell's `mx-auto max-w-xl`. The inset padding keeps it clear of the
+          home indicator / gesture bar, and the opaque background stops chips
+          showing through as they scroll underneath. Nav is at the top of the
+          shell (components/Nav.tsx), so nothing collides down here. */}
       <div
-        className="sticky bottom-0 flex justify-center bg-background pt-4"
+        className="fixed bottom-0 left-0 right-0 flex justify-center bg-background pt-4"
         style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
       >
         <button

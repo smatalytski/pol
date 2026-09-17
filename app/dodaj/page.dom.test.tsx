@@ -456,6 +456,50 @@ describe('AddPage layout', () => {
       Node.DOCUMENT_POSITION_FOLLOWING,
     )
   })
+
+  // DOM order was not enough. `sticky bottom-0` shipped first, and sticky only
+  // pins an element once its container overflows the viewport — nothing in the
+  // shell constrains height, so with a few chips the page is shorter than the
+  // screen and the button rendered right under the chips, near the top, which
+  // is what the user saw. jsdom has no layout engine, so these pin the
+  // mechanism rather than the appearance: the bar is positioned against the
+  // viewport, and the list reserves room so the last chip cannot hide beneath
+  // it.
+  it('anchors the button to the viewport, not to the end of the list', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'generated')] }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    const bar = (await screen.findByText(t.holdToRecord)).closest('div')!
+    expect(bar.className).toContain('fixed')
+    expect(bar.className).toContain('bottom-0')
+    expect(bar.className).not.toContain('sticky')
+  })
+
+  it('reserves room under the list so the last chip is not covered by the button', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'generated')] }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    await screen.findByText(t.holdToRecord)
+    expect(screen.getByRole('list').className).toMatch(/\bpb-/)
+  })
 })
 
 describe('AddPage re-recognition', () => {
