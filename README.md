@@ -321,12 +321,36 @@ thing genuinely new about this environment versus everything tested so far.
 | `SESSION_SECRET` | HMAC key for the session cookie |
 | `FISZKI_DB` | database path; `/mnt/fiszki/fiszki.db` on the VM |
 | `GOOGLE_CLOUD_PROJECT` | the GCP project for all three AI services |
-| `FISZKI_MODEL` | Gemini model ID; default `gemini-3.8-flash` (newer generation over nominally-higher-tier `gemini-2.5-pro`, spec §5), named fallback `gemini-2.5-pro` if generation quality regresses |
+| `FISZKI_MODEL` | Gemini model ID; default `gemini-3.8-flash` (newer generation over nominally-higher-tier `gemini-2.5-pro`, spec §5). **Do not fall back to a 2.5 model** — see below |
 | `GCP_VERTEX_LOCATION` | Gemini location, default `global` |
 | `GCP_SPEECH_LOCATION` | Speech/TTS location, default `eu` — Polish requires it |
 | `FISZKI_BACKUP_BUCKET` | GCS bucket for snapshots; unset means local-only |
 
 No API keys. Every Google call uses Application Default Credentials.
+
+### The model is load-bearing for Russian dictation
+
+`FISZKI_MODEL` used to name `gemini-2.5-pro` as a fallback "if generation
+quality regresses". Measured, after `fromDictation` began accepting either
+language, all three asked to make a card from the Russian word «склеп» (a
+crypt), which is a near-homophone of Polish `sklep` (a shop):
+
+```
+gemini-3.8-flash   prompt_ru="склеп"    answer_pl="grobowiec"   correct
+gemini-2.5-pro     prompt_ru="магазин"  answer_pl="sklep"       wrong direction
+gemini-2.5-flash   prompt_ru="магазин"  answer_pl="sklep"       wrong direction
+```
+
+Both 2.5 models read the Cyrillic as if it were the Polish look-alike and
+built the card backwards. Falling back to one would not degrade Russian
+dictation, it would silently invert it — and the result looks like a perfectly
+ordinary card, so nothing would flag it.
+
+Latency is worth knowing too: the same calls took 30s, 46s and 2.4s. A
+`gemini-3.8-flash` request that takes half a minute is normal here, and
+intermittent `429 RESOURCE_EXHAUSTED` from it is common enough that two
+consecutive re-recognitions hit it. A 429 leaves the card `needs_input`, which
+`wygeneruj ponownie` repairs.
 
 ## Not built yet
 
