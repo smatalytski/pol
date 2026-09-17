@@ -1,6 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import type { CaptureView } from '@/lib/capture/pipeline'
+import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
 
 /**
@@ -55,9 +56,11 @@ export function CaptureChip({
   item,
   onRetry,
   onDelete,
+  onRelanguage,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
+  onRelanguage: (id: string, lang: DictationLang) => void
   onDelete: (item: ChipItem) => void
 }) {
   // Hooks must run unconditionally, before the outbox early return below —
@@ -164,7 +167,12 @@ export function CaptureChip({
         <div className="flex-1">
           <p className="text-lg">{capture.transcript ?? t.transcribing}</p>
           {capture.duplicateOf && <p className="text-sm text-amber-600">{t.alreadyHave}</p>}
-          {capture.status === 'failed' && <p className="text-sm text-red-600">{capture.error}</p>}
+          {/* Shown whenever there is an error, not only when the status is
+              'failed': a transient Vertex 429 leaves a capture 'generated'
+              WITH an error and a stranded card, which is how a card ends up
+              needing repair with nothing on screen saying why. A failed
+              re-recognition lands the same way. */}
+          {capture.error && <p className="text-sm text-red-600">{capture.error}</p>}
         </div>
         {/* Pressing ▶ or "ponów" is itself a pointerdown+pointerup pair that
             would otherwise bubble to the `<li>` and register as a tap or a
@@ -190,6 +198,35 @@ export function CaptureChip({
           </button>
         )}
       </div>
+
+      {/* Dictation is recognised as Polish, because that is what nearly all of
+          it is: measured on the real API, a two-language recognizer swallows
+          Russian whole (spoken "склеп" came back "sklep"). So a Russian
+          recording is repaired here instead, from the stored audio — the wrong
+          transcript keeps no trace of what was actually said, which is why
+          regenerating from the card could never fix it. Both directions are
+          offered rather than a toggle, so a mistaken re-recognition is undone
+          the same way it was made. Each control stops its own pointer events,
+          or the <li> would read the press as a tap or a swipe as well. */}
+      {capture.audioMediaId && (
+        <div className="flex items-center gap-3 pl-2 text-sm">
+          <span className="text-neutral-500">{t.recognizeAs}</span>
+          {([
+            ['pl', t.asPolish],
+            ['ru', t.asRussian],
+          ] as const).map(([lang, label]) => (
+            <button
+              key={lang}
+              onClick={() => onRelanguage(capture.id, lang)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              className="underline"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {expanded && fields && (
         // Stops the same bubbling the controls above guard against: tapping

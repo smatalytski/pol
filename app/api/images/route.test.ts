@@ -32,7 +32,7 @@ vi.mock('@/lib/generate', async () => {
   const actual = await vi.importActual<typeof import('@/lib/generate')>('@/lib/generate')
   return {
     ...actual,
-    getGenerator: () => ({ fromImage: fromImageMock, fromPolish: vi.fn(), forms: vi.fn() }),
+    getGenerator: () => ({ fromImage: fromImageMock, fromDictation: vi.fn(), forms: vi.fn() }),
   }
 })
 

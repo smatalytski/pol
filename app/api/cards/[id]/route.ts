@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
-import { cards } from '@/lib/db/schema'
+import { captures, cards } from '@/lib/db/schema'
 import { deleteCard, updateCard } from '@/lib/cards/service'
 
 const Patch = z.object({
@@ -30,7 +30,23 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .where(and(eq(cards.id, id), isNull(cards.deletedAt)))
     .get()
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  return NextResponse.json({ card })
+
+  // The capture whose recording produced this card, so the detail screen can
+  // offer "recognise this again in Russian" — and only offer it when there is
+  // audio to re-recognise, rather than showing a control that must fail.
+  //
+  // Earliest, not latest: dedup means several captures can point at one card
+  // (a duplicate dictation resolves to the card it matched), and the earliest
+  // is the one whose recording actually created it. Re-recognising a later
+  // duplicate's audio would rewrite a card that recording never made.
+  const capture = db
+    .select({ id: captures.id })
+    .from(captures)
+    .where(and(eq(captures.cardId, id), isNotNull(captures.audioMediaId)))
+    .orderBy(asc(captures.createdAt))
+    .get()
+
+  return NextResponse.json({ card, captureId: capture?.id ?? null })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

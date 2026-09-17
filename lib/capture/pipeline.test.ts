@@ -5,7 +5,7 @@ import { cards, captures, media } from '../db/schema'
 import { deleteCard } from '../cards/service'
 import type { Generator } from '../generate'
 import type { Transcriber } from '../transcribe'
-import { createCapture, listCaptures, processCapture } from './pipeline'
+import { createCapture, listCaptures, processCapture, retranscribe } from './pipeline'
 
 const NOW = new Date('2026-09-12T10:00:00')
 const AUDIO = { bytes: new Uint8Array([9, 9, 9]), mime: 'audio/webm' }
@@ -25,7 +25,7 @@ function deps(over: { transcriber?: Partial<Transcriber>; generator?: Partial<Ge
     db,
     transcriber: { transcribe: vi.fn().mockResolvedValue('zloslivy'), ...over.transcriber } as Transcriber,
     generator: {
-      fromPolish: vi.fn().mockResolvedValue(GENERATED),
+      fromDictation: vi.fn().mockResolvedValue(GENERATED),
       fromImage: vi.fn(),
       forms: vi.fn(),
       ...over.generator,
@@ -93,8 +93,8 @@ describe('processCapture', () => {
     // succeeds and would key the card by the restored 'złośliwy' — a different string — so
     // the primary answer-key lookup alone would miss the first card entirely and silently
     // fork the word into a second, orphaning the first.
-    const fromPolish = vi.fn().mockRejectedValueOnce(new Error('llm down')).mockResolvedValue(GENERATED)
-    const d = deps({ generator: { fromPolish } })
+    const fromDictation = vi.fn().mockRejectedValueOnce(new Error('llm down')).mockResolvedValue(GENERATED)
+    const d = deps({ generator: { fromDictation } })
 
     const first = createCapture(d.db, AUDIO, NOW)
     await processCapture(d, first, NOW)
@@ -125,7 +125,7 @@ describe('processCapture', () => {
   })
 
   it('still creates a card when generation fails, flagged needs_input', async () => {
-    const d = deps({ generator: { fromPolish: vi.fn().mockRejectedValue(new Error('llm down')) } })
+    const d = deps({ generator: { fromDictation: vi.fn().mockRejectedValue(new Error('llm down')) } })
     const id = createCapture(d.db, AUDIO, NOW)
     await processCapture(d, id, NOW)
 
@@ -174,7 +174,7 @@ describe('processCapture', () => {
     // Overriding the mock after construction, rather than passing it into
     // `deps()`, so the mock's closure can reference `id` without a `var`
     // hoisting trick.
-    d.generator.fromPolish = vi.fn().mockImplementation(async () => {
+    d.generator.fromDictation = vi.fn().mockImplementation(async () => {
       // The user swiped the chip away right as generation was in flight —
       // exactly the window this test exercises.
       d.db.delete(captures).where(eq(captures.id, id)).run()
@@ -216,5 +216,161 @@ describe('listCaptures', () => {
     const d = deps()
     const id = createCapture(d.db, AUDIO, NOW)
     expect(listCaptures(d.db, 0).find((c) => c.id === id)).toBeDefined()
+  })
+})
+
+// Polish and Russian share too many near-homophones for a two-language
+// recognizer to be safe: measured on the real API, spoken "склеп" came back
+// "sklep" and "бешенство" came back "wściekłość". So dictation stays Polish
+// and a Russian recording is fixed afterwards — which only works from the
+// stored audio, since the wrong transcript carries no trace of what was said.
+describe('retranscribe', () => {
+  const RU_GENERATED = {
+    answer_pl: 'krypta',
+    prompt_ru: 'склеп',
+    prompt_hint: '',
+    example_pl: 'Krypta pod kościołem.',
+    example_ru: 'Склеп под церковью.',
+    grammar_note: 'rzeczownik rodzaju żeńskiego',
+  }
+
+  function strandedInPolish() {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW)
+    return { d, id }
+  }
+
+  it('re-recognises the stored audio in the requested language', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+
+    await retranscribe(d, id, 'ru', NOW)
+
+    const call = (d.transcriber.transcribe as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(call.lang).toBe('ru')
+    // getMedia hands back a sqlite Buffer, so compare contents not classes.
+    expect(Array.from(call.bytes as Uint8Array)).toEqual(Array.from(AUDIO.bytes))
+    expect(d.db.select().from(captures).where(eq(captures.id, id)).get()!.transcript).toBe('склеп')
+  })
+
+  it('rewrites the capture existing card in place instead of making a second one', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    const before = d.db.select().from(cards).get()!
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+
+    await retranscribe(d, id, 'ru', NOW)
+
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(1)
+    expect(all[0].id).toBe(before.id)
+    expect(all[0].promptText).toBe('склеп')
+    expect(all[0].answerPl).toBe('krypta')
+    expect(all[0].answerKey).toBe('krypta')
+    expect(all[0].grammarNote).toBe('rzeczownik rodzaju żeńskiego')
+  })
+
+  it('creates a card when the capture never got one', async () => {
+    const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('nope')) } })
+    const id = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, id, NOW) // transcription failed: no card
+    expect(d.db.select().from(cards).all()).toHaveLength(0)
+
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await retranscribe(d, id, 'ru', NOW)
+
+    const card = d.db.select().from(cards).get()!
+    expect(card.answerPl).toBe('krypta')
+    expect(d.db.select().from(captures).where(eq(captures.id, id)).get()!.cardId).toBe(card.id)
+  })
+
+  // The re-recognised answer re-keys the card, so it can land on a word that
+  // is already in the deck. Forking the deck into two cards sharing one
+  // answer_key is worse than keeping this card's answer and saying so.
+  it('keeps the answer and reports the clash when the new answer already exists', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    // A second, unrelated card already owns "krypta".
+    const other = createCapture(d.db, { bytes: new Uint8Array([7]), mime: 'audio/webm' }, NOW)
+    d.generator.fromDictation = vi.fn().mockResolvedValue({ ...RU_GENERATED, prompt_ru: 'могила' })
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('могила')
+    await processCapture(d, other, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(2)
+
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    const { duplicateOf } = await retranscribe(d, id, 'ru', NOW)
+
+    const fixed = d.db.select().from(cards).where(eq(cards.id, d.db.select().from(captures).where(eq(captures.id, id)).get()!.cardId!)).get()!
+    expect(duplicateOf).not.toBeNull()
+    expect(fixed.answerPl).toBe('złośliwy') // untouched
+    expect(fixed.promptText).toBe('склеп') // prompt still written
+    expect(d.db.select().from(cards).all()).toHaveLength(2)
+  })
+
+  it('records the failure and leaves the card alone when re-recognition fails', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
+
+    await retranscribe(d, id, 'ru', NOW)
+
+    const capture = d.db.select().from(captures).where(eq(captures.id, id)).get()!
+    expect(capture.error).toMatch(/unintelligible/)
+    // The old transcript and card survive, so the button can be pressed again.
+    expect(capture.transcript).toBe('zloslivy')
+    expect(d.db.select().from(cards).get()!.answerPl).toBe('złośliwy')
+  })
+
+  // A media row cannot be deleted out from under a capture — captures
+  // .audio_media_id is a foreign key, and deleting the media first fails with
+  // FOREIGN KEY constraint failed. So the reachable "no audio" case is a
+  // capture that never had any, which is what this covers.
+  // The caller needs the failure in the response, not only recorded on the
+  // capture row: the card detail screen never polls captures, so without this
+  // a failed re-recognition there would look exactly like a success.
+  it('returns the failure so the caller can show it without polling', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
+
+    const { error } = await retranscribe(d, id, 'ru', NOW)
+
+    expect(error).toMatch(/unintelligible/)
+  })
+
+  it('returns no error when it worked', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+
+    expect((await retranscribe(d, id, 'ru', NOW)).error).toBeNull()
+  })
+
+  it('refuses a capture that has no audio to re-recognise', async () => {
+    const d = deps()
+    d.db
+      .insert(captures)
+      .values({
+        id: 'no-audio',
+        audioMediaId: null,
+        transcript: null,
+        status: 'uploaded',
+        error: null,
+        generationJson: null,
+        cardId: null,
+        createdAt: NOW.getTime(),
+      })
+      .run()
+
+    await retranscribe(d, 'no-audio', 'ru', NOW)
+
+    expect(d.db.select().from(captures).where(eq(captures.id, 'no-audio')).get()!.error).toMatch(/audio/)
+    expect(d.transcriber.transcribe).not.toHaveBeenCalled()
   })
 })

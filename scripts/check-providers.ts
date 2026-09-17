@@ -111,7 +111,7 @@ async function checkGemini(): Promise<Result> {
   const name = 'Gemini on Vertex'
   try {
     const generator = getGenerator()
-    const card = await generator.fromPolish('kot')
+    const card = await generator.fromDictation('kot')
     if (!card.answer_pl.trim()) throw new Error('answer_pl is empty')
     if (!card.prompt_ru.trim()) throw new Error('prompt_ru is empty')
     if (!CYRILLIC.test(card.prompt_ru)) throw new Error(`prompt_ru has no Cyrillic: "${card.prompt_ru}"`)

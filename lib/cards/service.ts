@@ -306,19 +306,44 @@ export async function regenerateCard(
     throw new Error(`can only regenerate a needs_input card: ${id}`)
   }
 
-  const fields = toCardFields(await generator.fromPolish(card.answerPl))
+  const fields = toCardFields(await generator.fromDictation(card.answerPl))
+  return applyGeneratedFields(db, card, fields, now)
+}
 
-  // Writing the normalized answer is the point of regenerating at all: it
-  // restores diacritics a mangled transcript lost. But it also re-keys the
-  // card, so when a live card of the same type already owns that key, keep
-  // this card's answer and report the clash instead of forking the deck into
-  // two cards sharing one answer_key. The prompt and examples are still
-  // written — they are what the card was missing.
+/** The six fields a generation produces, as `toCardFields` returns them. */
+export type GeneratedFields = {
+  promptText: string | null
+  promptHint: string | null
+  answerPl: string
+  examplePl: string | null
+  exampleRu: string | null
+  grammarNote: string | null
+}
+
+/**
+ * Writes a fresh generation over an existing card, with one collision policy
+ * shared by everything that re-generates: `regenerateCard` here, and
+ * `retranscribe` in the capture pipeline.
+ *
+ * Writing the generated answer is the point of re-generating at all — it is
+ * what restores diacritics a mangled transcript lost, and what replaces a
+ * Polish look-alike after a recording turns out to have been Russian. But it
+ * also re-keys the card, so when a live card of the same type already owns
+ * that key, this card keeps its own answer and the clash is reported instead:
+ * forking the deck into two cards sharing one answer_key is worse than an
+ * answer that stays wrong and says so. The prompt and examples are written
+ * either way — they are what was missing.
+ */
+export function applyGeneratedFields(
+  db: Db,
+  card: CardRow,
+  fields: GeneratedFields,
+  now: Date,
+): { card: CardRow; duplicateOf: string | null } {
   const owner = findDuplicate(db, { type: card.type, answerPl: fields.answerPl })
-  const duplicateOf = owner !== null && owner !== id ? owner : null
-
+  const duplicateOf = owner !== null && owner !== card.id ? owner : null
   return {
-    card: updateCard(db, id, duplicateOf ? { ...fields, answerPl: card.answerPl } : fields, now),
+    card: updateCard(db, card.id, duplicateOf ? { ...fields, answerPl: card.answerPl } : fields, now),
     duplicateOf,
   }
 }

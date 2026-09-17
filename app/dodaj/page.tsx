@@ -5,6 +5,7 @@ import { useHoldToRecord, mediaRecorderFactory } from '@/hooks/useHoldToRecord'
 import { useWakeLock } from '@/hooks/useWakeLock'
 import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbox'
 import type { CaptureView } from '@/lib/capture/pipeline'
+import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
 
 export default function AddPage() {
@@ -129,6 +130,23 @@ export default function AddPage() {
     void fetch(`/api/captures/${id}/retry`, { method: 'POST' })
   }, [])
 
+  // Recognition is Polish by default, because that is what nearly all
+  // dictation is and because a two-language recognizer demonstrably swallows
+  // Russian (spoken "склеп" came back "sklep"). This re-runs recognition on
+  // the stored audio in the language the user names, then refreshes so the
+  // corrected transcript — or the error, if a provider refused — appears on
+  // the chip without a reload.
+  const relanguage = useCallback(
+    (id: string, lang: DictationLang) => {
+      void fetch(`/api/captures/${id}/jezyk`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ lang }),
+      }).then(() => fetchCaptures())
+    },
+    [fetchCaptures],
+  )
+
   // Spec §4's "swipe to delete", wired once Task 17 added the routes it
   // needs. An outbox chip never calls this (CaptureChip doesn't attach the
   // gesture to it — see its own comment), so this only ever sees a `capture`
@@ -165,7 +183,13 @@ export default function AddPage() {
     <div className="flex flex-col">
       <ul className="w-full">
         {chips.map((item) => (
-          <CaptureChip key={chipKey(item)} item={item} onRetry={retry} onDelete={deleteChip} />
+          <CaptureChip
+            key={chipKey(item)}
+            item={item}
+            onRetry={retry}
+            onDelete={deleteChip}
+            onRelanguage={relanguage}
+          />
         ))}
       </ul>
 

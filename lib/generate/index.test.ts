@@ -68,14 +68,14 @@ describe('toCardFields', () => {
   })
 })
 
-describe('geminiGenerator.fromPolish', () => {
+describe('geminiGenerator.fromDictation', () => {
   it('returns the parsed card', async () => {
-    expect(await make(ok(FULL)).fromPolish('złośliwy')).toEqual(FULL)
+    expect(await make(ok(FULL)).fromDictation('złośliwy')).toEqual(FULL)
   })
 
   it('sends the transcript, the configured model, and the schema', async () => {
     const generate = ok(FULL)
-    await make(generate, 'gemini-pro-xyz').fromPolish('na wszelki wypadek')
+    await make(generate, 'gemini-pro-xyz').fromDictation('na wszelki wypadek')
     const req = generate.mock.calls[0][0] as {
       model: string
       contents: unknown
@@ -87,9 +87,32 @@ describe('geminiGenerator.fromPolish', () => {
     expect(req.config.responseSchema).toBeDefined()
   })
 
+  // The old wording opened with "\u041f\u0440\u043e\u0434\u0438\u043a\u0442\u043e\u0432\u0430\u043d\u043e \u043f\u043e-\u043f\u043e\u043b\u044c\u0441\u043a\u0438" \u2014 "dictated in
+  // Polish" \u2014 which is a lie once the transcript can be Russian, and a lie
+  // stated to the model in the one place it cannot check. The script tells it
+  // which language it got; the request must not assert one.
+  it('does not tell the model which language the transcript is in', async () => {
+    const generate = ok(FULL)
+    await make(generate).fromDictation('\u0441\u043a\u043b\u0435\u043f')
+    const contents = JSON.stringify((generate.mock.calls[0][0] as { contents: unknown }).contents)
+    expect(contents).toContain('\u0441\u043a\u043b\u0435\u043f')
+    expect(contents).not.toContain('\u043f\u043e-\u043f\u043e\u043b\u044c\u0441\u043a\u0438')
+  })
+
+  it('tells the model what to do in each direction, since the transcript can be either language', async () => {
+    const generate = ok(FULL)
+    await make(generate).fromDictation('\u0441\u043a\u043b\u0435\u043f')
+    const system = (generate.mock.calls[0][0] as { config: { systemInstruction: string } }).config
+      .systemInstruction
+    // Both branches must be spelled out: Polish in means it is the answer,
+    // Russian in means it is the prompt and the Polish answer is produced.
+    expect(system).toMatch(/\u0435\u0441\u043b\u0438 .*\u043f\u043e-\u043f\u043e\u043b\u044c\u0441\u043a\u0438/i)
+    expect(system).toMatch(/\u0435\u0441\u043b\u0438 .*\u043f\u043e-\u0440\u0443\u0441\u0441\u043a\u0438/i)
+  })
+
   it('instructs the model that answers are Polish and prompts Russian, never English', async () => {
     const generate = ok(FULL)
-    await make(generate).fromPolish('złośliwy')
+    await make(generate).fromDictation('złośliwy')
     const system = (generate.mock.calls[0][0] as { config: { systemInstruction: string } }).config
       .systemInstruction
     // Pinned to the direction-setting rule lines themselves, not merely to
@@ -104,26 +127,26 @@ describe('geminiGenerator.fromPolish', () => {
   it('throws GenerationError when the response has no text', async () => {
     const generate = vi.fn().mockResolvedValue({ text: null })
     await expect(
-      geminiGenerator({ generate: generate as never }).fromPolish('x'),
+      geminiGenerator({ generate: generate as never }).fromDictation('x'),
     ).rejects.toThrow(GenerationError)
   })
 
   it('throws GenerationError on unparseable output rather than leaking a SyntaxError', async () => {
     const generate = vi.fn().mockResolvedValue({ text: 'not json at all' })
     await expect(
-      geminiGenerator({ generate: generate as never }).fromPolish('x'),
+      geminiGenerator({ generate: generate as never }).fromDictation('x'),
     ).rejects.toThrow(GenerationError)
   })
 
   it('throws GenerationError when the payload fails the schema', async () => {
-    await expect(make(ok({ answer_pl: 'złośliwy' })).fromPolish('x')).rejects.toThrow(
+    await expect(make(ok({ answer_pl: 'złośliwy' })).fromDictation('x')).rejects.toThrow(
       GenerationError,
     )
   })
 
   it('rejects an empty transcript before spending a request', async () => {
     const generate = ok(FULL)
-    await expect(make(generate).fromPolish('   ')).rejects.toThrow(GenerationError)
+    await expect(make(generate).fromDictation('   ')).rejects.toThrow(GenerationError)
     expect(generate).not.toHaveBeenCalled()
   })
 })

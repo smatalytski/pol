@@ -48,8 +48,8 @@ const FORMS_MARKDOWN = '| a | b |\n|---|---|\n| 1 | 2 |'
 const formsCard = () =>
   cardRow({ type: 'pl_forms', answerPl: FORMS_MARKDOWN, promptText: 'patrzeć — odmiana' })
 
-/** GET returns the card; every other verb succeeds. Records every call. */
-function stubFetch(card: () => CardRow) {
+/** GET returns the card and its capture id; every other verb succeeds. */
+function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1') {
   const calls: Array<{ url: string; method: string; body?: unknown }> = []
   vi.stubGlobal(
     'fetch',
@@ -59,12 +59,12 @@ function stubFetch(card: () => CardRow) {
       if (method === 'GET') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: card() }),
+          json: () => Promise.resolve({ card: card(), captureId }),
         }) as unknown as Promise<Response>
       }
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ card: card(), duplicateOf: null, ok: true }),
+        json: () => Promise.resolve({ card: card(), duplicateOf: null, error: null, ok: true }),
       }) as unknown as Promise<Response>
     }),
   )
@@ -79,7 +79,7 @@ function stubFailingWrites(card: () => CardRow, status = 502) {
       if ((init?.method ?? 'GET') === 'GET') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: card() }),
+          json: () => Promise.resolve({ card: card(), captureId: 'cap-1' }),
         }) as unknown as Promise<Response>
       }
       return Promise.resolve({
@@ -321,5 +321,94 @@ describe('CardDetailPage', () => {
     )
     render(<CardPage />)
     expect(await screen.findByText(t.cardNotFound)).toBeTruthy()
+  })
+
+  // Dictation is recognised as Polish; a Russian recording is repaired from
+  // the stored audio, which is the only thing that still knows what was said.
+  it('offers both languages when the card came from a recording', async () => {
+    stubFetch(() => cardRow())
+    render(<CardPage />)
+    expect(await screen.findByText(t.asRussian)).toBeTruthy()
+    expect(screen.getByText(t.asPolish)).toBeTruthy()
+  })
+
+  it('offers no language controls for a card with no recording behind it', async () => {
+    stubFetch(() => cardRow(), null)
+    render(<CardPage />)
+    await screen.findByDisplayValue('z\u0142o\u015bliwy')
+    expect(screen.queryByText(t.asRussian)).toBeNull()
+  })
+
+  it('re-recognises this card recording in Russian and reloads it', async () => {
+    const calls = stubFetch(() => cardRow())
+    render(<CardPage />)
+    const button = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.url).toBe('/api/captures/cap-1/jezyk')
+    expect(post?.body).toEqual({ lang: 'ru' })
+    expect(calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(1)
+  })
+
+  // Re-recognition calls Speech-to-Text and Gemini, and the route answers 200
+  // with the bad news in `error` rather than failing the request — so a page
+  // that only checks res.ok would show nothing at all.
+  it('shows an error when re-recognition reports one in a 200 response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if ((init?.method ?? 'GET') === 'GET') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ card: cardRow(), captureId: 'cap-1' }),
+          }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ cardId: 'c1', duplicateOf: null, error: 'transcription failed: unintelligible' }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<CardPage />)
+    const button = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
+  })
+
+  // The fields are uncontrolled `defaultValue` inputs, which React does not
+  // re-initialise when state changes. Re-recognition (and regeneration)
+  // replaces the card's contents wholesale, so without a remount the inputs
+  // keep showing the old answer — and the next blur would PATCH that stale
+  // value back over the repair, which is how the settings screen lost edits
+  // before A3.
+  it('shows the rebuilt card after re-recognition, not the stale input values', async () => {
+    let answer = 'sklep'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if ((init?.method ?? 'GET') === 'GET') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ card: cardRow({ answerPl: answer }), captureId: 'cap-1' }),
+          }) as unknown as Promise<Response>
+        }
+        answer = 'krypta'
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ cardId: 'c1', duplicateOf: null, error: null }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<CardPage />)
+    const button = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByDisplayValue('krypta')).toBeTruthy()
+    expect(screen.queryByDisplayValue('sklep')).toBeNull()
   })
 })

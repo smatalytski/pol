@@ -1,8 +1,22 @@
 import { v2 } from '@google-cloud/speech'
 import { gcpProject, speechLocation } from '../gcp/clients'
 
+/**
+ * Which language the recording is in. Always exactly one — never a list for
+ * the service to choose between. Measured on real API calls: with
+ * `['pl-PL','ru-RU']` the Polish model swallows Russian whole (spoken "склеп"
+ * came back "sklep", "час" came back "czas", "бешенство" came back
+ * "wściekłość"), in both code orders, while a single code was correct on every
+ * word in both languages. Polish and Russian share too many near-homophones
+ * for detection to be safe, and a wrong guess is not recoverable from the
+ * transcript afterwards — only by re-recognising the stored audio.
+ */
+export type DictationLang = 'pl' | 'ru'
+
+const LANGUAGE_CODES: Record<DictationLang, string> = { pl: 'pl-PL', ru: 'ru-RU' }
+
 export interface Transcriber {
-  transcribe(input: { bytes: Uint8Array; mime: string }): Promise<string>
+  transcribe(input: { bytes: Uint8Array; mime: string; lang?: DictationLang }): Promise<string>
 }
 
 export class TranscriptionError extends Error {
@@ -27,7 +41,7 @@ export function speechTranscriber(opts: {
   const model = opts.model ?? 'chirp_3'
 
   return {
-    async transcribe({ bytes }) {
+    async transcribe({ bytes, lang = 'pl' }) {
       let res: RecognizeResponse
       try {
         ;[res] = await opts.recognize({
@@ -38,9 +52,11 @@ export function speechTranscriber(opts: {
             // hard-coding an encoding would break on some phones.
             autoDecodingConfig: {},
             model,
-            // Dictation is always Polish. Auto-detection guesses wrong on
-            // single words and silently yields Russian or English spellings.
-            languageCodes: ['pl-PL'],
+            // Exactly one code, chosen by the caller — see DictationLang for
+            // the measurements behind that. Polish is the default because it
+            // is what nearly every dictation is; a Russian recording is
+            // re-recognised on request from the audio that is kept anyway.
+            languageCodes: [LANGUAGE_CODES[lang]],
             features: { enableAutomaticPunctuation: true },
           },
           content: bytes,

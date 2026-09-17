@@ -457,3 +457,42 @@ describe('AddPage layout', () => {
     )
   })
 })
+
+describe('AddPage re-recognition', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('asks the server to re-recognise a capture in Russian, then refreshes', async () => {
+    stubMic()
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [{ ...captureRow('cap-1', 'generated'), audioMediaId: 'm1', transcript: 'sklep' }],
+              cardId: 'c1',
+              duplicateOf: null,
+              error: null,
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.url).toBe('/api/captures/cap-1/jezyk')
+    expect(post?.body).toEqual({ lang: 'ru' })
+    // The refreshed transcript has to arrive without the user reloading.
+    expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
+  })
+})

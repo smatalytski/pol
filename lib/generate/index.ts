@@ -52,6 +52,9 @@ const SYSTEM = `Ты помогаешь взрослому человеку, к�
 Правила:
 - answer_pl всегда на польском, с правильной орфографией и диакритикой. Вход приходит из распознавания речи и часто теряет ł, ś, ż, ć, ó — восстанавливай их. Если слово продиктовано в косвенной форме внутри фразы, приведи его к словарной форме, если это отдельное слово; фразы и предложения оставляй как есть.
 - prompt_ru всегда на русском.
+- Транскрипт приходит либо по-польски, либо по-русски — тебе не говорят заранее, определи сам по алфавиту:
+  - если он по-польски — это ответ: answer_pl это он сам (с восстановленной диакритикой), а prompt_ru ты придумываешь;
+  - если он по-русски — это вопрос: prompt_ru это он сам (почищенный от лишней пунктуации), а answer_pl — то, что человек должен суметь сказать по-польски.
 - Никогда не используй английский язык — never use English anywhere in the output.
 - Русский перевод часто неоднозначен: «злобный» может дать złośliwy, wredny или zły. Поэтому для отдельных слов заполняй prompt_hint: часть речи и короткий контекст, чтобы вопрос имел понятный ответ. Для целых предложений prompt_hint оставляй пустым.
 - example_pl — одно короткое естественное предложение. Не выдумывай книжных конструкций.
@@ -73,7 +76,7 @@ export function toCardFields(g: GeneratedCard) {
 }
 
 export interface Generator {
-  fromPolish(transcript: string): Promise<GeneratedCard>
+  fromDictation(transcript: string): Promise<GeneratedCard>
   fromImage(image: { bytes: Uint8Array; mime: string }): Promise<GeneratedCard>
   forms(lemma: string): Promise<GeneratedForms>
 }
@@ -166,11 +169,15 @@ export function geminiGenerator(
   }
 
   return {
-    async fromPolish(transcript) {
+    async fromDictation(transcript) {
       const text = transcript.trim()
       if (!text) throw new GenerationError('empty transcript')
+      // Deliberately does not name the language. The transcript may be Polish
+      // or Russian and the alphabet already says which; claiming one here
+      // would be asserting something false in the one place the model cannot
+      // check it against the audio.
       return run(GeneratedCardSchema, SYSTEM, [
-        { text: `Продиктовано по-польски: «${text}»\n\nСделай карточку.` },
+        { text: `Продиктовано: «${text}»\n\nСделай карточку.` },
       ])
     },
 

@@ -393,7 +393,7 @@ describe('regenerateCard', () => {
     example_ru: '\u0427\u0443\u0432\u0441\u0442\u0432\u0443\u044e \u0441\u0435\u0431\u044f \u0437\u0434\u043e\u0440\u043e\u0432\u044b\u043c.',
     grammar_note: '\u043a\u0440\u0430\u0442\u043a\u0430\u044f \u0444\u043e\u0440\u043c\u0430',
   }
-  const gen = () => ({ fromPolish: vi.fn().mockResolvedValue(generated) }) as unknown as Generator
+  const gen = () => ({ fromDictation: vi.fn().mockResolvedValue(generated) }) as unknown as Generator
 
   const stranded = (over: Partial<CreateCardInput> = {}) =>
     input({ status: 'needs_input', promptText: null, answerPl: 'Zdr\u00f3w jak ryba.', ...over })
@@ -403,7 +403,7 @@ describe('regenerateCard', () => {
     const generator = gen()
     const { cardId } = createCard(db, stranded(), NOW)
     const { card } = await regenerateCard(db, generator, cardId, NOW)
-    expect(generator.fromPolish).toHaveBeenCalledWith('Zdr\u00f3w jak ryba.')
+    expect(generator.fromDictation).toHaveBeenCalledWith('Zdr\u00f3w jak ryba.')
     expect(card.status).toBe('ready')
     expect(card.promptText).toBe(generated.prompt_ru)
     expect(card.promptHint).toBe(generated.prompt_hint)

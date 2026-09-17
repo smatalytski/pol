@@ -8,7 +8,7 @@ const tmpDir = mkdtempSync(path.join(tmpdir(), 'fiszki-regen-route-'))
 process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
 afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
-const fromPolishMock = vi.fn().mockResolvedValue({
+const fromDictationMock = vi.fn().mockResolvedValue({
   prompt_ru: 'здоров как бык',
   prompt_hint: 'идиома',
   answer_pl: 'zdrów jak ryba',
@@ -20,7 +20,7 @@ const fromPolishMock = vi.fn().mockResolvedValue({
 // Mocks only the generation seam, same approach as the formy route's test.
 vi.mock('@/lib/generate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/generate')>()
-  return { ...actual, getGenerator: () => ({ ...actual.getGenerator(), fromPolish: fromPolishMock }) }
+  return { ...actual, getGenerator: () => ({ ...actual.getGenerator(), fromDictation: fromDictationMock }) }
 })
 
 const { POST } = await import('./route')
@@ -63,7 +63,7 @@ function post(id: string) {
 
 beforeEach(() => {
   db.delete(cards).run()
-  fromPolishMock.mockClear()
+  fromDictationMock.mockClear()
 })
 
 describe('POST /api/cards/:id/regeneruj', () => {
@@ -84,7 +84,7 @@ describe('POST /api/cards/:id/regeneruj', () => {
   // rather than half-written, so the button can be pressed again.
   it('surfaces a generation failure as a client error and leaves the card stranded', async () => {
     seedStranded('c2')
-    fromPolishMock.mockRejectedValueOnce(
+    fromDictationMock.mockRejectedValueOnce(
       new GenerationError('generation request failed: 429 RESOURCE_EXHAUSTED'),
     )
     const res = await post('c2')
