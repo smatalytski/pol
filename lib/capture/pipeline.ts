@@ -2,7 +2,7 @@ import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, cards } from '../db/schema'
-import { applyGeneratedFields, createCard, type GeneratedFields } from '../cards/service'
+import { applyGeneratedFields, createCard, updateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator } from '../generate'
@@ -276,9 +276,19 @@ export async function retranscribe(
     : undefined
 
   const { cardId, duplicateOf } = existing
-    ? (({ card, duplicateOf }) => ({ cardId: card.id, duplicateOf }))(
-        applyGeneratedFields(db, existing, fields, now),
-      )
+    ? (({ card, duplicateOf }) => {
+        // Same fallback processCapture's create path has always had, and the
+        // reason it is needed here was found end to end against the real
+        // providers: recognition succeeded, Gemini answered 429, and the card
+        // was left with the Cyrillic transcript as its answer, no prompt at
+        // all, and still marked 'ready' — queued for review as a card with no
+        // question. updateCard does not lower a status on its own, so say it
+        // explicitly. It also hands the card to `wygeneruj ponownie`, which
+        // only accepts needs_input and regenerates from answer_pl — by then
+        // the Russian transcript, which fromDictation reads correctly.
+        if (!generated) updateCard(db, card.id, { status: 'needs_input' }, now)
+        return { cardId: card.id, duplicateOf }
+      })(applyGeneratedFields(db, existing, fields, now))
     : createCard(
         db,
         {

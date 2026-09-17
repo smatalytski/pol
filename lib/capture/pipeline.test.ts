@@ -352,6 +352,30 @@ describe('retranscribe', () => {
     expect((await retranscribe(d, id, 'ru', NOW)).error).toBeNull()
   })
 
+  // Found by running this end to end against the real providers: recognition
+  // succeeded, Gemini answered 429, and the card was left answer_pl="склеп",
+  // prompt_text=null, status="ready" — a card with no question at all, queued
+  // for review. processCapture's create path has always fallen back to
+  // needs_input; the update path here has to as well. That also hands the card
+  // to `wygeneruj ponownie`, which only accepts needs_input and regenerates
+  // from answer_pl — now the Cyrillic transcript, which fromDictation reads
+  // correctly.
+  it('marks the card needs_input when re-recognition works but generation fails', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    expect(d.db.select().from(cards).get()!.status).toBe('ready')
+
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockRejectedValue(new Error('429 RESOURCE_EXHAUSTED'))
+    const { error } = await retranscribe(d, id, 'ru', NOW)
+
+    const card = d.db.select().from(cards).get()!
+    expect(error).toMatch(/429/)
+    expect(card.answerPl).toBe('склеп')
+    expect(card.promptText).toBeNull()
+    expect(card.status).toBe('needs_input')
+  })
+
   it('refuses a capture that has no audio to re-recognise', async () => {
     const d = deps()
     d.db
