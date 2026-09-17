@@ -1,0 +1,53 @@
+{
+  "name": "fiszki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "check-providers": "tsx scripts/check-providers.ts"
+  },
+  "dependencies": {
+    "@google-cloud/speech": "^8.1.0",
+    "@google-cloud/text-to-speech": "^7.1.0",
+    "@google/genai": "^2.22.0",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2",
+    "idb-keyval": "^6.3.0",
+    "next": "15.5.25",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "sharp": "^0.35.4",
+    "ts-fsrs": "4.7.0",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.25",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.0.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "vitest": "^5.0.0"
+  }
+}

@@ -1,0 +1,55 @@
+export const t = {
+  appName: 'Fiszki',
+
+  review: 'Powtórki',
+  add: 'Dodaj',
+  images: 'Obrazki',
+  cards: 'Fiszki',
+  settings: 'Ustawienia',
+
+  show: 'pokaż',
+  again: 'nie pamiętam',
+  hard: 'z trudem',
+  good: 'dobrze',
+  easy: 'łatwo',
+  undo: 'cofnij',
+
+  doneForToday: 'Na dziś koniec',
+  noCards: 'Brak fiszek',
+  sessionReviewed: 'Przejrzano',
+  nextReviewAt: 'Kolejna powtórka',
+  rateFailed: 'nie udało się zapisać oceny',
+
+  holdToRecord: 'przytrzymaj i mów',
+  uploading: 'wysyłanie…',
+  transcribing: 'rozpoznawanie…',
+  alreadyHave: 'już masz',
+  retry: 'ponów',
+  deleteItem: 'usuń',
+  play: 'odtwórz',
+  micDenied: 'Bez dostępu do mikrofonu nie da się nic dodać. Włącz mikrofon w ustawieniach przeglądarki i odśwież stronę.',
+
+  dropImages: 'przeciągnij obrazki tutaj',
+  imagePrompt: 'obrazek',
+  addForms: 'dodaj formy',
+  regenerate: 'wygeneruj ponownie',
+  suspend: 'zawieś',
+  unsuspend: 'przywróć',
+  save: 'zapisz',
+  needsInput: 'do uzupełnienia',
+  formsFailed: 'nie udało się wygenerować form',
+  regenerateFailed: 'nie udało się wygenerować fiszki',
+  regenerateDuplicate: 'to słowo już jest w talii — zapisano tylko podpowiedź',
+  saveFailed: 'nie udało się zapisać zmian',
+  chipSaveFailed: 'nie udało się zapisać zmian',
+
+  newPerDay: 'Nowe fiszki na dzień',
+  targetRetention: 'Docelowa skuteczność',
+  settingsSaveFailed: 'nie udało się zapisać ustawień',
+
+  logIn: 'wejdź',
+  badPassword: 'złe hasło',
+  passwordPlaceholder: 'hasło',
+} as const
+
+export type Strings = typeof t

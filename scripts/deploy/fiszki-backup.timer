@@ -1,0 +1,12 @@
+[Unit]
+Description=Run fiszki-backup.service daily
+
+[Timer]
+OnCalendar=daily
+# A missed run (VM off, or offline, at the scheduled time) fires as soon as
+# the timer is next active — e.g. right after boot — instead of silently
+# waiting a full day.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
