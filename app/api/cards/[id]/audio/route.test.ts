@@ -83,6 +83,26 @@ describe('GET /api/cards/:id/audio', () => {
     expect(getClipMock.mock.calls[0]?.[2]).toBe('złośliwy')
   })
 
+  // Regression, found in production on a phone. The Location header must not
+  // carry the server's own origin. Behind a reverse proxy — `tailscale serve`
+  // here, any ingress in general — the internal `req.url` is
+  // http://localhost:3000, so an absolute Location built from it told the
+  // BROWSER to fetch https://localhost:3000/api/media/..., i.e. the phone's
+  // own localhost, where nothing is listening. The <audio> element failed
+  // silently: the clip had already been synthesized server-side, so the only
+  // symptom was a play button that did nothing and a TTS bill for audio
+  // nobody could hear. The three tests above assert `status === 307` and never
+  // look at where the redirect points, which is exactly why this shipped.
+  it('Location is origin-independent, not the internal request host', async () => {
+    seedCard({ id: 'c9', type: 'ru_to_pl', answerPl: 'złośliwy' })
+    const res = await GET(
+      new Request('http://localhost:3000/api/cards/c9/audio?part=answer'),
+      { params: Promise.resolve({ id: 'c9' }) },
+    )
+    expect(res.status).toBe(307)
+    expect(res.headers.get('location')).toBe('/api/media/media-id-stub')
+  })
+
   it('image_to_pl answer is spoken in Polish', async () => {
     seedCard({ id: 'c3', type: 'image_to_pl', promptText: null, answerPl: 'kot' })
     const res = await call('c3', 'answer')

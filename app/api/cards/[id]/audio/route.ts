@@ -35,5 +35,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!text) return NextResponse.json({ error: 'nothing to speak' }, { status: 404 })
 
   const mediaId = await getClip(db, getSynthesizer(), text, lang, new Date())
-  return NextResponse.redirect(new URL(`/api/media/${mediaId}`, req.url), 307)
+  // A RELATIVE Location (RFC 7231 7.1.2), deliberately. The browser resolves
+  // it against the URL it actually requested, which is the only origin that is
+  // reachable from the browser's side. NextResponse.redirect requires an
+  // absolute URL, and the only origin available here is `req.url` — which
+  // behind a reverse proxy (`tailscale serve`, or any ingress) is
+  // http://localhost:3000, the app's own internal bind address. Sending that
+  // as Location tells the BROWSER to fetch its own localhost:3000, so the
+  // <audio> element fails silently and the card just never plays. Trusting a
+  // forwarded host header instead would work but adds a spoofable input for
+  // no gain: this redirect never needs to leave the current origin.
+  return new Response(null, { status: 307, headers: { location: `/api/media/${mediaId}` } })
 }
