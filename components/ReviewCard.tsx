@@ -2,6 +2,7 @@
 import type { QueueItem } from '@/lib/review/queue'
 import type { RatingValue } from '@/lib/scheduler'
 import { FormsTable } from './FormsTable'
+import { hasAnswerAudio } from '@/lib/cards/display'
 import { t } from '@/i18n/pl'
 
 const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
@@ -10,14 +11,6 @@ const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
   { value: 3, label: t.good },
   { value: 4, label: t.easy },
 ]
-
-// Mirrors GET /api/cards/:id/audio's eligibility table exactly (Task 11): the
-// answer route 404s for pl_forms, whose answer is a declension table that is
-// never spoken. A play control here for that type would be a dead button on
-// every forms card.
-function hasAnswerAudio(type: QueueItem['type']): boolean {
-  return type !== 'pl_forms'
-}
 
 export function ReviewCard({
   card,
@@ -55,7 +48,13 @@ export function ReviewCard({
               <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
             )}
             {card.examplePl && <p className="text-lg">{card.examplePl}</p>}
-            {card.exampleRu && <p className="text-sm text-neutral-500">{card.exampleRu}</p>}
+            {/* No Russian on the answer side. The Russian prompt above is the
+                retrieval cue; once the card is turned over, a Russian gloss of
+                the Polish example just gives the eye an easier place to land
+                than the Polish it is supposed to be reading. `exampleRu` is
+                still generated and stored — ten existing cards hold real
+                values, and dropping the column is a migration with nothing
+                user-visible to show for it. */}
             {card.grammarNote && <p className="text-sm text-neutral-500">{card.grammarNote}</p>}
           </div>
         )}

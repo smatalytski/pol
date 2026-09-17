@@ -8,7 +8,7 @@ export const GeneratedCardSchema = z.object({
   prompt_hint: z.string().describe('Short Russian disambiguator: part of speech and context; "" if unnecessary'),
   example_pl: z.string().describe('One short natural Polish sentence using it; "" if not useful'),
   example_ru: z.string().describe('Russian translation of example_pl; "" if example_pl is ""'),
-  grammar_note: z.string().describe('Short Russian note on gender, aspect or case governance; "" if unremarkable'),
+  grammar_note: z.string().describe('Short POLISH note on gender, aspect or case governance; "" if unremarkable'),
 })
 export type GeneratedCard = z.infer<typeof GeneratedCardSchema>
 
@@ -55,7 +55,7 @@ const SYSTEM = `Ты помогаешь взрослому человеку, к�
 - Никогда не используй английский язык — never use English anywhere in the output.
 - Русский перевод часто неоднозначен: «злобный» может дать złośliwy, wredny или zły. Поэтому для отдельных слов заполняй prompt_hint: часть речи и короткий контекст, чтобы вопрос имел понятный ответ. Для целых предложений prompt_hint оставляй пустым.
 - example_pl — одно короткое естественное предложение. Не выдумывай книжных конструкций.
-- grammar_note заполняй только когда есть что сказать: род существительного, вид глагола и его пара, управление падежом.
+- grammar_note заполняй только когда есть что сказать: род существительного, вид глагола и его пара, управление падежом. Пиши grammar_note ПО-ПОЛЬСКИ — она показывается на обратной стороне карточки, где всё по-польски.
 - Если поле не нужно, верни пустую строку.`
 
 const FORMS_SYSTEM = `Ты делаешь карточку-тренажёр форм для польского языка. prompt_pl — польская лемма и указание, какие формы нужны. answer_pl — компактная таблица форм в Markdown, только по-польски: для глагола — спряжение в настоящем/будущем, форма прошедшего времени по родам, вид и видовая пара; для существительного — склонение в единственном и множественном числе. Никакого английского и никакого русского в answer_pl.`

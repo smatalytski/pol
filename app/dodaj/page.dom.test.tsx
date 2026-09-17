@@ -427,3 +427,33 @@ describe('AddPage chip deletion (spec §4: "swipe to delete", wired up once Task
     await waitFor(() => expect(deleteCalls).toEqual(['/api/captures/c2']))
   })
 })
+
+describe('AddPage layout', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  // One-handed use: on a phone the thumb reaches the bottom of the screen, not
+  // the top, and the chip waterfall grows downward — so a button above the
+  // list drifts further out of reach the longer a session runs.
+  it('puts the record button after the capture list, at the bottom of the screen', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'generated')] }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.holdToRecord)
+    const list = screen.getByRole('list')
+    expect(list.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+})

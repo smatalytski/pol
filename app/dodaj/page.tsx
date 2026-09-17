@@ -162,23 +162,37 @@ export default function AddPage() {
   ].sort((a, b) => chipCreatedAt(b) - chipCreatedAt(a))
 
   return (
-    <div className="flex flex-col items-center gap-6">
-      <button
-        onPointerDown={() => { navigator.vibrate?.(10); start() }}
-        onPointerUp={stop}
-        onPointerCancel={stop}
-        onContextMenu={(e) => e.preventDefault()}
-        className={`h-40 w-40 select-none rounded-full text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
-        style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
-      >
-        {t.holdToRecord}
-      </button>
-
+    <div className="flex flex-col">
       <ul className="w-full">
         {chips.map((item) => (
           <CaptureChip key={chipKey(item)} item={item} onRetry={retry} onDelete={deleteChip} />
         ))}
       </ul>
+
+      {/* One-handed use: a thumb reaches the bottom of a phone screen, not the
+          top, and this list grows downward — so a button above it drifts
+          further out of reach the longer a session runs. Sticky rather than
+          fixed, so it sits below a short list instead of floating over it, and
+          stays put once the list is long enough to scroll. The inset padding
+          keeps it clear of the home indicator / gesture bar, and the opaque
+          background stops chips showing through as they scroll underneath.
+          Nav is at the top of the shell (components/Nav.tsx), so nothing
+          collides down here. */}
+      <div
+        className="sticky bottom-0 flex justify-center bg-background pt-4"
+        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+      >
+        <button
+          onPointerDown={() => { navigator.vibrate?.(10); start() }}
+          onPointerUp={stop}
+          onPointerCancel={stop}
+          onContextMenu={(e) => e.preventDefault()}
+          className={`h-40 w-40 select-none rounded-full text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
+          style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
+        >
+          {t.holdToRecord}
+        </button>
+      </div>
     </div>
   )
 }
