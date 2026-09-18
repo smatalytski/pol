@@ -10,7 +10,8 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { DELETE } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { captures } = await import('@/lib/db/schema')
+const { captures, cards } = await import('@/lib/db/schema')
+const { createCard } = await import('@/lib/cards/service')
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -38,6 +39,7 @@ function del(id: string) {
 
 beforeEach(() => {
   db.delete(captures).run()
+  db.delete(cards).run()
 })
 
 describe('DELETE /api/captures/:id', () => {
@@ -55,6 +57,24 @@ describe('DELETE /api/captures/:id', () => {
     expect(res.status).toBe(200)
     expect(db.select().from(captures).where(eq(captures.id, 'cap-1')).get()).toBeUndefined()
     expect(db.select().from(captures).where(eq(captures.id, 'cap-2')).get()).toBeDefined()
+  })
+
+  // Spec §8: only a recording with no card is rejected here. One that became
+  // a card is part of that card's history (its audio is what re-recognition
+  // reads), and a card is deleted from the card screen instead.
+  it('refuses a recording that has a card, with 409, and keeps it', async () => {
+    const { cardId } = createCard(
+      db,
+      {
+        type: 'ru_to_pl', promptText: 'кот', promptHint: null, answerPl: 'kot', examplePl: null, exampleRu: null,
+        grammarNote: null, wordKind: null, formsJson: null, status: 'ready',
+      },
+      NOW,
+    )
+    seedCapture({ id: 'cap-1', status: 'generated', cardId, transcript: 'kot' })
+    const res = await del('cap-1')
+    expect(res.status).toBe(409)
+    expect(db.select().from(captures).where(eq(captures.id, 'cap-1')).get()).toBeDefined()
   })
 
   it('is a no-op, not a 404, on an unknown id', async () => {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { captures } from '@/lib/db/schema'
 
@@ -18,9 +18,21 @@ import { captures } from '@/lib/db/schema'
  * does not add one.
  * A no-op (200) on an unknown id, like the cards DELETE route, since deleting
  * something already gone is not an error.
+ *
+ * A recording that has a card is refused with 409 (spec 2026-09-18-generation-
+ * queue §8: only a recording with no card is rejected here). It is that
+ * card's history — its audio is what re-recognition reads — and the card is
+ * deleted from the card screen instead. A queued recording has no card yet,
+ * so it can be deleted, and its job goes with it (ON DELETE CASCADE).
  */
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  db.delete(captures).where(eq(captures.id, id)).run()
+  const deleted = db
+    .delete(captures)
+    .where(and(eq(captures.id, id), isNull(captures.cardId)))
+    .run()
+  if (deleted.changes === 0 && db.select({ id: captures.id }).from(captures).where(eq(captures.id, id)).get()) {
+    return NextResponse.json({ error: 'recording has a card' }, { status: 409 })
+  }
   return NextResponse.json({ ok: true })
 }
