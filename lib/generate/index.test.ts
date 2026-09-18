@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import {
   GeneratedCardSchema,
   GenerationError,
@@ -14,6 +15,9 @@ const FULL = {
   example_pl: 'Zrobił to ze złośliwości.',
   example_ru: 'Он сделал это из злобы.',
   grammar_note: '',
+  kind: 'przymiotnik' as const,
+  forms_basic: [{ label: 'przysłówek', value: 'złośliwie' }],
+  forms_extended: [],
 }
 
 const ok = (payload: unknown) => vi.fn().mockResolvedValue({ text: JSON.stringify(payload) })
@@ -21,17 +25,16 @@ const make = (generate: ReturnType<typeof ok>, model = 'gemini-pro-test') =>
   geminiGenerator({ generate: generate as never, model })
 
 describe('responseSchemaFor', () => {
-  it('derives a required-string schema from the Zod schema, so the two cannot drift', () => {
+  it('derives every field from the Zod schema, all required, so the two cannot drift', () => {
     const schema = responseSchemaFor(GeneratedCardSchema) as {
       type: string
-      properties: Record<string, { type: string; description?: string }>
+      properties: Record<string, { type: string }>
       required: string[]
     }
     const keys = Object.keys(GeneratedCardSchema.shape)
     expect(schema.type).toBe('OBJECT')
     expect(Object.keys(schema.properties)).toEqual(keys)
     expect(schema.required).toEqual(keys)
-    expect(Object.values(schema.properties).every((p) => p.type === 'STRING')).toBe(true)
   })
 
   it('carries the Zod field descriptions through, since they are the model instructions', () => {
@@ -39,6 +42,40 @@ describe('responseSchemaFor', () => {
       properties: Record<string, { description?: string }>
     }
     expect(schema.properties.answer_pl.description).toMatch(/diacritic/i)
+  })
+
+  // The enum is what makes the model's classification a fact rather than
+  // prose: Gemini cannot return "rzeczownik (m.)" against it.
+  it('emits kind as a string enum of exactly the six kinds', () => {
+    const schema = responseSchemaFor(GeneratedCardSchema) as unknown as {
+      properties: Record<string, { type: string; enum?: string[] }>
+    }
+    expect(schema.properties.kind.type).toBe('STRING')
+    expect(schema.properties.kind.enum).toEqual([
+      'fraza', 'rzeczownik', 'czasownik', 'przymiotnik', 'przyslowek', 'inne',
+    ])
+  })
+
+  it('emits each forms list as an array of required {label, value} string objects', () => {
+    const schema = responseSchemaFor(GeneratedCardSchema) as unknown as {
+      properties: Record<string, { type: string; items?: { type: string; properties: Record<string, { type: string }>; required: string[] } }>
+    }
+    for (const key of ['forms_basic', 'forms_extended']) {
+      const field = schema.properties[key]
+      expect(field.type).toBe('ARRAY')
+      expect(field.items?.type).toBe('OBJECT')
+      expect(field.items?.properties).toEqual({
+        label: expect.objectContaining({ type: 'STRING' }),
+        value: expect.objectContaining({ type: 'STRING' }),
+      })
+      expect(field.items?.required).toEqual(['label', 'value'])
+    }
+  })
+
+  // The function's contract since it was written: a field shape it does not
+  // know must fail loudly, not be silently sent to Gemini as a string.
+  it('throws on a field shape it does not support', () => {
+    expect(() => responseSchemaFor(z.object({ n: z.number() }) as never)).toThrow(/unsupported/)
   })
 })
 
@@ -51,7 +88,21 @@ describe('toCardFields', () => {
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
+      wordKind: 'przymiotnik',
+      formsJson: JSON.stringify({ basic: [{ label: 'przysłówek', value: 'złośliwie' }], extended: [] }),
     })
+  })
+
+  // The kind decides, not whatever the model put in the arrays: a phrase
+  // never carries forms, so a card cannot claim forms its kind has none of.
+  it('stores no forms for a phrase even if the model returned some', () => {
+    const f = toCardFields({ ...FULL, kind: 'fraza', forms_basic: [{ label: 'x', value: 'y' }] })
+    expect(f.wordKind).toBe('fraza')
+    expect(f.formsJson).toBeNull()
+  })
+
+  it('stores no forms for a word of a kind with forms when both lists came back empty', () => {
+    expect(toCardFields({ ...FULL, kind: 'rzeczownik', forms_basic: [], forms_extended: [] }).formsJson).toBeNull()
   })
 
   // C5 (review finding): promptText used to pass g.prompt_ru through raw,

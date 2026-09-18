@@ -116,10 +116,14 @@ async function checkGemini(): Promise<Result> {
     if (!card.prompt_ru.trim()) throw new Error('prompt_ru is empty')
     if (!CYRILLIC.test(card.prompt_ru)) throw new Error(`prompt_ru has no Cyrillic: "${card.prompt_ru}"`)
     if (!POLISH_LATIN.test(card.answer_pl)) throw new Error(`answer_pl has no Latin script: "${card.answer_pl}"`)
+    // "kot" is an unambiguous noun: the kind and at least one basic form must
+    // come back, or the forms schema is not reaching the model.
+    if (card.kind !== 'rzeczownik') throw new Error(`kind for "kot" was "${card.kind}", not rzeczownik`)
+    if (card.forms_basic.length === 0) throw new Error('forms_basic came back empty for "kot"')
     return {
       name,
       ok: true,
-      detail: `prompt_ru="${card.prompt_ru}" answer_pl="${card.answer_pl}"`,
+      detail: `prompt_ru="${card.prompt_ru}" answer_pl="${card.answer_pl}" kind=${card.kind} basic=${JSON.stringify(card.forms_basic)}`,
     }
   } catch (err) {
     return { name, ok: false, detail: (err as Error).message }
