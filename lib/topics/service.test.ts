@@ -5,7 +5,19 @@ import { captures, cards, generationJobs, suggestions, topics } from '../db/sche
 import { createCard, deleteCard } from '../cards/service'
 import type { Suggestion, Suggester } from '../generate'
 import { enqueueJob } from '../queue/jobs'
-import { acceptRound, activeSuggestJob, enqueueSuggest, latestRound, parseRoundJob, runSuggest } from './service'
+import {
+  acceptRound,
+  activeSuggestJob,
+  createTopic,
+  enqueueSuggest,
+  latestRound,
+  listTopics,
+  parseRoundJob,
+  retrySuggest,
+  runSuggest,
+  topicView,
+  updateTopic,
+} from './service'
 
 type Db = ReturnType<typeof createTestDb>['db']
 const NOW = new Date('2026-09-18T10:00:00')
@@ -211,5 +223,103 @@ describe('acceptRound', () => {
   it('answers null for an unknown topic', () => {
     const { db } = createTestDb()
     expect(acceptRound(db, 'nope', 1, [], null, NOW)).toBeNull()
+  })
+})
+
+describe('createTopic', () => {
+  it('stores the trimmed context and queues round 1', () => {
+    const { db } = createTestDb()
+    const id = createTopic(db, { context: '  u mechanika  ', count: 5, mix: 'slowa' }, NOW)
+    expect(db.select().from(topics).get()).toMatchObject({ id, name: null, context: 'u mechanika', suspendedAt: null })
+    expect(parseRoundJob(activeSuggestJob(db, id)!.paramsJson)).toEqual({ round: 1, count: 5, mix: 'slowa' })
+  })
+})
+
+describe('topicView', () => {
+  it('is searching while a round is in flight', () => {
+    const { db } = createTestDb()
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    expect(topicView(db, id)).toMatchObject({ state: 'searching', round: 0, items: [] })
+  })
+
+  it('is failed, with the error, when the latest round gave up', () => {
+    const { db } = createTestDb()
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    db.update(generationJobs).set({ status: 'failed', lastError: 'unusable payload' }).run()
+    expect(topicView(db, id)).toMatchObject({ state: 'failed', error: 'unusable payload' })
+  })
+
+  it('is ready with the latest round’s proposed items, then idle once they are decided', () => {
+    const { db } = createTestDb()
+    topic(db)
+    suggestion(db, 'katar', { round: 1, status: 'accepted' })
+    suggestion(db, 'gorączka', { round: 2 })
+    expect(topicView(db, 't1')).toMatchObject({
+      state: 'ready', round: 2, items: [{ id: 's-gorączka', answerPl: 'gorączka', glossRu: 'перевод', kind: 'slowo' }],
+    })
+    acceptRound(db, 't1', 2, [], null, NOW)
+    expect(topicView(db, 't1')).toMatchObject({ state: 'idle', round: 2, items: [] })
+  })
+
+  it('lists the topic’s live cards and its pending items, and nothing else', () => {
+    const { db } = createTestDb()
+    topic(db)
+    topic(db, 't2')
+    const mine = card(db, 'katar')
+    db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, mine)).run()
+    const gone = card(db, 'kaszel')
+    db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, gone)).run()
+    deleteCard(db, gone, NOW)
+    card(db, 'kot')
+    suggestion(db, 'gorączka')
+    acceptRound(db, 't1', 1, [], null, NOW)
+    const v = topicView(db, 't1')!
+    expect(v.cards.map((c) => c.answerPl)).toEqual(['katar'])
+    expect(v.pending).toEqual([{ id: expect.any(String), transcript: 'gorączka', status: 'queued' }])
+  })
+
+  it('is null for an unknown topic', () => {
+    const { db } = createTestDb()
+    expect(topicView(db, 'nope')).toBeNull()
+  })
+})
+
+describe('listTopics', () => {
+  it('counts live cards and pending items per topic, newest topic first', () => {
+    const { db } = createTestDb()
+    topic(db, 't1', { createdAt: 1 })
+    topic(db, 't2', { createdAt: 2 })
+    const k = card(db, 'katar')
+    db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, k)).run()
+    suggestion(db, 'gorączka')
+    acceptRound(db, 't1', 1, [], null, NOW)
+    expect(listTopics(db).map((t) => [t.id, t.cardCount, t.pendingCount])).toEqual([
+      ['t2', 0, 0],
+      ['t1', 1, 1],
+    ])
+  })
+})
+
+describe('updateTopic', () => {
+  it('renames, edits the context and switches the topic off and on', () => {
+    const { db } = createTestDb()
+    topic(db)
+    expect(updateTopic(db, 't1', { name: 'U lekarza', context: 'nowy kontekst', suspendedAt: 5 })).toMatchObject({
+      name: 'U lekarza', context: 'nowy kontekst', suspendedAt: 5,
+    })
+    expect(updateTopic(db, 't1', { suspendedAt: null })!.suspendedAt).toBeNull()
+    expect(updateTopic(db, 'nope', { name: 'x' })).toBeNull()
+  })
+})
+
+describe('retrySuggest', () => {
+  it('re-queues a failed round with the same params, and only then', () => {
+    const { db } = createTestDb()
+    const id = createTopic(db, { context: 'x', count: 5, mix: 'frazy' }, NOW)
+    expect(retrySuggest(db, id, NOW)).toBeNull()
+    db.update(generationJobs).set({ status: 'failed' }).run()
+    const again = retrySuggest(db, id, NOW)!
+    expect(parseRoundJob(jobRow(db, again).paramsJson)).toEqual({ round: 1, count: 5, mix: 'frazy' })
+    expect(retrySuggest(db, id, NOW)).toBeNull()
   })
 })

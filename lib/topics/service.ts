@@ -1,12 +1,14 @@
-import { and, eq, inArray, isNull, max, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNotNull, isNull, max, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { Db } from '../db/client'
 import { captures, cards, generationJobs, suggestions, topics } from '../db/schema'
 import { answerKey } from '../cards/answer-key'
+import type { CardRow } from '../cards/service'
 import type { Suggester } from '../generate'
 import { enqueueJob, type JobRow } from '../queue/jobs'
 import { MIXES, mixTarget, pickRound, requestSize, type RoundParams } from './rounds'
+import type { SuggestionKind } from './rounds'
 
 /**
  * Topics and their rounds (spec 2026-09-18-topic-generation). Everything here
@@ -179,4 +181,129 @@ export function acceptRound(
     }
     return { accepted, nextJobId: next ? enqueueSuggest(t, topicId, next, now) : null }
   })
+}
+
+export function createTopic(db: Db, input: { context: string } & RoundParams, now: Date): string {
+  const id = randomUUID()
+  db.transaction((tx) => {
+    tx.insert(topics).values({ id, name: null, context: input.context.trim(), suspendedAt: null, createdAt: now.getTime() }).run()
+    enqueueSuggest(tx as unknown as Db, id, { count: input.count, mix: input.mix }, now)
+  })
+  return id
+}
+
+const PENDING = ['queued', 'generating'] as const
+
+export type TopicListRow = TopicRow & { cardCount: number; pendingCount: number }
+
+export function listTopics(db: Db): TopicListRow[] {
+  const cardCounts = new Map(
+    db
+      .select({ topicId: cards.topicId, n: count() })
+      .from(cards)
+      .where(and(isNotNull(cards.topicId), isNull(cards.deletedAt)))
+      .groupBy(cards.topicId)
+      .all()
+      .map((r) => [r.topicId!, r.n]),
+  )
+  const pendingCounts = new Map(
+    db
+      .select({ topicId: captures.topicId, n: count() })
+      .from(captures)
+      .where(and(isNotNull(captures.topicId), inArray(captures.status, PENDING)))
+      .groupBy(captures.topicId)
+      .all()
+      .map((r) => [r.topicId!, r.n]),
+  )
+  return db
+    .select()
+    .from(topics)
+    .orderBy(desc(topics.createdAt))
+    .all()
+    .map((t) => ({ ...t, cardCount: cardCounts.get(t.id) ?? 0, pendingCount: pendingCounts.get(t.id) ?? 0 }))
+}
+
+function latestSuggestJob(db: Db, topicId: string): JobRow | undefined {
+  return db
+    .select()
+    .from(generationJobs)
+    .where(and(eq(generationJobs.kind, 'suggest'), eq(generationJobs.topicId, topicId)))
+    .orderBy(desc(generationJobs.createdAt), desc(sql`rowid`))
+    .get()
+}
+
+export type RoundState = 'searching' | 'failed' | 'ready' | 'idle'
+
+export type TopicView = {
+  topic: TopicRow
+  state: RoundState
+  error: string | null
+  /** The highest round with items; 0 before the first arrives. */
+  round: number
+  /** That round's still-undecided items. */
+  items: { id: string; answerPl: string; glossRu: string; kind: SuggestionKind }[]
+  cards: CardRow[]
+  pending: { id: string; transcript: string | null; status: 'queued' | 'generating' }[]
+}
+
+/** Everything the topic page shows; its round state is derived, never stored (§4.4). */
+export function topicView(db: Db, id: string): TopicView | null {
+  const topic = db.select().from(topics).where(eq(topics.id, id)).get()
+  if (!topic) return null
+  const round = latestRound(db, id)
+  const items = db
+    .select({ id: suggestions.id, answerPl: suggestions.answerPl, glossRu: suggestions.glossRu, kind: suggestions.kind })
+    .from(suggestions)
+    .where(and(eq(suggestions.topicId, id), eq(suggestions.round, round), eq(suggestions.status, 'proposed')))
+    .orderBy(suggestions.createdAt, sql`rowid`)
+    .all()
+  const latest = latestSuggestJob(db, id)
+  const state: RoundState = activeSuggestJob(db, id)
+    ? 'searching'
+    : latest?.status === 'failed'
+      ? 'failed'
+      : items.length > 0
+        ? 'ready'
+        : 'idle'
+  return {
+    topic,
+    state,
+    error: state === 'failed' ? latest!.lastError : null,
+    round,
+    items,
+    cards: db
+      .select()
+      .from(cards)
+      .where(and(eq(cards.topicId, id), isNull(cards.deletedAt)))
+      .orderBy(desc(cards.createdAt))
+      .all(),
+    pending: db
+      .select({ id: captures.id, transcript: captures.transcript, status: captures.status })
+      .from(captures)
+      .where(and(eq(captures.topicId, id), inArray(captures.status, PENDING)))
+      .orderBy(desc(captures.createdAt))
+      .all() as TopicView['pending'],
+  }
+}
+
+export function updateTopic(
+  db: Db,
+  id: string,
+  patch: { name?: string; context?: string; suspendedAt?: number | null },
+): TopicRow | null {
+  if (!db.select({ id: topics.id }).from(topics).where(eq(topics.id, id)).get()) return null
+  const set: Partial<TopicRow> = {}
+  if (patch.name !== undefined) set.name = patch.name.trim()
+  if (patch.context !== undefined) set.context = patch.context.trim()
+  if (patch.suspendedAt !== undefined) set.suspendedAt = patch.suspendedAt
+  if (Object.keys(set).length > 0) db.update(topics).set(set).where(eq(topics.id, id)).run()
+  return db.select().from(topics).where(eq(topics.id, id)).get()!
+}
+
+/** `spróbuj ponownie`: the failed round again, with its own count and mix. */
+export function retrySuggest(db: Db, topicId: string, now: Date): string | null {
+  const latest = latestSuggestJob(db, topicId)
+  if (latest?.status !== 'failed') return null
+  const { count: n, mix } = parseRoundJob(latest.paramsJson)
+  return enqueueSuggest(db, topicId, { count: n, mix }, now)
 }
