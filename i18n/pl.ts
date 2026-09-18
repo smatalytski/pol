@@ -56,6 +56,7 @@ export const t = {
   typeDuplicate: 'taka karta już istnieje',
   saveFailed: 'nie udało się zapisać zmian',
   chipSaveFailed: 'nie udało się zapisać zmian',
+  deleteFailed: 'nie udało się usunąć',
 
   newPerDay: 'Nowe fiszki na dzień',
   targetRetention: 'Docelowa skuteczność',

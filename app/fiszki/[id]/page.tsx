@@ -29,6 +29,10 @@ export default function CardDetailPage() {
   // hand-typed card has no audio behind it.
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [langError, setLangError] = useState(false)
+  // Re-recognition is Speech-to-Text plus a Gemini call, and ~30 s is normal:
+  // without a visible pending state the user taps again and starts a second
+  // one on the same capture.
+  const [langPending, setLangPending] = useState(false)
   const [typeError, setTypeError] = useState(false)
   const [typeDuplicate, setTypeDuplicate] = useState(false)
 
@@ -107,19 +111,26 @@ export default function CardDetailPage() {
   // `res.ok` alone would show nothing when re-recognition fails.
   async function relanguage(lang: DictationLang) {
     if (!captureId) return
-    const res = await fetch(`/api/captures/${captureId}/jezyk`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ lang }),
-    })
-    if (!res.ok) {
+    setLangPending(true)
+    try {
+      const res = await fetch(`/api/captures/${captureId}/jezyk`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ lang }),
+      })
+      if (!res.ok) {
+        setLangError(true)
+        return
+      }
+      const body = (await res.json()) as { duplicateOf: string | null; error: string | null }
+      setLangError(body.error !== null)
+      setRegenDuplicate(body.duplicateOf !== null)
+      await load()
+    } catch {
       setLangError(true)
-      return
+    } finally {
+      setLangPending(false)
     }
-    const body = (await res.json()) as { duplicateOf: string | null; error: string | null }
-    setLangError(body.error !== null)
-    setRegenDuplicate(body.duplicateOf !== null)
-    await load()
   }
 
   // Deleting the card this screen is showing would otherwise leave it
@@ -219,10 +230,16 @@ export default function CardDetailPage() {
             ['pl', t.asPolish],
             ['ru', t.asRussian],
           ] as const).map(([lang, label]) => (
-            <button key={lang} onClick={() => void relanguage(lang)} className="underline">
+            <button
+              key={lang}
+              onClick={() => void relanguage(lang)}
+              disabled={langPending}
+              className="underline disabled:text-neutral-400"
+            >
               {label}
             </button>
           ))}
+          {langPending && <span className="text-neutral-500">{t.transcribing}</span>}
         </div>
       )}
 

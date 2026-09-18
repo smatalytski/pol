@@ -9,17 +9,33 @@ import type { DictationLang } from '@/lib/transcribe'
 import type { CardType } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
+type Notice = 'typeFailed' | 'typeDuplicate' | 'languageFailed' | 'deleteFailed'
+
+const NOTICE_TEXT: Record<Notice, string> = {
+  typeFailed: t.typeFailed,
+  typeDuplicate: t.typeDuplicate,
+  languageFailed: t.languageFailed,
+  deleteFailed: t.deleteFailed,
+}
+
 export default function AddPage() {
   const [captures, setCaptures] = useState<CaptureView[]>([])
   const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([])
   const [micDenied, setMicDenied] = useState(false)
-  const [typeNotice, setTypeNotice] = useState<'failed' | 'duplicate' | null>(null)
+  // One notice line for the chip controls' outcomes. A failed or refused
+  // request would otherwise look exactly like a dead button.
+  const [notice, setNotice] = useState<Notice | null>(null)
+  // Captures whose re-recognition or type switch is in flight. Re-recognition
+  // is Speech-to-Text plus a Gemini call, and ~30 s is normal, so without this
+  // the user taps again and starts a second one on the same capture.
+  const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
 
-  // Shared by every async chain below (drain, poll) that eventually calls a
-  // setter: guards against updating state after the screen has been
-  // navigated away from, rather than each chain inventing its own flag.
+  // Shared by every async chain below (drain, poll, the chip actions) that
+  // eventually calls a setter: guards against updating state after the screen
+  // has been navigated away from, rather than each chain inventing its own
+  // flag.
   const mountedRef = useRef(true)
   useEffect(() => {
     return () => {
@@ -132,50 +148,84 @@ export default function AddPage() {
     void fetch(`/api/captures/${id}/retry`, { method: 'POST' })
   }, [])
 
+  // A failed refresh after a chip action is not reported: the action's own
+  // outcome already was, and the chip is only as stale as it was before.
+  const refresh = useCallback(() => fetchCaptures().catch(() => {}), [fetchCaptures])
+
+  // Runs one slow chip action with the chip marked pending until the list has
+  // been refreshed, so its controls come back only once they show the result.
+  const whilePending = useCallback(
+    async (captureId: string, action: () => Promise<void>) => {
+      setPending((p) => new Set(p).add(captureId))
+      await action()
+      await refresh()
+      if (mountedRef.current) {
+        setPending((p) => {
+          const next = new Set(p)
+          next.delete(captureId)
+          return next
+        })
+      }
+    },
+    [refresh],
+  )
+
   // Recognition is Polish by default, because that is what nearly all
   // dictation is and because a two-language recognizer demonstrably swallows
   // Russian (spoken "склеп" came back "sklep"). This re-runs recognition on
   // the stored audio in the language the user names, then refreshes so the
-  // corrected transcript — or the error, if a provider refused — appears on
-  // the chip without a reload.
+  // corrected transcript appears on the chip without a reload. A provider
+  // failure comes back as a 200 with the error recorded on the capture, which
+  // the refreshed chip shows; a refused or unreachable request gets the
+  // notice instead.
   const relanguage = useCallback(
     (id: string, lang: DictationLang) => {
-      void fetch(`/api/captures/${id}/jezyk`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lang }),
-      }).then(() => fetchCaptures())
+      void whilePending(id, async () => {
+        try {
+          const res = await fetch(`/api/captures/${id}/jezyk`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ lang }),
+          })
+          if (mountedRef.current) setNotice(res.ok ? null : 'languageFailed')
+        } catch {
+          if (mountedRef.current) setNotice('languageFailed')
+        }
+      })
     },
-    [fetchCaptures],
+    [whilePending],
   )
 
   // Every dictation becomes ru_to_pl; this flips one to drilling the forms of
   // a word already known (spec 2026-09-18 §2), then refreshes so the chip
   // shows the new type without a reload. A 400 (e.g. a noun whose forms_json
-  // turned out empty) and a 200 carrying `duplicateOf` (a pl_to_pl card for
-  // this word already exists, so nothing changed) would otherwise both look
-  // like a dead button — the notice says which one happened. `mountedRef`
-  // guards this setter the same way every other async setter on this page
-  // does, since the fetch can resolve after the screen was navigated away
-  // from.
+  // turned out empty), an unreachable server, and a 200 carrying `duplicateOf`
+  // (a pl_to_pl card for this word already exists, so nothing changed) would
+  // otherwise all look like a dead button — the notice says which one
+  // happened. Like every async setter on this page, these are behind
+  // `mountedRef`, since the fetch can resolve after the screen was navigated
+  // away from.
   const setType = useCallback(
-    (cardId: string, type: CardType) => {
-      void fetch(`/api/cards/${cardId}/typ`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ type }),
-      })
-        .then(async (res) => {
+    (captureId: string, cardId: string, type: CardType) => {
+      void whilePending(captureId, async () => {
+        try {
+          const res = await fetch(`/api/cards/${cardId}/typ`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type }),
+          })
           if (!res.ok) {
-            if (mountedRef.current) setTypeNotice('failed')
+            if (mountedRef.current) setNotice('typeFailed')
             return
           }
           const { duplicateOf } = (await res.json()) as { duplicateOf: string | null }
-          if (mountedRef.current) setTypeNotice(duplicateOf ? 'duplicate' : null)
-        })
-        .then(() => fetchCaptures())
+          if (mountedRef.current) setNotice(duplicateOf ? 'typeDuplicate' : null)
+        } catch {
+          if (mountedRef.current) setNotice('typeFailed')
+        }
+      })
     },
-    [fetchCaptures],
+    [whilePending],
   )
 
   // Spec §4's "swipe to delete", wired once Task 17 added the routes it
@@ -185,15 +235,24 @@ export default function AddPage() {
   // ever sees a `capture` item: one with a card is soft-deleted (DELETE
   // /api/cards/:id), one without a card yet (still uploaded/transcribed/
   // failed) has its capture row removed instead (DELETE /api/captures/:id) —
-  // there is no card to delete.
+  // there is no card to delete. A refused or unreachable delete leaves the
+  // chip on screen, so the notice says the delete did not happen.
   const deleteChip = useCallback(
     (item: ChipItem) => {
       if (item.kind === 'outbox') return
       const { capture } = item
       const url = capture.cardId ? `/api/cards/${capture.cardId}` : `/api/captures/${capture.id}`
-      void fetch(url, { method: 'DELETE' }).then(() => fetchCaptures())
+      void (async () => {
+        try {
+          const res = await fetch(url, { method: 'DELETE' })
+          if (mountedRef.current) setNotice(res.ok ? null : 'deleteFailed')
+        } catch {
+          if (mountedRef.current) setNotice('deleteFailed')
+        }
+        await refresh()
+      })()
     },
-    [fetchCaptures],
+    [refresh],
   )
 
   // Without a microphone this screen has no function at all, so say so plainly
@@ -213,8 +272,11 @@ export default function AddPage() {
 
   return (
     <div className="flex flex-col">
-      {typeNotice === 'failed' && <p className="p-3 text-sm text-red-600">{t.typeFailed}</p>}
-      {typeNotice === 'duplicate' && <p className="p-3 text-sm text-amber-600">{t.typeDuplicate}</p>}
+      {notice && (
+        <p className={`p-3 text-sm ${notice === 'typeDuplicate' ? 'text-amber-600' : 'text-red-600'}`}>
+          {NOTICE_TEXT[notice]}
+        </p>
+      )}
       {/* Bottom padding reserves the height of the fixed bar below, so the
           last chip can still be read and swiped instead of sitting under the
           button. */}
@@ -226,7 +288,8 @@ export default function AddPage() {
             onRetry={retry}
             onDelete={deleteChip}
             onRelanguage={relanguage}
-            onSetType={setType}
+            onSetType={(cardId, type) => item.kind === 'capture' && setType(item.capture.id, cardId, type)}
+            pending={item.kind === 'capture' && pending.has(item.capture.id)}
           />
         ))}
       </ul>

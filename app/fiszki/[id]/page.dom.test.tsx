@@ -383,6 +383,42 @@ describe('CardDetailPage', () => {
     expect(calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(1)
   })
 
+  // Ruling 14: re-recognition is Speech-to-Text plus a ~30 s Gemini call.
+  // Without a visible pending state the user taps again and starts a second
+  // one on the same capture.
+  it('disables the language controls and shows progress while re-recognition runs', async () => {
+    let finish!: (v: unknown) => void
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if ((init?.method ?? 'GET') === 'GET') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ card: cardRow(), captureId: 'cap-1' }),
+          }) as unknown as Promise<Response>
+        }
+        return new Promise<unknown>((resolve) => {
+          finish = resolve
+        }) as Promise<Response>
+      }),
+    )
+    render(<CardPage />)
+    const ru = (await screen.findByText(t.asRussian)) as HTMLButtonElement
+    const pl = screen.getByText(t.asPolish) as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(ru)
+    })
+    expect(ru.disabled).toBe(true)
+    expect(pl.disabled).toBe(true)
+    expect(screen.getByText(t.transcribing)).toBeTruthy()
+
+    await act(async () => {
+      finish({ ok: true, json: () => Promise.resolve({ cardId: 'c1', duplicateOf: null, error: null }) })
+    })
+    await vi.waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
+    expect((screen.getByText(t.asRussian) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   // Re-recognition calls Speech-to-Text and Gemini, and the route answers 200
   // with the bad news in `error` rather than failing the request — so a page
   // that only checks res.ok would show nothing at all.

@@ -61,12 +61,20 @@ export function CaptureChip({
   onDelete,
   onRelanguage,
   onSetType,
+  pending = false,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
   onRelanguage: (id: string, lang: DictationLang) => void
   onDelete: (item: ChipItem) => void
   onSetType: (cardId: string, type: CardType) => void
+  /**
+   * A re-recognition or type switch for this capture is in flight (the page
+   * owns that state). Re-recognition is Speech-to-Text plus a Gemini call,
+   * ~30 s is normal, so the controls that would start another one are
+   * disabled and the chip says it is working.
+   */
+  pending?: boolean
 }) {
   // Hooks must run unconditionally, before the outbox early return below —
   // an outbox chip never uses this state, but React doesn't allow a
@@ -225,11 +233,13 @@ export function CaptureChip({
               onClick={() => onRelanguage(capture.id, lang)}
               onPointerDown={(e) => e.stopPropagation()}
               onPointerUp={(e) => e.stopPropagation()}
-              className="underline"
+              disabled={pending}
+              className="underline disabled:text-neutral-400"
             >
               {label}
             </button>
           ))}
+          {pending && <span className="text-neutral-500">{t.transcribing}</span>}
         </div>
       )}
 
@@ -238,7 +248,11 @@ export function CaptureChip({
           forms to drill (spec 2026-09-18 §7.1). */}
       {capture.cardId && capture.cardType && hasForms(capture.wordKind) && (
         <div className="pl-2">
-          <CardTypeSwitch type={capture.cardType} onChange={(type) => onSetType(capture.cardId!, type)} />
+          <CardTypeSwitch
+            type={capture.cardType}
+            onChange={(type) => onSetType(capture.cardId!, type)}
+            disabled={pending}
+          />
         </div>
       )}
 

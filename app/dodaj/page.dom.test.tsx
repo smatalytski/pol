@@ -660,3 +660,145 @@ describe('AddPage re-recognition', () => {
     expect(await screen.findByText(t.typeDuplicate)).toBeTruthy()
   })
 })
+
+// Ruling 14: a re-recognition is Speech-to-Text plus a Gemini call, and ~30 s
+// is normal. With nothing on screen the user taps again and starts a second
+// retranscribe on the same capture — and a failure used to show nothing at all.
+describe('AddPage slow and failing chip controls', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  const chip = {
+    ...captureRow('cap-1', 'generated'),
+    audioMediaId: 'm1',
+    transcript: 'kot',
+    cardId: 'card-1',
+    cardType: 'ru_to_pl' as const,
+    wordKind: 'rzeczownik' as const,
+  }
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    let reject!: (e: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  /** Lists `chip`; every other request is answered by `write`. */
+  function stubWrites(write: (url: string, init: RequestInit) => Promise<unknown>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [chip] }) })
+        }
+        return write(url, init!)
+      }),
+    )
+  }
+
+  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
+
+  it('disables the chip controls and says so while a re-recognition is in flight', async () => {
+    stubMic()
+    const post = deferred<unknown>()
+    stubWrites(() => post.promise)
+    render(<AddPage />)
+    const control = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+
+    expect(screen.getByText(t.transcribing)).toBeTruthy()
+    expect(button(t.asRussian).disabled).toBe(true)
+    expect(button(t.asPolish).disabled).toBe(true)
+    expect(button(t.typePlPl).disabled).toBe(true)
+
+    await act(async () => {
+      post.resolve({ ok: true, json: () => Promise.resolve({ cardId: 'card-1', duplicateOf: null, error: null }) })
+    })
+    await waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
+    expect(button(t.asRussian).disabled).toBe(false)
+    expect(button(t.typePlPl).disabled).toBe(false)
+  })
+
+  it('disables the chip controls while a type switch is in flight', async () => {
+    stubMic()
+    const post = deferred<unknown>()
+    stubWrites(() => post.promise)
+    render(<AddPage />)
+    const control = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+
+    expect(button(t.asRussian).disabled).toBe(true)
+    expect(button(t.typePlPl).disabled).toBe(true)
+
+    await act(async () => {
+      post.resolve({ ok: true, json: () => Promise.resolve({ card: null, duplicateOf: null }) })
+    })
+    await waitFor(() => expect(button(t.typePlPl).disabled).toBe(false))
+  })
+
+  it('shows a notice when re-recognition is refused', async () => {
+    stubMic()
+    stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
+    render(<AddPage />)
+    const control = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
+    expect(button(t.asRussian).disabled).toBe(false)
+  })
+
+  it('shows a notice when re-recognition never reaches the server', async () => {
+    stubMic()
+    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<AddPage />)
+    const control = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
+  })
+
+  it('shows a notice when a type switch never reaches the server', async () => {
+    stubMic()
+    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<AddPage />)
+    const control = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
+  })
+
+  it('shows a notice when a delete is refused', async () => {
+    stubMic()
+    stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
+    render(<AddPage />)
+    const control = await screen.findByText(t.deleteItem)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.deleteFailed)).toBeTruthy()
+  })
+
+  it('shows a notice when a delete never reaches the server', async () => {
+    stubMic()
+    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<AddPage />)
+    const control = await screen.findByText(t.deleteItem)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.deleteFailed)).toBeTruthy()
+  })
+})
