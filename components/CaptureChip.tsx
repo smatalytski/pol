@@ -91,6 +91,21 @@ export function CaptureChip({
   const [fields, setFields] = useState<EditableFields | null>(null)
   const [saveError, setSaveError] = useState(false)
 
+  // `fields` is a snapshot of the card taken when the form expanded. A
+  // re-recognition (a new transcript) or a type switch rebuilds the card under
+  // it, and pressing zapisz after that would PATCH the old answer and prompt
+  // straight back over the rebuild — so the form closes whenever either
+  // changes, and reopening it loads the card as it now is. Adjusted during
+  // render (React's pattern for resetting state on a prop change), so the
+  // stale form is never painted.
+  const cardVersion =
+    item.kind === 'capture' ? JSON.stringify([item.capture.transcript, item.capture.cardType]) : null
+  const [seenVersion, setSeenVersion] = useState(cardVersion)
+  if (cardVersion !== seenVersion) {
+    setSeenVersion(cardVersion)
+    setFields(null)
+  }
+
   if (item.kind === 'outbox') {
     // No server row exists yet for this recording, so there is no id to
     // replay audio against or to retry — rendering those controls anyway

@@ -389,4 +389,42 @@ describe('CaptureChip', () => {
     swipe(screen.getByText(t.deleteItem), -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
+
+  // Ruling 15: the edit form's fields are a snapshot taken when it expanded.
+  // A re-recognition (new transcript) or a type switch rebuilds the card under
+  // it, and pressing zapisz afterwards would PATCH the old answer and prompt
+  // back over the rebuilt card — so the form closes when either changes.
+  it('closes the edit form when the capture is re-recognised or its type changes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              card: { promptText: 'магазин', promptHint: null, answerPl: 'sklep', examplePl: null, exampleRu: null, grammarNote: null },
+            }),
+        }) as unknown as Promise<Response>,
+      ),
+    )
+    const props = { onRetry: vi.fn(), onDelete: vi.fn(), onRelanguage: vi.fn(), onSetType: vi.fn() }
+    const base = { cardId: 'card-1', transcript: 'sklep', cardType: 'ru_to_pl' as const, wordKind: 'rzeczownik' as const }
+    const { rerender } = render(<CaptureChip item={captureItem(base)} {...props} />)
+    const expand = async () => {
+      await act(async () => {
+        swipe(screen.getByRole('listitem'), 0)
+      })
+      expect(await screen.findByDisplayValue('магазин')).toBeTruthy()
+    }
+
+    await expand()
+    rerender(<CaptureChip item={captureItem({ ...base, transcript: 'склеп' })} {...props} />)
+    expect(screen.queryByDisplayValue('магазин')).toBeNull()
+    expect(screen.queryByRole('button', { name: t.save })).toBeNull()
+
+    await expand()
+    rerender(<CaptureChip item={captureItem({ ...base, transcript: 'склеп', cardType: 'pl_to_pl' })} {...props} />)
+    expect(screen.queryByDisplayValue('магазин')).toBeNull()
+    expect(screen.queryByRole('button', { name: t.save })).toBeNull()
+  })
 })

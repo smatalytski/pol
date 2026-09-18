@@ -89,7 +89,7 @@ describe('GET /api/cards/:id/audio', () => {
   // own localhost, where nothing is listening. The <audio> element failed
   // silently: the clip had already been synthesized server-side, so the only
   // symptom was a play button that did nothing and a TTS bill for audio
-  // nobody could hear. The three tests above assert `status === 307` and never
+  // nobody could hear. The two tests above assert `status === 307` and never
   // look at where the redirect points, which is exactly why this shipped.
   it('Location is origin-independent, not the internal request host', async () => {
     seedCard({ id: 'c9', type: 'ru_to_pl', answerPl: 'złośliwy' })
