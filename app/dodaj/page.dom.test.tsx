@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AddPage from './page'
 import { clearOutbox, enqueue } from '@/lib/capture/outbox'
+import { createStore, set as idbSet } from 'idb-keyval'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import { t } from '@/i18n/pl'
 
@@ -371,7 +372,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
   })
 })
 
-describe('AddPage chip deletion (spec §4: "swipe to delete", wired up once Task 17 added the routes)', () => {
+describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -505,7 +506,7 @@ describe('AddPage layout', () => {
   })
 })
 
-describe('AddPage recording language (Task 4: PL/RU buttons, no on-screen language controls)', () => {
+describe('AddPage recording language (PL/RU buttons, no on-screen language controls)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -539,6 +540,40 @@ describe('AddPage recording language (Task 4: PL/RU buttons, no on-screen langua
     await screen.findByText('kot')
     expect(screen.queryByText(t.asPolish)).toBeNull()
     expect(screen.queryByText(t.asRussian)).toBeNull()
+  })
+
+  // A legacy outbox entry saved before `lang` existed has no `lang` field at
+  // all (not even `undefined` written to it) — written straight into the
+  // same idb-keyval store `enqueue` uses, since `enqueue`'s own type now
+  // requires `lang`. `drain` must still upload it, and spec §2 says a
+  // missing `lang` field means `pl` on the server, so the FormData it sends
+  // must likewise have no `lang` field rather than guessing one client-side.
+  it('uploads a legacy outbox entry with no lang as no lang field', async () => {
+    const legacyStore = createStore('fiszki', 'outbox')
+    await idbSet(
+      'legacy-1',
+      { id: 'legacy-1', bytes: new Uint8Array([1]).buffer, mime: 'audio/webm', createdAt: Date.now(), attempts: 0 },
+      legacyStore,
+    )
+
+    const posts: FormData[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({ json: () => Promise.resolve({ captures: [] }) }) as unknown as Promise<Response>
+        }
+        if (url === '/api/captures' && init?.method === 'POST') {
+          posts.push(init.body as FormData)
+          return Promise.resolve({ ok: true, status: 202, json: () => Promise.resolve({ captures: [], captureId: 'c' }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+
+    render(<AddPage />)
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0].has('lang')).toBe(false)
   })
 })
 

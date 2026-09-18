@@ -185,14 +185,13 @@ export default function AddPage() {
     [whilePending],
   )
 
-  // Spec §4's "swipe to delete", wired once Task 17 added the routes it
-  // needs, and the visible `usuń` button (Task 9: swipe alone was invisible)
-  // calls the same handler. An outbox chip never calls this (CaptureChip
-  // doesn't attach either control to it — see its own comment), so this only
-  // ever sees a `capture` item. An on-screen recording never has a card (it
-  // is uploaded, failed or under review — see `listOnScreen`), so rejecting
-  // it always deletes the recording itself, never a card. A refused or
-  // unreachable delete leaves the chip on screen, so the notice says the
+  // Spec §4's "swipe to delete", and the visible `usuń` button (swipe alone
+  // was invisible) calls the same handler. An outbox chip never calls this
+  // (CaptureChip doesn't attach either control to it — see its own comment),
+  // so this only ever sees a `capture` item. An on-screen recording never has
+  // a card (it is uploaded, failed or under review — see `listOnScreen`), so
+  // rejecting it always deletes the recording itself, never a card. A refused
+  // or unreachable delete leaves the chip on screen, so the notice says the
   // delete did not happen.
   const deleteChip = useCallback(
     (item: ChipItem) => {
@@ -233,7 +232,7 @@ export default function AddPage() {
       {/* Bottom padding reserves the height of the fixed bar below, so the
           last chip can still be read and swiped instead of sitting under the
           button. */}
-      <ul className="w-full pb-52">
+      <ul className="w-full pb-60">
         {chips.map((item) => (
           <CaptureChip
             key={chipKey(item)}
@@ -256,23 +255,26 @@ export default function AddPage() {
           under them — near the top, exactly where it started. Fixed anchors it
           to the viewport whatever the list is doing; `left-0 right-0` plus the
           inner max-w-xl re-centres it, because a fixed element ignores the
-          shell's `mx-auto max-w-xl`. The inset padding keeps it clear of the
+          shell's `mx-auto max-w-xl`. `px-4` keeps the buttons off the screen
+          edges on a narrow phone. The inset padding keeps it clear of the
           home indicator / gesture bar, and the opaque background stops chips
           showing through as they scroll underneath. Nav is at the top of the
           shell (components/Nav.tsx), so nothing collides down here.
 
-          Two buttons, not one with a language toggle (Task 4): the choice has
-          to be made before the hold, since a hold is Polish or Russian, never
-          both — a modal or a separate toggle tap would slow down the exact
-          moment a two-handed toggle-then-hold gesture is trying to avoid. Both
+          Two buttons, not one with a language toggle: the choice has to be
+          made before the hold, since a hold is Polish or Russian, never both
+          — a modal or a separate toggle tap would slow down the exact moment
+          a two-handed toggle-then-hold gesture is trying to avoid. Both
           buttons share one getStream/factory (`pl`/`ru` below) since only one
-          can ever be recording at a time. `flex-wrap` plus the caption's
-          `w-full` puts the caption on its own row above the two buttons
-          without a nested wrapper div — `closest('div')` from either button
-          has to land on this fixed bar itself, not an inner row, for the
-          layout tests to see the right element. */}
+          can ever be recording at a time. This is a single flex container,
+          not a caption plus a nested row for the buttons: `flex-wrap` plus
+          the caption's `w-full` puts the caption on its own row above the
+          two buttons with no wrapper div needed. `gap-x-6` separates the two
+          buttons; `gap-y-2` is the (smaller) gap between the caption's row
+          and the buttons' row, so the bar stays short enough for the list's
+          bottom padding above to cover it. */}
       <div
-        className="fixed bottom-0 left-0 right-0 flex flex-wrap items-center justify-center gap-6 bg-background pt-4"
+        className="fixed bottom-0 left-0 right-0 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 bg-background px-4 pt-4"
         style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
       >
         <p className="w-full text-center text-sm text-neutral-500">{t.holdToRecord}</p>
