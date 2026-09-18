@@ -13,6 +13,7 @@ export default function AddPage() {
   const [captures, setCaptures] = useState<CaptureView[]>([])
   const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([])
   const [micDenied, setMicDenied] = useState(false)
+  const [typeNotice, setTypeNotice] = useState<'failed' | 'duplicate' | null>(null)
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
 
@@ -150,25 +151,41 @@ export default function AddPage() {
 
   // Every dictation becomes ru_to_pl; this flips one to drilling the forms of
   // a word already known (spec 2026-09-18 §2), then refreshes so the chip
-  // shows the new type without a reload.
+  // shows the new type without a reload. A 400 (e.g. a noun whose forms_json
+  // turned out empty) and a 200 carrying `duplicateOf` (a pl_to_pl card for
+  // this word already exists, so nothing changed) would otherwise both look
+  // like a dead button — the notice says which one happened. `mountedRef`
+  // guards this setter the same way every other async setter on this page
+  // does, since the fetch can resolve after the screen was navigated away
+  // from.
   const setType = useCallback(
     (cardId: string, type: CardType) => {
       void fetch(`/api/cards/${cardId}/typ`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ type }),
-      }).then(() => fetchCaptures())
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            if (mountedRef.current) setTypeNotice('failed')
+            return
+          }
+          const { duplicateOf } = (await res.json()) as { duplicateOf: string | null }
+          if (mountedRef.current) setTypeNotice(duplicateOf ? 'duplicate' : null)
+        })
+        .then(() => fetchCaptures())
     },
     [fetchCaptures],
   )
 
   // Spec §4's "swipe to delete", wired once Task 17 added the routes it
-  // needs. An outbox chip never calls this (CaptureChip doesn't attach the
-  // gesture to it — see its own comment), so this only ever sees a `capture`
-  // item: one with a card is soft-deleted (DELETE /api/cards/:id), one
-  // without a card yet (still uploaded/transcribed/failed) has its capture
-  // row removed instead (DELETE /api/captures/:id) — there is no card to
-  // delete.
+  // needs, and the visible `usuń` button (Task 9: swipe alone was invisible)
+  // calls the same handler. An outbox chip never calls this (CaptureChip
+  // doesn't attach either control to it — see its own comment), so this only
+  // ever sees a `capture` item: one with a card is soft-deleted (DELETE
+  // /api/cards/:id), one without a card yet (still uploaded/transcribed/
+  // failed) has its capture row removed instead (DELETE /api/captures/:id) —
+  // there is no card to delete.
   const deleteChip = useCallback(
     (item: ChipItem) => {
       if (item.kind === 'outbox') return
@@ -196,6 +213,8 @@ export default function AddPage() {
 
   return (
     <div className="flex flex-col">
+      {typeNotice === 'failed' && <p className="p-3 text-sm text-red-600">{t.typeFailed}</p>}
+      {typeNotice === 'duplicate' && <p className="p-3 text-sm text-amber-600">{t.typeDuplicate}</p>}
       {/* Bottom padding reserves the height of the fixed bar below, so the
           last chip can still be read and swiped instead of sitting under the
           button. */}

@@ -51,6 +51,8 @@ export const t = {
   typeLabel: 'karta',
   typeRuPl: 'ru→pl',
   typePlPl: 'tylko formy',
+  typeFailed: 'nie udało się zmienić typu karty',
+  typeDuplicate: 'taka karta już istnieje',
   saveFailed: 'nie udało się zapisać zmian',
   chipSaveFailed: 'nie udało się zapisać zmian',
 

@@ -580,4 +580,83 @@ describe('AddPage re-recognition', () => {
     expect(post?.body).toEqual({ type: 'pl_to_pl' })
     expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
   })
+
+  // A 400 — e.g. a noun whose forms_json turned out empty — must not look like
+  // a dead button: the refresh still happens (the chip may have changed for
+  // other reasons), but the failure has to say so.
+  it('shows a failure notice when the type switch is rejected', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (method === 'POST') {
+          return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: 'no forms' }) }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [
+                {
+                  ...captureRow('cap-1', 'generated'),
+                  audioMediaId: 'm1',
+                  transcript: 'kot',
+                  cardId: 'card-1',
+                  cardType: 'ru_to_pl',
+                  wordKind: 'rzeczownik',
+                },
+              ],
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
+  })
+
+  // A 200 carrying `duplicateOf` means a pl_to_pl card for this word already
+  // exists, so this capture's card was NOT switched — that also has to be
+  // said, not left looking like a silent success.
+  it('shows a duplicate notice when a pl_to_pl card for this word already exists', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ card: null, duplicateOf: 'other' }),
+          }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [
+                {
+                  ...captureRow('cap-1', 'generated'),
+                  audioMediaId: 'm1',
+                  transcript: 'kot',
+                  cardId: 'card-1',
+                  cardType: 'ru_to_pl',
+                  wordKind: 'rzeczownik',
+                },
+              ],
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.typeDuplicate)).toBeTruthy()
+  })
 })

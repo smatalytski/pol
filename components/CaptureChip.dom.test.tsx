@@ -377,4 +377,16 @@ describe('CaptureChip', () => {
     swipe(screen.getByText(t.typePlPl), -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
+
+  // The delete button's own onClick already covers "clicking it deletes
+  // exactly the item". This covers the button's pointer-bubbling guard: a
+  // swipe gesture that starts and ends on the button dispatches only
+  // pointerdown/pointerup, no click, so it must not also fall through to the
+  // <li>'s own swipe handler and trigger a second, uncontrolled delete.
+  it('swiping across the delete button does not also trigger the li swipe handler', () => {
+    const onDelete = vi.fn()
+    render(<CaptureChip item={captureItem({ cardId: 'c1' })} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
+    swipe(screen.getByText(t.deleteItem), -100)
+    expect(onDelete).not.toHaveBeenCalled()
+  })
 })
