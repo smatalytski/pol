@@ -353,8 +353,9 @@ ordinary card, so nothing would flag it.
 Latency is worth knowing too: the same calls took 30s, 46s and 2.4s. A
 `gemini-3.8-flash` request that takes half a minute is normal here, and
 intermittent `429 RESOURCE_EXHAUSTED` from it is common enough that two
-consecutive re-recognitions hit it. A 429 leaves the card `needs_input`, which
-`wygeneruj ponownie` repairs.
+consecutive re-recognitions hit it. That is why every Gemini call runs in the
+generation queue (`lib/queue/jobs.ts`): a 429 pauses the queue with backoff and
+the job is retried until it succeeds, instead of failing a request.
 
 ## Not built yet
 

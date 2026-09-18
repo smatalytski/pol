@@ -28,9 +28,10 @@ export default function CardDetailPage() {
   // hand-typed card has no audio behind it.
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [langError, setLangError] = useState(false)
-  // Re-recognition is Speech-to-Text plus a Gemini call, and ~30 s is normal:
-  // without a visible pending state the user taps again and starts a second
-  // one on the same capture.
+  // The re-recognition request runs Speech-to-Text before it answers (the
+  // Gemini half is queued), a round trip of a few seconds: without a visible
+  // pending state the user taps again and starts a second one on the same
+  // capture.
   const [langPending, setLangPending] = useState(false)
   const [typeError, setTypeError] = useState(false)
   const [typeDuplicate, setTypeDuplicate] = useState(false)

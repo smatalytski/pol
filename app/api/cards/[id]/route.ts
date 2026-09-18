@@ -18,11 +18,10 @@ const Patch = z.object({
 })
 
 /**
- * Not in the task brief's literal file list — added because
- * `components/CaptureChip.tsx`'s "tap to expand and edit" needs a way to load
- * a specific card's current fields before editing them, and there was no
- * existing single-card lookup route (`GET /api/cards` only searches/lists).
- * Excludes a soft-deleted card the same way every other listing query does.
+ * One card's current fields, for the card screen (`app/fiszki/[id]/page.tsx`),
+ * which loads them before editing and polls this while a queued job rewrites
+ * the card. `GET /api/cards` only searches and lists. Excludes a soft-deleted
+ * card the same way every other listing query does.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
