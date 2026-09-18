@@ -24,14 +24,14 @@ import { t } from '@/i18n/pl'
  * nothing here tries to eagerly suppress it, since doing so would require
  * correlating the two unrelated id spaces.
  *
- * The chip itself is status-only (Task 8): no audio player, no type switch,
- * no tap-to-edit form. A recording under review offers only usuń, with a bar
- * draining toward approval — a wrong language is not fixed here (Task 4
- * removed re-recognition); it is deleted and recorded again with the
- * matching PL/RU button on /dodaj. A failed recognition offers ponów
- * instead. There is nothing here for a card the recording turned into — an
- * on-screen recording is by definition still uploaded, failed, or under
- * review (see `listOnScreen`).
+ * The chip itself is status-only: no audio player, no type switch, no
+ * tap-to-edit form. A recording under review offers only usuń, with a bar
+ * draining toward approval — a wrong language is not fixed here (re-
+ * recognition is gone); it is deleted and recorded again with the matching
+ * PL/RU button on /dodaj. A failed recognition offers ponów instead. There
+ * is nothing here for a card the recording turned into — an on-screen
+ * recording is by definition still uploaded, failed, or under review (see
+ * `listOnScreen`).
  */
 export type ChipItem =
   | { kind: 'outbox'; id: string; createdAt: number }
@@ -70,7 +70,7 @@ export function CaptureChip({
   const pointerStartX = useRef<number | null>(null)
 
   if (item.kind === 'outbox') {
-    // No server row yet, so nothing to retry, re-recognise or delete.
+    // No server row yet, so there's nothing to retry or delete.
     return (
       <li className="flex items-center gap-3 border-b py-3">
         <p className="flex-1 text-lg text-neutral-500">{t.uploading}</p>

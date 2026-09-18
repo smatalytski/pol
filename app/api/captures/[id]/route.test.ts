@@ -60,8 +60,8 @@ describe('DELETE /api/captures/:id', () => {
   })
 
   // Spec §8: only a recording with no card is rejected here. One that became
-  // a card is part of that card's history (its audio is what re-recognition
-  // reads), and a card is deleted from the card screen instead.
+  // a card is part of that card's history (its audio is kept, per spec §4),
+  // and a card is deleted from the card screen instead.
   it('refuses a recording that has a card, with 409, and keeps it', async () => {
     const { cardId } = createCard(
       db,

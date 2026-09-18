@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server'
 import { getTranscriber, type DictationLang } from '@/lib/transcribe'
 
 /**
- * A dictated topic context, recognised synchronously, as re-recognition is.
- * Nothing is stored: the context is not a card, and the user corrects the
- * text before sending it. Russian by default: a context is usually described
- * in Russian, and Speech-to-Text takes exactly one language (DictationLang).
+ * A dictated topic context, recognised synchronously — the request waits on
+ * the transcript and returns it directly. Nothing is stored: the context is
+ * not a card, and the user corrects the text before sending it. Russian by
+ * default: a context is usually described in Russian, and Speech-to-Text
+ * takes exactly one language (DictationLang).
  */
 export async function POST(req: Request) {
   const form = await req.formData()

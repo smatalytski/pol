@@ -21,9 +21,10 @@ import { captures } from '@/lib/db/schema'
  *
  * A recording that has a card is refused with 409 (spec 2026-09-18-generation-
  * queue §8: only a recording with no card is rejected here). It is that
- * card's history — its audio is what re-recognition reads — and the card is
- * deleted from the card screen instead. A queued recording has no card yet,
- * so it can be deleted, and its job goes with it (ON DELETE CASCADE).
+ * card's history — its audio is kept, per spec §4, as the record of what the
+ * card was made from — and the card is deleted from the card screen instead.
+ * A queued recording has no card yet, so it can be deleted, and its job goes
+ * with it (ON DELETE CASCADE).
  */
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

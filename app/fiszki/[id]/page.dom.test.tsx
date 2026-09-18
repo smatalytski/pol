@@ -374,8 +374,8 @@ describe('CardDetailPage', () => {
     expect(await screen.findByText(t.cardNotFound)).toBeTruthy()
   })
 
-  // Task 4: re-recognition is gone — a wrong-language recording is deleted
-  // and recorded again with the matching button on /dodaj, not repaired here.
+  // Re-recognition is gone — a wrong-language recording is deleted and
+  // recorded again with the matching button on /dodaj, not repaired here.
   it('offers no language controls on the card detail page', async () => {
     stubFetch(() => cardRow())
     render(<CardPage />)

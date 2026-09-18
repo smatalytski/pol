@@ -209,8 +209,9 @@ export default function CardDetailPage() {
           {t.deleteItem}
         </button>
         {/* wygeneruj ponownie is the only thing that queues a rebuild here
-            now (Task 4 removed re-recognition), so this shows exactly while
-            that request is in flight. */}
+            now that re-recognition is gone, so this shows while a queued or
+            running job for this card exists — not only during the request
+            that queues it. */}
         {generating && <span className="text-neutral-500">{t.generating}</span>}
       </div>
 
