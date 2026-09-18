@@ -9,8 +9,9 @@ const card = (id: string): QueueItem => ({
   promptHint: null,
   answerPl: 'złośliwy',
   examplePl: null,
-  exampleRu: null,
   grammarNote: null,
+  wordKind: null,
+  forms: null,
   isNew: false,
 })
 

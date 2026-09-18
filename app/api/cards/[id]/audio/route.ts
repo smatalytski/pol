@@ -14,15 +14,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const card = db.select().from(cards).where(eq(cards.id, id)).get()
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-  // Only a ru_to_pl card has a Russian prompt to speak; its answer is always
-  // Polish. Deriving the voice from `part` alone would send Polish text to the
-  // Russian voice, and because the clip cache is content-addressed, a wrong
-  // clip made that way could never be displaced by a later fix.
-  const lang: 'pl' | 'ru' | null =
-    part === 'prompt' ? (card.type === 'ru_to_pl' ? 'ru' : null) : 'pl'
-  if (!lang) return NextResponse.json({ error: 'nothing to speak' }, { status: 404 })
-
-  const text = part === 'answer' ? card.answerPl : card.promptText
+  // Only a ru_to_pl card has a Russian prompt. A pl_to_pl card's prompt IS the
+  // Polish word, so its prompt is spoken from answer_pl in the Polish voice
+  // (spec 2026-09-18 §8). Forms are never spoken. Deriving the voice from
+  // `part` alone would send Polish text to the Russian voice, and because the
+  // clip cache is content-addressed, a wrong clip made that way could never be
+  // displaced by a later fix.
+  const russianPrompt = part === 'prompt' && card.type === 'ru_to_pl'
+  const lang: 'pl' | 'ru' = russianPrompt ? 'ru' : 'pl'
+  const text = russianPrompt ? card.promptText : card.answerPl
   if (!text) return NextResponse.json({ error: 'nothing to speak' }, { status: 404 })
 
   const mediaId = await getClip(db, getSynthesizer(), text, lang, new Date())

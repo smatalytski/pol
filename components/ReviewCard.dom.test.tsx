@@ -13,8 +13,9 @@ const card: QueueItem = {
   promptHint: 'прилагательное',
   answerPl: 'złośliwy',
   examplePl: 'Zrobił to ze złośliwości.',
-  exampleRu: 'Он сделал это из злобы.',
   grammarNote: null,
+  wordKind: null,
+  forms: null,
   isNew: true,
 }
 

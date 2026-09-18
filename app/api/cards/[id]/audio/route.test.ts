@@ -113,4 +113,21 @@ describe('GET /api/cards/:id/audio', () => {
     expect(res.status).toBe(404)
     expect(getClipMock).not.toHaveBeenCalled()
   })
+
+  // Spec §8: a pl_to_pl card's prompt IS the Polish word, so "the prompt" is
+  // spoken in Polish from answer_pl — never the stored Russian prompt_text.
+  it('speaks a pl_to_pl prompt as the Polish word', async () => {
+    seedCard({ id: 'f1', type: 'pl_to_pl', promptText: 'кот', answerPl: 'kot' })
+    const res = await call('f1', 'prompt')
+    expect(res.status).toBe(307)
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('kot')
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
+  })
+
+  it('speaks a pl_to_pl answer as the Polish word', async () => {
+    seedCard({ id: 'f2', type: 'pl_to_pl', answerPl: 'kot' })
+    await call('f2', 'answer')
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('kot')
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
+  })
 })

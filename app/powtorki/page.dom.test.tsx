@@ -12,8 +12,9 @@ type QueueItem = {
   promptHint: null
   answerPl: string
   examplePl: null
-  exampleRu: null
   grammarNote: null
+  wordKind: null
+  forms: null
   isNew: boolean
 }
 
@@ -25,8 +26,9 @@ function card(id: string, promptText: string): QueueItem {
     promptHint: null,
     answerPl: `answer-${id}`,
     examplePl: null,
-    exampleRu: null,
     grammarNote: null,
+    wordKind: null,
+    forms: null,
     isNew: false,
   }
 }
