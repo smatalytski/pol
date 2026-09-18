@@ -40,6 +40,19 @@ describe('runNextJob', () => {
     expect(job(db, second).status).toBe('queued')
   })
 
+  // Determinism: promoteApproved can insert two jobs with the same createdAt
+  // in one tick. The tie must break on insertion order (rowid), not be
+  // left to whatever order SQLite happens to return.
+  it('breaks a tie on createdAt by picking the job inserted first', async () => {
+    const { db } = createTestDb()
+    const first = enqueueJob(db, { kind: 'regenerate', cardId: null }, at(5))
+    const second = enqueueJob(db, { kind: 'regenerate', cardId: null }, at(5))
+    const { handlers, run } = fakeHandlers()
+    expect(await runNextJob(db, handlers, { pausedUntil: 0 }, at(10), zero)).toBe('done')
+    expect(run.mock.calls[0][0].id).toBe(first)
+    expect(job(db, second).status).toBe('queued')
+  })
+
   it('is idle when nothing is due', async () => {
     const { db } = createTestDb()
     const { handlers } = fakeHandlers()
@@ -92,7 +105,30 @@ describe('runNextJob', () => {
 
     expect(giveUp).toHaveBeenCalledTimes(1)
     expect(giveUp.mock.calls[0][1]).toBe('unusable')
-    expect(job(db, a)).toMatchObject({ status: 'failed', attempts: 3, lastError: 'unusable', finishedAt: T + 10_000 })
+    expect(job(db, a)).toMatchObject({
+      status: 'failed', attempts: 3, failures: 3, lastError: 'unusable', finishedAt: T + 10_000,
+    })
+  })
+
+  // Spec §6: retryable failures never count against the 3-attempt limit — only
+  // a non-retryable reply brings the job closer to giving up.
+  it('does not count a 429 against the non-retryable attempt limit', async () => {
+    const { db } = createTestDb()
+    const a = enqueueJob(db, { kind: 'regenerate' }, at(0))
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(new GenerationError('429', { retryable: true }))
+      .mockRejectedValueOnce(new GenerationError('429', { retryable: true }))
+      .mockRejectedValue(new GenerationError('unusable'))
+    const { handlers, giveUp } = fakeHandlers(run)
+    const state = { pausedUntil: 0 }
+
+    expect(await runNextJob(db, handlers, state, at(0), zero)).toBe('retry')
+    expect(await runNextJob(db, handlers, state, new Date(state.pausedUntil), zero)).toBe('retry')
+    expect(await runNextJob(db, handlers, state, new Date(state.pausedUntil), zero)).toBe('retry')
+
+    expect(giveUp).not.toHaveBeenCalled()
+    expect(job(db, a)).toMatchObject({ status: 'queued', attempts: 3, failures: 1, lastError: 'unusable' })
   })
 
   it('treats an error that is not a GenerationError as non-retryable', async () => {
@@ -139,6 +175,7 @@ describe('promoteApproved', () => {
     capture(db, 'dup', { duplicateOf: 'k' })
     expect(promoteApproved(db, at(10_000))).toEqual({ queued: [], duplicates: ['dup'] })
     expect(db.select().from(generationJobs).all()).toHaveLength(0)
+    expect(db.select().from(captures).where(eq(captures.id, 'dup')).get()!.status).toBe('duplicate')
   })
 
   it('promotes a recording only once', () => {
@@ -147,6 +184,18 @@ describe('promoteApproved', () => {
     promoteApproved(db, at(10_000))
     promoteApproved(db, at(20_000))
     expect(db.select().from(generationJobs).all()).toHaveLength(1)
+  })
+
+  // Determinism: two recordings can become approved in the same tick (e.g.
+  // both past their 10 s window); their jobs must still be picked up in a
+  // fixed, sensible order rather than whatever order a Set happened to yield.
+  it('promotes oldest-transcribed-first, so the older job is inserted first', () => {
+    const { db } = createTestDb()
+    capture(db, 'younger', { transcribedAt: T + 1_000, createdAt: T + 1_000 })
+    capture(db, 'older', { transcribedAt: T, createdAt: T })
+    expect(promoteApproved(db, at(20_000))).toEqual({ queued: ['older', 'younger'], duplicates: [] })
+    const jobs = db.select().from(generationJobs).all()
+    expect(jobs.map((j) => j.captureId)).toEqual(['older', 'younger'])
   })
 })
 

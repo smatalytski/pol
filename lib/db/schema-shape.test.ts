@@ -31,7 +31,7 @@ describe('schema after migrations', () => {
     const { sqlite } = createTestDb()
     const cols = (sqlite.prepare('PRAGMA table_info(generation_jobs)').all() as { name: string }[]).map((c) => c.name)
     expect(cols).toEqual([
-      'id', 'kind', 'capture_id', 'card_id', 'status', 'attempts',
+      'id', 'kind', 'capture_id', 'card_id', 'status', 'attempts', 'failures',
       'next_attempt_at', 'last_error', 'created_at', 'finished_at',
     ])
   })

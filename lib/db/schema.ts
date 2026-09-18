@@ -70,6 +70,8 @@ export const generationJobs = sqliteTable('generation_jobs', {
   cardId: text('card_id'),
   status: text('status', { enum: ['queued', 'running', 'done', 'failed'] }).notNull(),
   attempts: integer('attempts').notNull(),
+  // Counts only non-retryable failures (spec §6); see migrations/002-generation-queue.sql.
+  failures: integer('failures').notNull(),
   nextAttemptAt: integer('next_attempt_at').notNull(),
   lastError: text('last_error'),
   createdAt: integer('created_at').notNull(),

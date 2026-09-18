@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, lte } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, generationJobs } from '../db/schema'
@@ -16,7 +16,11 @@ import { approvedIds, type ReviewRow } from './review'
 export type JobKind = 'new' | 'regenerate' | 'rerecognized'
 export type JobRow = typeof generationJobs.$inferSelect
 
-/** A non-retryable failure gets this many attempts, then the job gives up (§6). */
+/**
+ * A non-retryable failure gets this many attempts, then the job gives up
+ * (§6). Counted by `failures`, not `attempts`: a retryable failure never
+ * brings a job closer to this limit, however many of them precede it.
+ */
 export const MAX_ATTEMPTS_NON_RETRYABLE = 3
 
 export function enqueueJob(
@@ -33,6 +37,7 @@ export function enqueueJob(
       cardId: input.cardId ?? null,
       status: 'queued',
       attempts: 0,
+      failures: 0,
       nextAttemptAt: now.getTime(),
       lastError: null,
       createdAt: now.getTime(),
@@ -75,13 +80,20 @@ export function underReview(db: Db): ReviewRow[] {
  * Every approved recording leaves review: a word already in the deck becomes
  * 'duplicate' and is never queued (§4); any other becomes 'queued' with a
  * `new` job. One transaction, so a recording is never queued without its job.
+ * Processed oldest-transcribed-first (ties broken by createdAt) so that, when
+ * several recordings are approved in the same tick, their jobs are inserted
+ * in a fixed, sensible order rather than whatever order a Set yields.
  */
 export function promoteApproved(db: Db, now: Date): { queued: string[]; duplicates: string[] } {
-  const approved = approvedIds(underReview(db), now.getTime())
+  const rows = underReview(db)
+  const approved = approvedIds(rows, now.getTime())
+  const ordered = rows
+    .filter((r) => approved.has(r.id))
+    .sort((a, b) => a.transcribedAt - b.transcribedAt || a.createdAt - b.createdAt)
   const queued: string[] = []
   const duplicates: string[] = []
   db.transaction((tx) => {
-    for (const id of approved) {
+    for (const { id } of ordered) {
       const row = tx
         .select({ duplicateOf: captures.duplicateOf })
         .from(captures)
@@ -139,9 +151,12 @@ function setNewCaptureStatus(db: Db, job: JobRow, status: 'queued' | 'generating
 /**
  * Runs at most one job: the oldest queued one that is due. A retryable failure
  * re-queues it with backoff AND pauses the whole queue for the same delay,
- * because the quota is per project. A non-retryable one gets
- * MAX_ATTEMPTS_NON_RETRYABLE attempts without pausing, then its handler's
- * giveUp runs once.
+ * because the quota is per project — and never counts against the give-up
+ * limit, however many of them occur. A non-retryable one gets
+ * MAX_ATTEMPTS_NON_RETRYABLE such failures without pausing, then its
+ * handler's giveUp runs once. `attempts` counts every failed attempt of
+ * either kind and drives backoffMs; `failures` counts only non-retryable ones
+ * and drives the give-up decision.
  */
 export async function runNextJob(
   db: Db,
@@ -156,7 +171,9 @@ export async function runNextJob(
     .select()
     .from(generationJobs)
     .where(and(eq(generationJobs.status, 'queued'), lte(generationJobs.nextAttemptAt, t)))
-    .orderBy(asc(generationJobs.createdAt))
+    // createdAt can tie when promoteApproved inserts several jobs in one
+    // tick; rowid (insertion order) breaks the tie deterministically.
+    .orderBy(asc(generationJobs.createdAt), sql`rowid`)
     .get()
   if (!job) return 'idle'
 
@@ -170,15 +187,16 @@ export async function runNextJob(
     const attempts = job.attempts + 1
     const message = String((err as Error)?.message ?? err)
     const retryable = err instanceof GenerationError && err.retryable
-    if (retryable || attempts < MAX_ATTEMPTS_NON_RETRYABLE) {
+    const failures = retryable ? job.failures : job.failures + 1
+    if (retryable || failures < MAX_ATTEMPTS_NON_RETRYABLE) {
       const next = t + backoffMs(attempts, random)
       if (retryable) state.pausedUntil = next
-      setJob(db, job.id, { status: 'queued', attempts, nextAttemptAt: next, lastError: message })
+      setJob(db, job.id, { status: 'queued', attempts, failures, nextAttemptAt: next, lastError: message })
       setNewCaptureStatus(db, job, 'queued')
       return 'retry'
     }
     handlers[job.kind].giveUp(job, message, now)
-    setJob(db, job.id, { status: 'failed', attempts, lastError: message, finishedAt: t })
+    setJob(db, job.id, { status: 'failed', attempts, failures, lastError: message, finishedAt: t })
     return 'gave-up'
   }
 }

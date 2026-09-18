@@ -24,6 +24,9 @@ CREATE TABLE generation_jobs (
   card_id          TEXT REFERENCES cards(id),
   status           TEXT NOT NULL,     -- 'queued' | 'running' | 'done' | 'failed'
   attempts         INTEGER NOT NULL DEFAULT 0,
+  -- Counts only non-retryable failures; a job gives up once this reaches
+  -- MAX_ATTEMPTS_NON_RETRYABLE, no matter how many retryable ones preceded it.
+  failures         INTEGER NOT NULL DEFAULT 0,
   next_attempt_at  INTEGER NOT NULL,
   last_error       TEXT,
   created_at       INTEGER NOT NULL,
