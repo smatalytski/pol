@@ -2,8 +2,9 @@ import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, cards } from '../db/schema'
-import { applyGeneratedFields, createCard, updateCard, type GeneratedFields } from '../cards/service'
+import { applyGeneratedFields, createCard, updateCard, type CardType, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
+import type { WordKind } from '../cards/forms'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator } from '../generate'
 import type { DictationLang, Transcriber } from '../transcribe'
@@ -19,6 +20,8 @@ export type CaptureView = {
   duplicateOf: string | null
   audioMediaId: string | null
   createdAt: number
+  cardType: CardType | null
+  wordKind: WordKind | null
 }
 
 export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }, now: Date): string {
@@ -184,6 +187,8 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
       generationJson: captures.generationJson,
       audioMediaId: captures.audioMediaId,
       createdAt: captures.createdAt,
+      cardType: cards.type,
+      wordKind: cards.wordKind,
     })
     .from(captures)
     .leftJoin(cards, eq(cards.id, captures.cardId))
@@ -201,6 +206,8 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
         : null,
       audioMediaId: c.audioMediaId,
       createdAt: c.createdAt,
+      cardType: c.cardType,
+      wordKind: c.wordKind,
     }))
 }
 

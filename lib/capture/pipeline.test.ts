@@ -236,6 +236,17 @@ describe('listCaptures', () => {
     const id = createCapture(d.db, AUDIO, NOW)
     expect(listCaptures(d.db, 0).find((c) => c.id === id)).toBeDefined()
   })
+
+  // The chip offers the type switch only once generation has classified the
+  // word as one with forms, so it needs the card's type and kind.
+  it('exposes the card type and word kind of each capture', async () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, id, NOW)
+    const [view] = listCaptures(d.db, 0)
+    expect(view.cardType).toBe('ru_to_pl')
+    expect(view.wordKind).toBe(GENERATED.kind)
+  })
 })
 
 // Polish and Russian share too many near-homophones for a two-language

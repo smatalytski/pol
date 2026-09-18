@@ -16,6 +16,8 @@ function captureRow(id: string, status: string, createdAt = Date.now()): Capture
     duplicateOf: null,
     audioMediaId: null,
     createdAt,
+    cardType: null,
+    wordKind: null,
   }
 }
 
@@ -537,6 +539,45 @@ describe('AddPage re-recognition', () => {
     expect(post?.url).toBe('/api/captures/cap-1/jezyk')
     expect(post?.body).toEqual({ lang: 'ru' })
     // The refreshed transcript has to arrive without the user reloading.
+    expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
+  })
+
+  it('asks the server to make a capture card forms-only, then refreshes', async () => {
+    stubMic()
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [
+                {
+                  ...captureRow('cap-1', 'generated'),
+                  audioMediaId: 'm1',
+                  transcript: 'kot',
+                  cardId: 'card-1',
+                  cardType: 'ru_to_pl',
+                  wordKind: 'rzeczownik',
+                },
+              ],
+              card: null,
+              duplicateOf: null,
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.url).toBe('/api/cards/card-1/typ')
+    expect(post?.body).toEqual({ type: 'pl_to_pl' })
     expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
   })
 })

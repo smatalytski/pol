@@ -6,6 +6,7 @@ import { useWakeLock } from '@/hooks/useWakeLock'
 import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbox'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
+import type { CardType } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
 export default function AddPage() {
@@ -147,6 +148,20 @@ export default function AddPage() {
     [fetchCaptures],
   )
 
+  // Every dictation becomes ru_to_pl; this flips one to drilling the forms of
+  // a word already known (spec 2026-09-18 §2), then refreshes so the chip
+  // shows the new type without a reload.
+  const setType = useCallback(
+    (cardId: string, type: CardType) => {
+      void fetch(`/api/cards/${cardId}/typ`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type }),
+      }).then(() => fetchCaptures())
+    },
+    [fetchCaptures],
+  )
+
   // Spec §4's "swipe to delete", wired once Task 17 added the routes it
   // needs. An outbox chip never calls this (CaptureChip doesn't attach the
   // gesture to it — see its own comment), so this only ever sees a `capture`
@@ -192,6 +207,7 @@ export default function AddPage() {
             onRetry={retry}
             onDelete={deleteChip}
             onRelanguage={relanguage}
+            onSetType={setType}
           />
         ))}
       </ul>

@@ -48,6 +48,9 @@ export const t = {
   regenerateDuplicate: 'to słowo już jest w talii — zapisano tylko podpowiedź',
   showAllForms: 'pokaż wszystkie formy',
   hideAllForms: 'ukryj formy',
+  typeLabel: 'karta',
+  typeRuPl: 'ru→pl',
+  typePlPl: 'tylko formy',
   saveFailed: 'nie udało się zapisać zmian',
   chipSaveFailed: 'nie udało się zapisać zmian',
 

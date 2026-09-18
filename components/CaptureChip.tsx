@@ -2,6 +2,9 @@
 import { useRef, useState } from 'react'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
+import type { CardType } from '@/lib/cards/service'
+import { hasForms } from '@/lib/cards/forms'
+import { CardTypeSwitch } from '@/components/CardTypeSwitch'
 import { t } from '@/i18n/pl'
 
 /**
@@ -57,11 +60,13 @@ export function CaptureChip({
   onRetry,
   onDelete,
   onRelanguage,
+  onSetType,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
   onRelanguage: (id: string, lang: DictationLang) => void
   onDelete: (item: ChipItem) => void
+  onSetType: (cardId: string, type: CardType) => void
 }) {
   // Hooks must run unconditionally, before the outbox early return below —
   // an outbox chip never uses this state, but React doesn't allow a
@@ -227,6 +232,27 @@ export function CaptureChip({
           ))}
         </div>
       )}
+
+      {/* Only once generation has classified the word as one with forms:
+          before that there is nothing to switch to, and a phrase never has
+          forms to drill (spec 2026-09-18 §7.1). */}
+      {capture.cardId && capture.cardType && hasForms(capture.wordKind) && (
+        <div className="pl-2">
+          <CardTypeSwitch type={capture.cardType} onChange={(type) => onSetType(capture.cardId!, type)} />
+        </div>
+      )}
+
+      {/* Swipe-left always deleted a chip, but nothing on screen said so —
+          the user asked for a delete that already existed because they could
+          not see it. Swipe stays as a shortcut. */}
+      <button
+        onClick={() => onDelete(item)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        className="self-end text-sm text-red-600 underline"
+      >
+        {t.deleteItem}
+      </button>
 
       {expanded && fields && (
         // Stops the same bubbling the controls above guard against: tapping
