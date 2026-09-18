@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getTableColumns, getTableName } from 'drizzle-orm'
 import { createTestDb } from './testing'
 import * as schema from './schema'
-import { media, cards, reviews, captures, ttsClips, settings } from './schema'
+import { media, cards, reviews, captures, ttsClips, settings, generationJobs } from './schema'
 
 describe('schema', () => {
   it('creates every table', () => {
@@ -12,11 +12,11 @@ describe('schema', () => {
       .all()
       .map((r) => (r as { name: string }).name)
     expect(names).toEqual(
-      expect.arrayContaining(['media', 'cards', 'reviews', 'captures', 'tts_clips', 'settings']),
+      expect.arrayContaining(['media', 'cards', 'reviews', 'captures', 'tts_clips', 'settings', 'generation_jobs']),
     )
   })
 
-  it.each([media, cards, reviews, captures, ttsClips, settings])(
+  it.each([media, cards, reviews, captures, ttsClips, settings, generationJobs])(
     'drizzle definition matches the SQL for %s',
     (table) => {
       const { sqlite } = createTestDb()
@@ -41,7 +41,7 @@ describe('schema', () => {
 
   it('exports nothing unexpected', () => {
     expect(Object.keys(schema).sort()).toEqual(
-      ['captures', 'cards', 'media', 'reviews', 'settings', 'ttsClips'].sort(),
+      ['captures', 'cards', 'generationJobs', 'media', 'reviews', 'settings', 'ttsClips'].sort(),
     )
   })
 })
