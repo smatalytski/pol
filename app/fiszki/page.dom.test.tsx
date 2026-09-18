@@ -46,7 +46,12 @@ function cardRow(over: Partial<CardRow> = {}): CardRow {
   }
 }
 
-function stubFetch(rows: () => CardRow[]) {
+type PendingRow = { id: string; transcript: string | null; status: 'queued' | 'generating' }
+
+function stubFetch(
+  rows: () => CardRow[],
+  extra: { pending?: PendingRow[]; generatingCardIds?: string[] } = {},
+) {
   const calls: string[] = []
   vi.stubGlobal(
     'fetch',
@@ -54,7 +59,12 @@ function stubFetch(rows: () => CardRow[]) {
       calls.push(url)
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ cards: rows() }),
+        json: () =>
+          Promise.resolve({
+            cards: rows(),
+            pending: extra.pending ?? [],
+            generatingCardIds: extra.generatingCardIds ?? [],
+          }),
       }) as unknown as Promise<Response>
     }),
   )
@@ -136,5 +146,36 @@ describe('CardsPage (browse list)', () => {
     await screen.findByText('złośliwy')
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'prać' } })
     await waitFor(() => expect(calls).toContain(`/api/cards?q=${encodeURIComponent('prać')}`))
+  })
+
+  it('lists words waiting for generation above the cards, badged', async () => {
+    stubFetch(() => [cardRow({ answerPl: 'kot' })], {
+      pending: [
+        { id: 'p1', transcript: 'zdrów jak ryba', status: 'generating' },
+        { id: 'p2', transcript: 'wścieklizna', status: 'queued' },
+      ],
+    })
+    render(<CardsPage />)
+    const items = await screen.findAllByRole('listitem')
+    expect(items[0].textContent).toContain('zdrów jak ryba')
+    expect(items[0].textContent).toContain(t.generating)
+    expect(items[1].textContent).toContain(t.queued)
+    expect(items[2].textContent).toContain('kot')
+    expect(items[0].querySelector('a')).toBeNull()
+  })
+
+  it('badges a card that is being regenerated', async () => {
+    stubFetch(() => [cardRow({ id: 'c1', answerPl: 'kot' })], { generatingCardIds: ['c1'] })
+    render(<CardsPage />)
+    const row = (await screen.findByText('kot')).closest('li')!
+    expect(row.textContent).toContain(t.generating)
+  })
+
+  it('filters waiting words by the search, like cards', async () => {
+    stubFetch(() => [], { pending: [{ id: 'p1', transcript: 'wścieklizna', status: 'queued' }] })
+    render(<CardsPage />)
+    await screen.findByText('wścieklizna')
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'kot' } })
+    await waitFor(() => expect(screen.queryByText('wścieklizna')).toBeNull())
   })
 })

@@ -45,6 +45,8 @@ export const t = {
   cardNotFound: 'Nie ma takiej fiszki',
   regenerateFailed: 'nie udało się wygenerować fiszki',
   regenerateDuplicate: 'to słowo już jest w talii',
+  queued: 'w kolejce',
+  generating: 'generowanie…',
   showAllForms: 'pokaż wszystkie formy',
   hideAllForms: 'ukryj formy',
   typeLabel: 'karta',
