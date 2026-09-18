@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client'
 import { cards } from '@/lib/db/schema'
 import { deleteCard, updateCard } from '@/lib/cards/service'
 import { creatorCaptureId } from '@/lib/capture/pipeline'
+import { hasActiveJob } from '@/lib/queue/jobs'
 
 const Patch = z.object({
   promptText: z.string().nullable().optional(),
@@ -37,8 +38,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // audio to re-recognise, rather than showing a control that must fail.
   // Earliest, not latest: see creatorCaptureId, which applyRerecognized uses too.
   // Re-recognising a later duplicate's audio would not rewrite this card at
-  // all — it would build that recording its own card.
-  return NextResponse.json({ card, captureId: creatorCaptureId(db, id) })
+  // all — it would go through createCard instead, producing a new card (or,
+  // via dedup, resolving to an existing one). `generating` tells the page a
+  // queued job will rewrite this card, so it can show that as not-yet-final.
+  return NextResponse.json({ card, captureId: creatorCaptureId(db, id), generating: hasActiveJob(db, id) })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
