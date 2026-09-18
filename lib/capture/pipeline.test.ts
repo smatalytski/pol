@@ -57,6 +57,7 @@ function deps(over: { transcriber?: Partial<Transcriber>; generator?: Partial<Ge
   return {
     db,
     transcriber: { transcribe: vi.fn().mockResolvedValue('zloslivy'), ...over.transcriber } as Transcriber,
+    clock: () => NOW,
     generator: {
       fromDictation: vi.fn().mockResolvedValue(GENERATED),
       ...over.generator,
@@ -82,9 +83,12 @@ describe('createCapture', () => {
 async function recognized(d: ReturnType<typeof deps>, transcript: string, now = NOW) {
   d.transcriber.transcribe = vi.fn().mockResolvedValue(transcript)
   const id = createCapture(d.db, AUDIO, now)
-  await recognizeCapture(d, id, now)
+  await recognizeCapture(at(d, now), id)
   return id
 }
+
+/** The same deps with the clock stopped at `now`. */
+const at = <D extends { clock: () => Date }>(d: D, now: Date): D => ({ ...d, clock: () => now })
 
 const row = (d: ReturnType<typeof deps>, id: string) =>
   d.db.select().from(captures).where(eq(captures.id, id)).get()!
@@ -103,6 +107,21 @@ describe('recognizeCapture', () => {
     expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'złośliwy', transcribedAt: NOW.getTime(), duplicateOf: null })
   })
 
+  // Spec §3: the window starts when the transcript arrives, not when the
+  // request did — Speech-to-Text can take seconds of the 10.
+  it('stamps transcribedAt with the clock read after Speech-to-Text returned', async () => {
+    const d = deps()
+    let clockNow = NOW
+    const afterStt = new Date(NOW.getTime() + 3_000)
+    d.transcriber.transcribe = vi.fn(async () => {
+      clockNow = afterStt
+      return 'kot'
+    })
+    const id = createCapture(d.db, AUDIO, NOW)
+    await recognizeCapture({ ...d, clock: () => clockNow }, id)
+    expect(row(d, id).transcribedAt).toBe(afterStt.getTime())
+  })
+
   it('makes no Gemini call — generation is queued, not run here', async () => {
     const d = deps()
     await recognized(d, 'złośliwy')
@@ -113,7 +132,7 @@ describe('recognizeCapture', () => {
   it('keeps the audio and marks failed when recognition fails', async () => {
     const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('unintelligible')) } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     expect(row(d, id)).toMatchObject({ status: 'failed', error: 'unintelligible' })
     expect(row(d, id).audioMediaId).not.toBeNull()
     expect(d.db.select().from(media).all()).toHaveLength(1)
@@ -127,7 +146,7 @@ describe('recognizeCapture', () => {
       d.db.delete(captures).where(eq(captures.id, id)).run()
       return 'kot'
     })
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     expect(d.db.select().from(captures).all()).toHaveLength(0)
   })
 
@@ -142,9 +161,9 @@ describe('recognizeCapture', () => {
     const transcribe = vi.fn().mockRejectedValueOnce(new Error('stt down')).mockResolvedValue('zloslivy')
     const d = deps({ transcriber: { transcribe } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     expect(row(d, id).status).toBe('failed')
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'zloslivy', error: null })
     await generateNewCard(d, id, NOW)
     expect(d.db.select().from(cards).all()).toHaveLength(1)
@@ -155,7 +174,7 @@ describe('recognizeCapture', () => {
     const d = deps()
     const id = await recognized(d, 'zloslivy')
     await generateNewCard(d, id, NOW)
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     expect(d.transcriber.transcribe).toHaveBeenCalledTimes(1)
     expect(row(d, id).status).toBe('generated')
   })
@@ -163,7 +182,7 @@ describe('recognizeCapture', () => {
   it('marks a recording with no audio failed without calling Speech-to-Text', async () => {
     const d = deps()
     insertCapture(d, { id: 'no-audio' })
-    await recognizeCapture(d, 'no-audio', NOW)
+    await recognizeCapture(d, 'no-audio')
     expect(row(d, 'no-audio')).toMatchObject({ status: 'failed', error: 'no audio' })
     expect(d.transcriber.transcribe).not.toHaveBeenCalled()
   })
@@ -212,12 +231,25 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
     const later = new Date(NOW.getTime() + 7_000)
-    expect(await rerecognize(d, id, 'ru', later)).toEqual({ queued: false, error: null })
+    expect(await rerecognize(at(d, later), id, 'ru')).toEqual({ queued: false, error: null })
     expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'склеп', transcribedAt: later.getTime() })
     const call = (d.transcriber.transcribe as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(call.lang).toBe('ru')
     // getMedia hands back a sqlite Buffer, so compare contents not classes.
     expect(Array.from(call.bytes as Uint8Array)).toEqual(Array.from(AUDIO.bytes))
+  })
+
+  it('restarts the window at the clock read after Speech-to-Text returned', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    let clockNow = new Date(NOW.getTime() + 7_000)
+    const afterStt = new Date(NOW.getTime() + 9_000)
+    d.transcriber.transcribe = vi.fn(async () => {
+      clockNow = afterStt
+      return 'склеп'
+    })
+    await rerecognize({ ...d, clock: () => clockNow }, id, 'ru')
+    expect(row(d, id).transcribedAt).toBe(afterStt.getTime())
   })
 
   it('clears a stale już masz when the new transcript is not in the deck', async () => {
@@ -226,7 +258,7 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     expect(row(d, id).duplicateOf).not.toBeNull()
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    await rerecognize(d, id, 'ru', NOW)
+    await rerecognize(d, id, 'ru')
     expect(row(d, id).duplicateOf).toBeNull()
   })
 
@@ -234,10 +266,10 @@ describe('rerecognize', () => {
   it('puts a recording whose recognition failed back under review, with no Gemini call', async () => {
     const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('nope')) } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
     const later = new Date(NOW.getTime() + 60_000)
-    expect(await rerecognize(d, id, 'ru', later)).toEqual({ queued: false, error: null })
+    expect(await rerecognize(at(d, later), id, 'ru')).toEqual({ queued: false, error: null })
     expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'склеп', transcribedAt: later.getTime(), error: null })
     expect(d.generator.fromDictation).not.toHaveBeenCalled()
     expect(d.db.select().from(cards).all()).toHaveLength(0)
@@ -248,7 +280,7 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     await generateNewCard(d, id, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: true, error: null })
     const jobs = d.db.select().from(generationJobs).all()
     expect(jobs).toHaveLength(1)
     expect(jobs[0]).toMatchObject({ kind: 'rerecognized', captureId: id, cardId: row(d, id).cardId })
@@ -265,7 +297,7 @@ describe('rerecognize', () => {
     const cardId = row(d, id).cardId!
     enqueueJob(d.db, { kind: 'regenerate', cardId }, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: true, error: null })
     const kinds = d.db.select().from(generationJobs).all().map((j) => j.kind).sort()
     expect(kinds).toEqual(['regenerate', 'rerecognized'])
   })
@@ -276,9 +308,9 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     await generateNewCard(d, id, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    await rerecognize(d, id, 'ru', NOW)
+    await rerecognize(d, id, 'ru')
     d.transcriber.transcribe = vi.fn().mockResolvedValue('sklep')
-    expect(await rerecognize(d, id, 'pl', NOW)).toEqual({ queued: true, error: null })
+    expect(await rerecognize(d, id, 'pl')).toEqual({ queued: true, error: null })
     expect(d.db.select().from(generationJobs).all()).toHaveLength(1)
     expect(row(d, id).transcript).toBe('sklep')
   })
@@ -291,10 +323,10 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     await generateNewCard(d, id, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    await rerecognize(d, id, 'ru', NOW)
+    await rerecognize(d, id, 'ru')
     d.db.update(generationJobs).set({ status: 'running' }).run()
     d.transcriber.transcribe = vi.fn().mockResolvedValue('sklep')
-    expect(await rerecognize(d, id, 'pl', NOW)).toEqual({ queued: true, error: null })
+    expect(await rerecognize(d, id, 'pl')).toEqual({ queued: true, error: null })
     const jobs = d.db.select().from(generationJobs).all()
     expect(jobs.map((j) => [j.kind, j.status]).sort()).toEqual([['rerecognized', 'queued'], ['rerecognized', 'running']])
   })
@@ -307,7 +339,7 @@ describe('rerecognize', () => {
     d.db.update(captures).set({ status: 'duplicate' }).where(eq(captures.id, id)).run()
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
     const later = new Date(NOW.getTime() + 30_000)
-    expect(await rerecognize(d, id, 'ru', later)).toEqual({ queued: false, error: null })
+    expect(await rerecognize(at(d, later), id, 'ru')).toEqual({ queued: false, error: null })
     expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'склеп', transcribedAt: later.getTime(), duplicateOf: null })
     expect(d.db.select().from(generationJobs).all()).toHaveLength(0)
   })
@@ -320,7 +352,7 @@ describe('rerecognize', () => {
     d.db.update(captures).set({ status: 'queued' }).where(eq(captures.id, id)).run()
     enqueueJob(d.db, { kind: 'new', captureId: id }, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: true, error: null })
     expect(row(d, id)).toMatchObject({ status: 'queued', transcript: 'склеп' })
     expect(d.db.select().from(generationJobs).all().map((j) => j.kind)).toEqual(['new'])
   })
@@ -332,7 +364,7 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     d.db.update(captures).set({ status: 'generating' }).where(eq(captures.id, id)).run()
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: true, error: null })
     const jobs = d.db.select().from(generationJobs).all()
     expect(jobs).toHaveLength(1)
     expect(jobs[0]).toMatchObject({ kind: 'rerecognized', captureId: id, cardId: null })
@@ -353,7 +385,7 @@ describe('rerecognize', () => {
     const id = await recognized(d, 'sklep')
     d.db.update(captures).set({ status: 'generating' }).where(eq(captures.id, id)).run()
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    await rerecognize(d, id, 'ru', NOW)
+    await rerecognize(d, id, 'ru')
     d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
     await applyRerecognized(d, id, NOW)
     await generateNewCard(d, id, NOW)
@@ -369,7 +401,7 @@ describe('rerecognize', () => {
     await generateNewCard(d, id, NOW)
     deleteCard(d.db, row(d, id).cardId!, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: false, error: null })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: false, error: null })
     expect(d.db.select().from(generationJobs).all()).toHaveLength(0)
   })
 
@@ -377,7 +409,7 @@ describe('rerecognize', () => {
     const d = deps()
     const id = await recognized(d, 'sklep')
     d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: false, error: 'unintelligible' })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: false, error: 'unintelligible' })
     expect(row(d, id).transcript).toBe('sklep')
   })
 
@@ -387,7 +419,7 @@ describe('rerecognize', () => {
     await generateNewCard(d, id, NOW)
     const before = d.db.select().from(cards).get()!
     d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
-    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: false, error: 'unintelligible' })
+    expect(await rerecognize(d, id, 'ru')).toEqual({ queued: false, error: 'unintelligible' })
     expect(row(d, id)).toMatchObject({ error: 'unintelligible', transcript: 'zloslivy' })
     expect(d.db.select().from(cards).get()).toEqual(before)
     expect(d.db.select().from(generationJobs).all()).toHaveLength(0)
@@ -396,7 +428,7 @@ describe('rerecognize', () => {
   it('refuses a recording that has no audio to re-recognise', async () => {
     const d = deps()
     insertCapture(d, { id: 'no-audio' })
-    expect(await rerecognize(d, 'no-audio', 'ru', NOW)).toEqual({ queued: false, error: 'audio missing' })
+    expect(await rerecognize(d, 'no-audio', 'ru')).toEqual({ queued: false, error: 'audio missing' })
     expect(row(d, 'no-audio').error).toMatch(/audio/)
     expect(d.transcriber.transcribe).not.toHaveBeenCalled()
   })
@@ -416,7 +448,7 @@ describe('listOnScreen', () => {
   it('keeps a failed recognition on screen until acted on', async () => {
     const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('x')) } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await recognizeCapture(d, id, NOW)
+    await recognizeCapture(d, id)
     expect(listOnScreen(d.db, 0, new Date(NOW.getTime() + 60_000))).toEqual([
       expect.objectContaining({ id, status: 'failed', inReview: false, reviewRemainingMs: null }),
     ])

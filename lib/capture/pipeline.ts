@@ -57,7 +57,12 @@ function strandedFields(transcript: string): GeneratedFields {
   }
 }
 
-export type RecognizeDeps = { db: Db; transcriber: Transcriber }
+/**
+ * `clock` rather than a `now` argument: the review window starts when the
+ * transcript arrives (§3), which is only known after Speech-to-Text returns,
+ * so the time is read then. Routes pass `() => new Date()`; tests a fake.
+ */
+export type RecognizeDeps = { db: Db; transcriber: Transcriber; clock: () => Date }
 
 const CYRILLIC = /[Ѐ-ӿ]/
 
@@ -90,8 +95,8 @@ export function knownCardFor(db: Db, transcript: string): string | null {
  * Recognises an uploaded (or failed) recording and opens its review window.
  * Makes no Gemini call: generation is queued once the recording is approved.
  */
-export async function recognizeCapture(deps: RecognizeDeps, captureId: string, now: Date): Promise<void> {
-  const { db, transcriber } = deps
+export async function recognizeCapture(deps: RecognizeDeps, captureId: string): Promise<void> {
+  const { db, transcriber, clock } = deps
   const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
   if (!capture) throw new Error(`no such capture: ${captureId}`)
   if (capture.status !== 'uploaded' && capture.status !== 'failed') return
@@ -120,7 +125,7 @@ export async function recognizeCapture(deps: RecognizeDeps, captureId: string, n
     .set({
       transcript,
       status: 'transcribed',
-      transcribedAt: now.getTime(),
+      transcribedAt: clock().getTime(),
       duplicateOf: knownCardFor(db, transcript),
       error: null,
     })
@@ -153,9 +158,8 @@ export async function rerecognize(
   deps: RecognizeDeps,
   captureId: string,
   lang: DictationLang,
-  now: Date,
 ): Promise<{ queued: boolean; error: string | null }> {
-  const { db, transcriber } = deps
+  const { db, transcriber, clock } = deps
   const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
   if (!capture) throw new Error(`no such capture: ${captureId}`)
   const audio = capture.audioMediaId ? getMedia(db, capture.audioMediaId) : null
@@ -174,7 +178,8 @@ export async function rerecognize(
     return { queued: false, error: message }
   }
   // Read after Speech-to-Text returned: promotion may have moved the
-  // recording on while it ran.
+  // recording on while it ran, and the restarted window starts now (§3).
+  const now = clock()
   const still = db.select().from(captures).where(eq(captures.id, captureId)).get()
   if (!still) return { queued: false, error: null }
   const setTranscript = (patch: Partial<typeof captures.$inferInsert> = {}) =>

@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   // here at all: it is queued once the recording leaves review. Safe because
   // this runs as a long-lived Node server; a serverless host would kill the
   // work mid-flight.
-  void recognizeCapture({ db, transcriber: getTranscriber() }, id, new Date()).catch((err) =>
+  void recognizeCapture({ db, transcriber: getTranscriber(), clock: () => new Date() }, id).catch((err) =>
     console.error('capture recognition failed', id, err),
   )
 

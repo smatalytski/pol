@@ -14,12 +14,12 @@ const GENERATED: GeneratedCard = {
 
 function deps(fromDictation = vi.fn().mockResolvedValue(GENERATED)) {
   const { db } = createTestDb()
-  return { db, transcriber: { transcribe: vi.fn().mockResolvedValue('kot') }, generator: { fromDictation } }
+  return { db, transcriber: { transcribe: vi.fn().mockResolvedValue('kot') }, generator: { fromDictation }, clock: () => NOW }
 }
 
 async function dictate(d: ReturnType<typeof deps>) {
   const id = createCapture(d.db, { bytes: new Uint8Array([1]), mime: 'audio/webm' }, NOW)
-  await recognizeCapture(d, id, NOW)
+  await recognizeCapture(d, id)
   return id
 }
 

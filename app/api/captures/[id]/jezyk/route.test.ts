@@ -62,7 +62,7 @@ describe('POST /api/captures/:id/jezyk', () => {
   async function underReview() {
     transcribeMock.mockResolvedValueOnce('sklep')
     const id = createCapture(db, { bytes: new Uint8Array([1, 2, 3]), mime: 'audio/webm' }, NOW)
-    await recognizeCapture({ db, transcriber: { transcribe: transcribeMock } }, id, NOW)
+    await recognizeCapture({ db, transcriber: { transcribe: transcribeMock }, clock: () => NOW }, id)
     transcribeMock.mockClear()
     return id
   }

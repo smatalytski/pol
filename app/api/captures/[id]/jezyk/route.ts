@@ -22,5 +22,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Speech-to-Text failures come back in `error` as a 200 — the recording
   // keeps its transcript. `queued` says the Gemini half (a card's rebuild, or
   // a recording's first generation) is now waiting in the generation queue.
-  return NextResponse.json(await rerecognize({ db, transcriber: getTranscriber() }, id, body.data.lang, new Date()))
+  return NextResponse.json(await rerecognize({ db, transcriber: getTranscriber(), clock: () => new Date() }, id, body.data.lang))
 }
