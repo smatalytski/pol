@@ -22,9 +22,11 @@ export default function AddPage() {
   // One notice line for the chip controls' outcomes. A failed or refused
   // request would otherwise look exactly like a dead button.
   const [notice, setNotice] = useState<Notice | null>(null)
-  // Captures whose re-recognition is in flight. Re-recognition is
-  // Speech-to-Text plus a Gemini call, and ~30 s is normal, so without this
-  // the user taps again and starts a second one on the same capture.
+  // Captures whose re-recognition is in flight. Every recording on this
+  // screen has no card yet (§7.1: uploaded, failed, or still under review),
+  // so re-recognition here is Speech-to-Text only — it just restarts the
+  // review window — but it is still a network round trip, so without this
+  // the user taps again and starts a second one on the same recording.
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)

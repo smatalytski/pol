@@ -124,6 +124,9 @@ describe('CaptureChip', () => {
     expect(screen.getByText(t.retry)).toBeTruthy()
     expect(screen.queryByText(t.asRussian)).toBeNull()
     expect(screen.getByText('unintelligible')).toBeTruthy()
+    // Spec §7.1: a failed row shows only the error, not "rozpoznawanie…"
+    // beside it — that placeholder is for a recording still being recognised.
+    expect(screen.queryByText(t.transcribing)).toBeNull()
   })
 
   it('says już masz for a word already in the deck', () => {

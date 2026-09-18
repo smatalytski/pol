@@ -102,7 +102,10 @@ export function CaptureChip({
     <li className="flex flex-col gap-2 border-b py-3" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
       <div className="flex items-center gap-3">
         <div className="flex-1">
-          <p className="text-lg">{capture.transcript ?? t.transcribing}</p>
+          {/* "rozpoznawanie…" is only for a recording still waiting on its
+              first transcript (§7.1) — a failed one shows only its error
+              below, never this placeholder beside it. */}
+          <p className="text-lg">{capture.transcript ?? (capture.status === 'uploaded' ? t.transcribing : null)}</p>
           {capture.duplicateOf && <p className="text-sm text-amber-600">{t.alreadyHave}</p>}
           {capture.error && <p className="text-sm text-red-600">{capture.error}</p>}
         </div>
