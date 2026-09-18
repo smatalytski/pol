@@ -5,6 +5,7 @@ const LINKS = [
   { href: '/powtorki', label: t.review },
   { href: '/dodaj', label: t.add },
   { href: '/fiszki', label: t.cards },
+  { href: '/tematy', label: t.topics },
   { href: '/ustawienia', label: t.settings },
 ]
 
