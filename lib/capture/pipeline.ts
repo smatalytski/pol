@@ -8,7 +8,7 @@ import type { WordKind } from '../cards/forms'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator } from '../generate'
 import type { DictationLang, Transcriber } from '../transcribe'
-import { enqueueJob, hasActiveJobFor, underReview, type JobHandlers } from '../queue/jobs'
+import { enqueueJob, hasQueuedJobFor, underReview, type JobHandlers } from '../queue/jobs'
 import { approvedIds, reviewRemainingMs } from '../queue/review'
 
 export type CaptureDeps = { db: Db; transcriber: Transcriber; generator: Generator }
@@ -136,8 +136,9 @@ export async function recognizeCapture(deps: RecognizeDeps, captureId: string, n
 /**
  * Re-recognises a recording's stored audio in the language the user names.
  * Speech-to-Text stays synchronous (fast, its own quota). Under review, the
- * transcript is replaced and the 10 s restarts (§3). With a card, the Gemini
- * half is queued as a `rerecognized` job (§5).
+ * transcript is replaced and the 10 s restarts (§3). With a card, or with a
+ * `new` job already generating, the Gemini half is queued as a `rerecognized`
+ * job (§5); `queued` in the result says the Gemini half is waiting in the queue.
  *
  * This exists because language detection is not safe here. Measured on the
  * real API: with `['pl-PL','ru-RU']` the Polish model swallows Russian whole —
@@ -177,32 +178,61 @@ export async function rerecognize(
     db.update(captures).set({ error: message }).where(eq(captures.id, captureId)).run()
     return { queued: false, error: message }
   }
+  // Read after Speech-to-Text returned: promotion may have moved the
+  // recording on while it ran.
   const still = db.select().from(captures).where(eq(captures.id, captureId)).get()
   if (!still) return { queued: false, error: null }
+  const setTranscript = (patch: Partial<typeof captures.$inferInsert> = {}) =>
+    db.update(captures).set({ transcript, error: null, ...patch }).where(eq(captures.id, captureId)).run()
 
   if (still.cardId) {
-    db.update(captures).set({ transcript, error: null }).where(eq(captures.id, captureId)).run()
-    // A `rerecognized` job still waiting reads the transcript when it runs, so
-    // it already covers this one.
-    if (!hasActiveJobFor(db, 'rerecognized', captureId)) {
-      enqueueJob(db, { kind: 'rerecognized', captureId, cardId: still.cardId }, now)
-    }
+    setTranscript()
+    // A card the user deleted stays deleted: nothing is rebuilt for it.
+    if (!liveCard(db, still.cardId)) return { queued: false, error: null }
+    queueRerecognized(db, captureId, still.cardId, now)
     return { queued: true, error: null }
   }
-  const reopen = still.status === 'transcribed' || still.status === 'failed'
-  db.update(captures)
-    .set({
-      transcript,
-      duplicateOf: knownCardFor(db, transcript),
-      error: null,
-      // Under review (or its first recognition failed): back into review with
-      // a fresh 10 s. Already approved and waiting: its `new` job reads the
-      // transcript when it runs, so only the text changes.
-      ...(reopen ? { status: 'transcribed' as const, transcribedAt: now.getTime() } : {}),
-    })
-    .where(eq(captures.id, captureId))
-    .run()
+  if (still.status === 'generating') {
+    // Its `new` job is mid-Gemini on the old transcript. A `rerecognized` job
+    // runs after it (the worker is serial) and reads the recording's card at
+    // run time, so it rebuilds the card that job made — or, if it runs first
+    // because that job failed and is retrying, makes the card itself, and the
+    // `new` job then only marks the recording generated.
+    setTranscript()
+    queueRerecognized(db, captureId, null, now)
+    return { queued: true, error: null }
+  }
+  if (still.status === 'queued') {
+    // Its `new` job is waiting (first try or a retry) and reads the transcript
+    // when it runs, so only the text changes.
+    setTranscript()
+    return { queued: true, error: null }
+  }
+  // Under review, promoted as już masz, or its first recognition failed: back
+  // into review with a fresh 10 s, and już masz decided again for the new
+  // word. Still 'uploaded' (its first recognition has not landed): only the
+  // text changes.
+  const reopen = still.status === 'transcribed' || still.status === 'duplicate' || still.status === 'failed'
+  setTranscript({
+    duplicateOf: knownCardFor(db, transcript),
+    ...(reopen ? { status: 'transcribed' as const, transcribedAt: now.getTime() } : {}),
+  })
   return { queued: false, error: null }
+}
+
+/**
+ * A queued `rerecognized` job reads the transcript when it runs, so it
+ * already covers a newer one. A running one has already read the old
+ * transcript: a successor is queued, which runs after it and wins.
+ */
+function queueRerecognized(db: Db, captureId: string, cardId: string | null, now: Date): void {
+  if (!hasQueuedJobFor(db, 'rerecognized', captureId)) {
+    enqueueJob(db, { kind: 'rerecognized', captureId, cardId }, now)
+  }
+}
+
+function liveCard(db: Db, cardId: string) {
+  return db.select().from(cards).where(and(eq(cards.id, cardId), isNull(cards.deletedAt))).get()
 }
 
 /**
@@ -307,21 +337,23 @@ export function giveUpNewCard(db: Db, captureId: string, lastError: string, now:
  * Job `rerecognized`: rebuilds a card from its recording's new transcript. It
  * rewrites the card in place only when this recording created it (see
  * creatorCaptureId), and on a clash leaves it untouched; otherwise the
- * recording goes through createCard like a new dictation.
+ * recording goes through createCard like a new dictation. A card the user
+ * deleted is never rebuilt or replaced, not even when it was deleted while
+ * Gemini ran.
  */
 export async function applyRerecognized(deps: CaptureDeps, captureId: string, now: Date): Promise<void> {
   const { db, generator } = deps
   const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
   if (!capture?.transcript) return
+  if (capture.cardId && !liveCard(db, capture.cardId)) return
   const transcript = capture.transcript
   const generated = await generator.fromDictation(transcript)
   const fields = toCardFields(generated)
   const still = db.select({ cardId: captures.cardId }).from(captures).where(eq(captures.id, captureId)).get()
   if (!still) return
+  if (still.cardId && !liveCard(db, still.cardId)) return
   const existing =
-    still.cardId && creatorCaptureId(db, still.cardId) === captureId
-      ? db.select().from(cards).where(and(eq(cards.id, still.cardId), isNull(cards.deletedAt))).get()
-      : undefined
+    still.cardId && creatorCaptureId(db, still.cardId) === captureId ? liveCard(db, still.cardId) : undefined
   const { cardId, duplicateOf } = existing
     ? (({ card, duplicateOf }) => ({ cardId: card.id, duplicateOf }))(
         applyGeneratedFields(db, existing, fields, now, { onClash: 'untouched' }),

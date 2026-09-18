@@ -4,7 +4,7 @@ import { createTestDb } from '../db/testing'
 import { captures, generationJobs } from '../db/schema'
 import { GenerationError } from '../generate'
 import {
-  activeJobCardIds, enqueueJob, hasActiveJob, hasActiveJobFor, promoteApproved, recoverRunning, runNextJob,
+  activeJobCardIds, enqueueJob, hasActiveJob, hasQueuedJobFor, promoteApproved, recoverRunning, runNextJob,
   type JobHandlers,
 } from './jobs'
 
@@ -227,21 +227,23 @@ describe('active jobs', () => {
 
   // Ruling 1: a pending `regenerate` on the same card works from answer_pl, so
   // it must not stop a re-recognition from queueing its own `rerecognized`
-  // job — the check is per kind and per recording, not per card.
-  it('finds an active job of one kind for one recording only', () => {
+  // job — the check is per kind and per recording, not per card. And only a
+  // queued job counts: a running one has already read the old transcript.
+  it('finds a queued job of one kind for one recording only', () => {
     const { db, sqlite } = createTestDb()
     sqlite.prepare(`INSERT INTO cards (id, type, answer_pl, answer_key, status, created_at, updated_at, due) VALUES ('k', 'ru_to_pl', 'k', 'k', 'ready', 1, 1, 1)`).run()
     capture(db, 'c1', { status: 'generated', cardId: 'k' })
     capture(db, 'c2', { status: 'generated', cardId: 'k' })
     enqueueJob(db, { kind: 'regenerate', cardId: 'k' }, at(0))
     enqueueJob(db, { kind: 'new', captureId: 'c1' }, at(0))
-    const running = enqueueJob(db, { kind: 'rerecognized', captureId: 'c2', cardId: 'k' }, at(0))
-    db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, running)).run()
+    const second = enqueueJob(db, { kind: 'rerecognized', captureId: 'c2', cardId: 'k' }, at(0))
+    expect(hasQueuedJobFor(db, 'rerecognized', 'c1')).toBe(false)
+    expect(hasQueuedJobFor(db, 'new', 'c1')).toBe(true)
+    expect(hasQueuedJobFor(db, 'rerecognized', 'c2')).toBe(true)
+    db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, second)).run()
     expect(hasActiveJob(db, 'k')).toBe(true)
-    expect(hasActiveJobFor(db, 'rerecognized', 'c1')).toBe(false)
-    expect(hasActiveJobFor(db, 'new', 'c1')).toBe(true)
-    expect(hasActiveJobFor(db, 'rerecognized', 'c2')).toBe(true)
-    db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, running)).run()
-    expect(hasActiveJobFor(db, 'rerecognized', 'c2')).toBe(false)
+    expect(hasQueuedJobFor(db, 'rerecognized', 'c2')).toBe(false)
+    db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, second)).run()
+    expect(hasQueuedJobFor(db, 'rerecognized', 'c2')).toBe(false)
   })
 })

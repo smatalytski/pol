@@ -269,15 +269,19 @@ on it automatically — the service will not start unless that mount is
 actually active. `After=...mnt-fiszki.mount` is kept alongside it only as
 documentation of intent; `RequiresMountsFor` is what actually enforces it.
 
-## Known assumption: the unawaited capture pipeline under `next start`
+## Known assumption: the unawaited capture recognition under `next start`
 
-`POST /api/captures` returns `{captureId}` immediately and runs the pipeline
-in an unawaited `void processCapture(...)` — its own comment notes this would
+`POST /api/captures` returns `{captureId}` immediately and runs Speech-to-Text
+in an unawaited `void recognizeCapture(...)` — its own comment notes this would
 be unsafe on a serverless host that can freeze or kill the process the moment
 the response is sent. Spec §10 deploys `next start` under systemd on a
 persistent VM specifically so that assumption holds: the Node process keeps
 running, event loop and all, long after the HTTP response for `/api/captures`
 has gone out, exactly as it would under `next dev`.
+
+Card generation is not started by the request at all: a recording that leaves
+its review window becomes a job in the generation queue (`lib/queue/jobs.ts`),
+and the Gemini call happens when that job runs.
 
 That said, this has only ever been exercised against `npm run dev` in
 development and in the automated test suite (which invokes the same

@@ -20,7 +20,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!body.success) return NextResponse.json({ error: 'lang must be pl or ru' }, { status: 400 })
 
   // Speech-to-Text failures come back in `error` as a 200 — the recording
-  // keeps its transcript. With a card, `queued` says the Gemini half is now
-  // waiting in the generation queue.
+  // keeps its transcript. `queued` says the Gemini half (a card's rebuild, or
+  // a recording's first generation) is now waiting in the generation queue.
   return NextResponse.json(await rerecognize({ db, transcriber: getTranscriber() }, id, body.data.lang, new Date()))
 }

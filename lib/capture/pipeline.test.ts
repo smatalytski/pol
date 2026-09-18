@@ -283,6 +283,96 @@ describe('rerecognize', () => {
     expect(row(d, id).transcript).toBe('sklep')
   })
 
+  // Fix round 1, finding 1: a running job has already read the old
+  // transcript, so it cannot stand in for this one; the worker is serial, so
+  // the successor runs after it and wins.
+  it('queues a successor when the rerecognized job is already running', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    await rerecognize(d, id, 'ru', NOW)
+    d.db.update(generationJobs).set({ status: 'running' }).run()
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('sklep')
+    expect(await rerecognize(d, id, 'pl', NOW)).toEqual({ queued: true, error: null })
+    const jobs = d.db.select().from(generationJobs).all()
+    expect(jobs.map((j) => [j.kind, j.status]).sort()).toEqual([['rerecognized', 'queued'], ['rerecognized', 'running']])
+  })
+
+  // Fix round 1, finding 2: promotion can land while Speech-to-Text runs.
+  it('puts a recording promoted as już masz back under review, like one still in review', async () => {
+    const d = deps()
+    createCard(d.db, input({ answerPl: 'sklep' }), NOW)
+    const id = await recognized(d, 'sklep')
+    d.db.update(captures).set({ status: 'duplicate' }).where(eq(captures.id, id)).run()
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    const later = new Date(NOW.getTime() + 30_000)
+    expect(await rerecognize(d, id, 'ru', later)).toEqual({ queued: false, error: null })
+    expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'склеп', transcribedAt: later.getTime(), duplicateOf: null })
+    expect(d.db.select().from(generationJobs).all()).toHaveLength(0)
+  })
+
+  // A queued recording's `new` job reads the transcript when it runs, so
+  // only the text changes.
+  it('only replaces the transcript of a recording whose new job is still queued', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    d.db.update(captures).set({ status: 'queued' }).where(eq(captures.id, id)).run()
+    enqueueJob(d.db, { kind: 'new', captureId: id }, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    expect(row(d, id)).toMatchObject({ status: 'queued', transcript: 'склеп' })
+    expect(d.db.select().from(generationJobs).all().map((j) => j.kind)).toEqual(['new'])
+  })
+
+  // Its `new` job is mid-Gemini on the old transcript: a rerecognized job
+  // with no card follows it and rebuilds whatever card that job made.
+  it('queues a rerecognized job for a recording whose new job is generating, and ends with one card from the new transcript', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    d.db.update(captures).set({ status: 'generating' }).where(eq(captures.id, id)).run()
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    const jobs = d.db.select().from(generationJobs).all()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]).toMatchObject({ kind: 'rerecognized', captureId: id, cardId: null })
+
+    // The `new` job finishes (its Gemini answer came from the old transcript),
+    // then the rerecognized job rewrites that card in place.
+    await generateNewCard(d, id, NOW)
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await applyRerecognized(d, id, NOW)
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(1)
+    expect(all[0]).toMatchObject({ answerPl: 'krypta', promptText: 'склеп' })
+    expect(row(d, id)).toMatchObject({ status: 'generated', cardId: all[0].id })
+  })
+
+  it('ends with one card when the rerecognized job runs before the new job retries', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    d.db.update(captures).set({ status: 'generating' }).where(eq(captures.id, id)).run()
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    await rerecognize(d, id, 'ru', NOW)
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await applyRerecognized(d, id, NOW)
+    await generateNewCard(d, id, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(1)
+    expect(d.generator.fromDictation).toHaveBeenCalledTimes(1)
+    expect(row(d, id).status).toBe('generated')
+  })
+
+  // Fix round 1, finding 3: a card the user deleted must not come back.
+  it('queues nothing for a recording whose card was deleted', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    deleteCard(d.db, row(d, id).cardId!, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: false, error: null })
+    expect(d.db.select().from(generationJobs).all()).toHaveLength(0)
+  })
+
   it('returns a Speech-to-Text failure and leaves the transcript', async () => {
     const d = deps()
     const id = await recognized(d, 'sklep')
@@ -563,6 +653,37 @@ describe('applyRerecognized', () => {
     expect(JSON.parse(row(d, id).generationJson!).duplicateOf).toBe(owner)
     expect(d.db.select().from(cards).where(eq(cards.id, cardId)).get()).toEqual(before)
     expect(d.db.select().from(cards).all()).toHaveLength(2)
+  })
+
+  // Fix round 1, finding 3: the job may have been queued before the delete.
+  it('does not bring back a card the user deleted', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    const cardId = row(d, id).cardId!
+    deleteCard(d.db, cardId, NOW)
+    const before = d.db.select().from(cards).get()!
+    d.db.update(captures).set({ transcript: 'склеп' }).where(eq(captures.id, id)).run()
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await applyRerecognized(d, id, NOW)
+    expect(d.db.select().from(cards).all()).toEqual([before])
+    expect(row(d, id).cardId).toBe(cardId)
+  })
+
+  it('does not bring back a card deleted while Gemini ran', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    const cardId = row(d, id).cardId!
+    d.generator.fromDictation = vi.fn(async () => {
+      deleteCard(d.db, cardId, NOW)
+      return RU_GENERATED
+    })
+    await applyRerecognized(d, id, NOW)
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(1)
+    expect(all[0]).toMatchObject({ id: cardId, answerPl: GENERATED.answer_pl })
+    expect(all[0].deletedAt).not.toBeNull()
   })
 
   it('throws a generation failure and leaves the card as it was', async () => {

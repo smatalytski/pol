@@ -58,12 +58,13 @@ export function hasActiveJob(db: Db, cardId: string): boolean {
 }
 
 /**
- * Whether a job of this kind for this recording is still queued or running.
- * Per kind and per recording, not per card: a pending `regenerate` on the same
- * card works from answer_pl and would never see a new transcript, so it must
- * not stop a re-recognition from queueing its own `rerecognized` job.
+ * Whether a job of this kind for this recording is waiting to run. Per kind
+ * and per recording, not per card: a pending `regenerate` on the same card
+ * works from answer_pl and would never see a new transcript, so it must not
+ * stop a re-recognition from queueing its own `rerecognized` job. Queued
+ * only, not running: a running job has already read its inputs.
  */
-export function hasActiveJobFor(db: Db, kind: JobKind, captureId: string): boolean {
+export function hasQueuedJobFor(db: Db, kind: JobKind, captureId: string): boolean {
   return !!db
     .select({ id: generationJobs.id })
     .from(generationJobs)
@@ -71,7 +72,7 @@ export function hasActiveJobFor(db: Db, kind: JobKind, captureId: string): boole
       and(
         eq(generationJobs.kind, kind),
         eq(generationJobs.captureId, captureId),
-        inArray(generationJobs.status, ACTIVE),
+        eq(generationJobs.status, 'queued'),
       ),
     )
     .get()
