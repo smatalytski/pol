@@ -42,6 +42,7 @@ function cardRow(over: Partial<CardRow> = {}): CardRow {
     lapses: 0,
     state: 0,
     lastReview: null,
+    topicId: null,
     ...over,
   }
 }
