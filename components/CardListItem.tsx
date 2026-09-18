@@ -11,10 +11,12 @@ import { t } from '@/i18n/pl'
 export function CardListItem({
   card,
   topicName,
+  topicSuspended,
   generating,
 }: {
   card: CardRow
   topicName?: string | null
+  topicSuspended?: boolean
   generating?: boolean
 }) {
   return (
@@ -30,6 +32,10 @@ export function CardListItem({
               review. Compared against null rather than truthiness so a
               0 timestamp could not render as a bare "0". */}
           {card.suspendedAt !== null && <span className="text-neutral-500">{t.suspended}</span>}
+          {/* A card in a switched-off topic is out of review just like one
+              suspended individually (spec §3.5), but nothing said so — it
+              looked like any other active card. */}
+          {topicSuspended && <span className="text-neutral-500">{t.topicOff}</span>}
           {generating && <span className="text-sky-700">{t.generating}</span>}
         </span>
       </Link>

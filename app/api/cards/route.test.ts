@@ -93,6 +93,15 @@ describe('GET /api/cards', () => {
     const body = await (await GET(new Request('http://test/api/cards'))).json()
     expect(body.topicNames).toEqual({ t1: 'U lekarza' })
   })
+
+  // A card in a switched-off topic is out of review just like an
+  // individually suspended one (spec §3.5), but nothing on /fiszki said so.
+  it('lists the ids of switched-off topics, so their cards can be badged', async () => {
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: 5, createdAt: 1 }).run()
+    db.insert(topics).values({ id: 't2', name: 'U mechanika', context: 'y', suspendedAt: null, createdAt: 2 }).run()
+    const body = await (await GET(new Request('http://test/api/cards'))).json()
+    expect(body.suspendedTopicIds).toEqual(['t1'])
+  })
 })
 
 describe('POST /api/cards', () => {

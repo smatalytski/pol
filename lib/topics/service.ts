@@ -235,6 +235,16 @@ export function topicNames(db: Db): Record<string, string> {
   )
 }
 
+/** Ids of switched-off topics, so a card whose topic is off (not the card itself) can be badged too (§3.5). */
+export function suspendedTopicIds(db: Db): string[] {
+  return db
+    .select({ id: topics.id })
+    .from(topics)
+    .where(isNotNull(topics.suspendedAt))
+    .all()
+    .map((t) => t.id)
+}
+
 function latestSuggestJob(db: Db, topicId: string): JobRow | undefined {
   return db
     .select()

@@ -73,7 +73,7 @@ export default function TopicsPage() {
                 onClick={() => void toggle(x)}
                 className="rounded border px-2 py-1"
               >
-                {x.suspendedAt === null ? t.topicOn : t.topicOff}
+                {x.suspendedAt === null ? t.topicOn : t.topicOffToggle}
               </button>
             </span>
           </li>

@@ -21,6 +21,7 @@ export default function CardsPage() {
   const [pending, setPending] = useState<PendingRow[]>([])
   const [generatingIds, setGeneratingIds] = useState<ReadonlySet<string>>(() => new Set())
   const [topicNames, setTopicNames] = useState<Record<string, string>>({})
+  const [suspendedTopicIds, setSuspendedTopicIds] = useState<ReadonlySet<string>>(() => new Set())
 
   const load = useCallback(async (query: string) => {
     const res = await fetch(`/api/cards?q=${encodeURIComponent(query)}`)
@@ -29,11 +30,13 @@ export default function CardsPage() {
       pending: PendingRow[]
       generatingCardIds: string[]
       topicNames: Record<string, string>
+      suspendedTopicIds: string[]
     }
     setRows(body.cards)
     setPending(body.pending)
     setGeneratingIds(new Set(body.generatingCardIds))
     setTopicNames(body.topicNames)
+    setSuspendedTopicIds(new Set(body.suspendedTopicIds))
   }, [])
 
   useEffect(() => {
@@ -75,6 +78,7 @@ export default function CardsPage() {
             key={c.id}
             card={c}
             topicName={c.topicId ? topicNames[c.topicId] : null}
+            topicSuspended={c.topicId ? suspendedTopicIds.has(c.topicId) : false}
             generating={generatingIds.has(c.id)}
           />
         ))}

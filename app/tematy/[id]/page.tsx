@@ -130,7 +130,7 @@ export default function TopicPage() {
           onClick={() => void patch({ suspendedAt: topic.suspendedAt === null ? Date.now() : null })}
           className="shrink-0 rounded border px-2 py-1 text-xs"
         >
-          {topic.suspendedAt === null ? t.topicOn : t.topicOff}
+          {topic.suspendedAt === null ? t.topicOn : t.topicOffToggle}
         </button>
       </div>
 
@@ -214,7 +214,7 @@ export default function TopicPage() {
           </li>
         ))}
         {view.cards.map((c) => (
-          <CardListItem key={c.id} card={c} />
+          <CardListItem key={c.id} card={c} topicSuspended={topic.suspendedAt !== null} />
         ))}
       </ul>
     </div>

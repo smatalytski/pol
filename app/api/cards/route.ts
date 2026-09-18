@@ -4,7 +4,7 @@ import { db } from '@/lib/db/client'
 import { createCard, searchCards } from '@/lib/cards/service'
 import { pendingCaptures } from '@/lib/capture/pipeline'
 import { activeJobCardIds } from '@/lib/queue/jobs'
-import { topicNames } from '@/lib/topics/service'
+import { suspendedTopicIds, topicNames } from '@/lib/topics/service'
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams.get('q') ?? ''
@@ -16,6 +16,9 @@ export async function GET(req: Request) {
     generatingCardIds: activeJobCardIds(db),
     // Named topics only, for showing beside each card that belongs to one.
     topicNames: topicNames(db),
+    // A card is out of review if it or its topic is off (spec §3.5); this
+    // says which topics are off so their cards can be badged too.
+    suspendedTopicIds: suspendedTopicIds(db),
   })
 }
 

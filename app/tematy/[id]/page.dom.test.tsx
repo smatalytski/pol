@@ -138,6 +138,21 @@ describe('TopicPage', () => {
     expect(screen.getByText(t.needsInput).closest('li')).toBe(screen.getByText('kaszel').closest('li'))
   })
 
+  // A card in a switched-off topic is out of review just like an
+  // individually suspended one (spec §3.5), and the topic page must say so
+  // on every card row, "the same rows as /fiszki".
+  it('badges every card when the topic itself is switched off', async () => {
+    stubFetch(() =>
+      view({
+        topic: { id: 't1', name: 'U lekarza', context: 'x', suspendedAt: 123, createdAt: 1 },
+        cards: [{ id: 'k1', answerPl: 'katar', status: 'ready', suspendedAt: null, type: 'ru_to_pl' }],
+      }),
+    )
+    render(<TopicPage />)
+    expect(await screen.findByText(t.topicOff)).toBeTruthy()
+    expect(screen.getByText(t.topicOff).closest('li')).toBe(screen.getByText('katar').closest('li'))
+  })
+
   it('switches the topic off', async () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)
