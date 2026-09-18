@@ -269,15 +269,24 @@ on it automatically — the service will not start unless that mount is
 actually active. `After=...mnt-fiszki.mount` is kept alongside it only as
 documentation of intent; `RequiresMountsFor` is what actually enforces it.
 
-## Known assumption: the unawaited capture pipeline under `next start`
+## Known assumption: the unawaited capture recognition under `next start`
 
-`POST /api/captures` returns `{captureId}` immediately and runs the pipeline
-in an unawaited `void processCapture(...)` — its own comment notes this would
+`POST /api/captures` returns `{captureId}` immediately and runs Speech-to-Text
+in an unawaited `void recognizeCapture(...)` — its own comment notes this would
 be unsafe on a serverless host that can freeze or kill the process the moment
 the response is sent. Spec §10 deploys `next start` under systemd on a
 persistent VM specifically so that assumption holds: the Node process keeps
 running, event loop and all, long after the HTTP response for `/api/captures`
 has gone out, exactly as it would under `next dev`.
+
+Card generation is not started by the request at all: a recording that leaves
+its review window becomes a job in the generation queue (`lib/queue/jobs.ts`),
+and the Gemini call happens when that job runs.
+
+A restart (every deploy is one) kills an unawaited recognition mid-flight,
+leaving its recording `uploaded`. The generation worker re-runs recognition
+for every such recording when it starts (`recognizeStranded` in
+`lib/capture/pipeline.ts`), so none waits at `rozpoznawanie…` forever.
 
 That said, this has only ever been exercised against `npm run dev` in
 development and in the automated test suite (which invokes the same
@@ -349,8 +358,9 @@ ordinary card, so nothing would flag it.
 Latency is worth knowing too: the same calls took 30s, 46s and 2.4s. A
 `gemini-3.8-flash` request that takes half a minute is normal here, and
 intermittent `429 RESOURCE_EXHAUSTED` from it is common enough that two
-consecutive re-recognitions hit it. A 429 leaves the card `needs_input`, which
-`wygeneruj ponownie` repairs.
+consecutive re-recognitions hit it. That is why every Gemini call runs in the
+generation queue (`lib/queue/jobs.ts`): a 429 pauses the queue with backoff and
+the job is retried until it succeeds, instead of failing a request.
 
 ## Not built yet
 

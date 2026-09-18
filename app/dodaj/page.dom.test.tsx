@@ -7,17 +7,16 @@ import type { CaptureView } from '@/lib/capture/pipeline'
 import { t } from '@/i18n/pl'
 
 function captureRow(id: string, status: string, createdAt = Date.now()): CaptureView {
+  const inReview = status === 'transcribed'
   return {
     id,
     status,
     transcript: null,
     error: null,
-    cardId: null,
     duplicateOf: null,
-    audioMediaId: null,
     createdAt,
-    cardType: null,
-    wordKind: null,
+    inReview,
+    reviewRemainingMs: inReview ? 5000 : null,
   }
 }
 
@@ -383,14 +382,16 @@ describe('AddPage chip deletion (spec §4: "swipe to delete", wired up once Task
     fireEvent.pointerUp(el, { clientX: 80 })
   }
 
-  it('soft-deletes the card when swiping a chip whose capture already has one', async () => {
+  // An on-screen recording never has a card (it is uploaded, failed or under
+  // review), so rejecting it always deletes the recording itself.
+  it('deletes the recording when swiping a chip under review', async () => {
     const deleteCalls: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string, init?: RequestInit) => {
         if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
           return Promise.resolve({
-            json: () => Promise.resolve({ captures: [{ ...captureRow('c1', 'generated'), cardId: 'card-1' }] }),
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'transcribed')] }),
           }) as unknown as Promise<Response>
         }
         if (init?.method === 'DELETE') {
@@ -403,10 +404,10 @@ describe('AddPage chip deletion (spec §4: "swipe to delete", wired up once Task
     render(<AddPage />)
     const li = await screen.findByRole('listitem')
     swipeLeft(li)
-    await waitFor(() => expect(deleteCalls).toEqual(['/api/cards/card-1']))
+    await waitFor(() => expect(deleteCalls).toEqual(['/api/captures/c1']))
   })
 
-  it('removes the capture (not a card) when swiping a chip whose capture has no card yet', async () => {
+  it('deletes the recording when swiping a chip with a failed recognition', async () => {
     const deleteCalls: string[] = []
     vi.stubGlobal(
       'fetch',
@@ -522,10 +523,7 @@ describe('AddPage re-recognition', () => {
           ok: true,
           json: () =>
             Promise.resolve({
-              captures: [{ ...captureRow('cap-1', 'generated'), audioMediaId: 'm1', transcript: 'sklep' }],
-              cardId: 'c1',
-              duplicateOf: null,
-              error: null,
+              captures: [{ ...captureRow('cap-1', 'transcribed'), transcript: 'sklep' }],
             }),
         }) as unknown as Promise<Response>
       }),
@@ -541,129 +539,65 @@ describe('AddPage re-recognition', () => {
     // The refreshed transcript has to arrive without the user reloading.
     expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
   })
+})
 
-  it('asks the server to make a capture card forms-only, then refreshes', async () => {
-    stubMic()
-    const calls: Array<{ url: string; method: string; body?: unknown }> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
-        const method = init?.method ?? 'GET'
-        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              captures: [
-                {
-                  ...captureRow('cap-1', 'generated'),
-                  audioMediaId: 'm1',
-                  transcript: 'kot',
-                  cardId: 'card-1',
-                  cardType: 'ru_to_pl',
-                  wordKind: 'rzeczownik',
-                },
-              ],
-              card: null,
-              duplicateOf: null,
-            }),
-        }) as unknown as Promise<Response>
-      }),
-    )
-    render(<AddPage />)
-    const button = await screen.findByText(t.typePlPl)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    const post = calls.find((c) => c.method === 'POST')
-    expect(post?.url).toBe('/api/cards/card-1/typ')
-    expect(post?.body).toEqual({ type: 'pl_to_pl' })
-    expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
+// A failed recognition stops the polling (nothing on screen is in flight), so
+// ponów has to fetch its own result: otherwise the recording re-enters review
+// and is approved without ever being shown.
+describe('AddPage ponów', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
-  // A 400 — e.g. a noun whose forms_json turned out empty — must not look like
-  // a dead button: the refresh still happens (the chip may have changed for
-  // other reasons), but the failure has to say so.
-  it('shows a failure notice when the type switch is rejected', async () => {
+  it('shows the transcript that the retried recognition produced', async () => {
     stubMic()
+    let list: CaptureView[] = [{ ...captureRow('cap-1', 'failed'), error: 'unintelligible' }]
+    const posts: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string, init?: RequestInit) => {
-        const method = init?.method ?? 'GET'
-        if (method === 'POST') {
-          return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: 'no forms' }) }) as unknown as Promise<Response>
+        if (init?.method === 'POST') {
+          posts.push(url)
+          list = [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }]
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
         }
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              captures: [
-                {
-                  ...captureRow('cap-1', 'generated'),
-                  audioMediaId: 'm1',
-                  transcript: 'kot',
-                  cardId: 'card-1',
-                  cardType: 'ru_to_pl',
-                  wordKind: 'rzeczownik',
-                },
-              ],
-            }),
-        }) as unknown as Promise<Response>
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: list }) })
       }),
     )
     render(<AddPage />)
-    const button = await screen.findByText(t.typePlPl)
+    const control = await screen.findByText(t.retry)
     await act(async () => {
-      fireEvent.click(button)
+      fireEvent.click(control)
     })
-    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
-  })
-
-  // A 200 carrying `duplicateOf` means a pl_to_pl card for this word already
-  // exists, so this capture's card was NOT switched — that also has to be
-  // said, not left looking like a silent success.
-  it('shows a duplicate notice when a pl_to_pl card for this word already exists', async () => {
-    stubMic()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
-        const method = init?.method ?? 'GET'
-        if (method === 'POST') {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ card: null, duplicateOf: 'other' }),
-          }) as unknown as Promise<Response>
-        }
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              captures: [
-                {
-                  ...captureRow('cap-1', 'generated'),
-                  audioMediaId: 'm1',
-                  transcript: 'kot',
-                  cardId: 'card-1',
-                  cardType: 'ru_to_pl',
-                  wordKind: 'rzeczownik',
-                },
-              ],
-            }),
-        }) as unknown as Promise<Response>
-      }),
-    )
-    render(<AddPage />)
-    const button = await screen.findByText(t.typePlPl)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    expect(await screen.findByText(t.typeDuplicate)).toBeTruthy()
+    expect(posts).toEqual(['/api/captures/cap-1/retry'])
+    expect(await screen.findByText('kot')).toBeTruthy()
   })
 })
 
-// Ruling 14: a re-recognition is Speech-to-Text plus a Gemini call, and ~30 s
-// is normal. With nothing on screen the user taps again and starts a second
-// retranscribe on the same capture — and a failure used to show nothing at all.
+// The fade is data-driven: a recording leaves the screen when the server
+// stops returning it (it was approved), not on a client timer.
+describe('AddPage review fade', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('drops a recording once the server stops returning it', async () => {
+    stubMic()
+    let list: CaptureView[] = [captureRow('cap-1', 'transcribed')]
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: list }) }) as unknown as Promise<Response>))
+    render(<AddPage />)
+    expect(await screen.findByText(t.asRussian)).toBeTruthy()
+    list = []
+    await waitFor(() => expect(screen.queryByText(t.asRussian)).toBeNull(), { timeout: 3_000 })
+  })
+})
+
+// Ruling 14: a re-recognition used to be Speech-to-Text plus a Gemini call, and
+// ~30 s was normal. With nothing on screen the user taps again and starts a
+// second re-recognition (rerecognize) on the same capture — and a failure used
+// to show nothing at all.
 describe('AddPage slow and failing chip controls', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -671,12 +605,8 @@ describe('AddPage slow and failing chip controls', () => {
   })
 
   const chip = {
-    ...captureRow('cap-1', 'generated'),
-    audioMediaId: 'm1',
+    ...captureRow('cap-1', 'transcribed'),
     transcript: 'kot',
-    cardId: 'card-1',
-    cardType: 'ru_to_pl' as const,
-    wordKind: 'rzeczownik' as const,
   }
 
   function deferred<T>() {
@@ -717,33 +647,12 @@ describe('AddPage slow and failing chip controls', () => {
     expect(screen.getByText(t.transcribing)).toBeTruthy()
     expect(button(t.asRussian).disabled).toBe(true)
     expect(button(t.asPolish).disabled).toBe(true)
-    expect(button(t.typePlPl).disabled).toBe(true)
 
     await act(async () => {
-      post.resolve({ ok: true, json: () => Promise.resolve({ cardId: 'card-1', duplicateOf: null, error: null }) })
+      post.resolve({ ok: true, json: () => Promise.resolve({ queued: false, error: null }) })
     })
     await waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
     expect(button(t.asRussian).disabled).toBe(false)
-    expect(button(t.typePlPl).disabled).toBe(false)
-  })
-
-  it('disables the chip controls while a type switch is in flight', async () => {
-    stubMic()
-    const post = deferred<unknown>()
-    stubWrites(() => post.promise)
-    render(<AddPage />)
-    const control = await screen.findByText(t.typePlPl)
-    await act(async () => {
-      fireEvent.click(control)
-    })
-
-    expect(button(t.asRussian).disabled).toBe(true)
-    expect(button(t.typePlPl).disabled).toBe(true)
-
-    await act(async () => {
-      post.resolve({ ok: true, json: () => Promise.resolve({ card: null, duplicateOf: null }) })
-    })
-    await waitFor(() => expect(button(t.typePlPl).disabled).toBe(false))
   })
 
   it('shows a notice when re-recognition is refused', async () => {
@@ -767,17 +676,6 @@ describe('AddPage slow and failing chip controls', () => {
       fireEvent.click(control)
     })
     expect(await screen.findByText(t.languageFailed)).toBeTruthy()
-  })
-
-  it('shows a notice when a type switch never reaches the server', async () => {
-    stubMic()
-    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
-    render(<AddPage />)
-    const control = await screen.findByText(t.typePlPl)
-    await act(async () => {
-      fireEvent.click(control)
-    })
-    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
   })
 
   it('shows a notice when a delete is refused', async () => {

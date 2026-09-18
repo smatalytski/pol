@@ -52,11 +52,30 @@ export const captures = sqliteTable('captures', {
   id: text('id').primaryKey(),
   audioMediaId: text('audio_media_id'),
   transcript: text('transcript'),
-  status: text('status', { enum: ['uploaded', 'transcribed', 'generated', 'failed'] }).notNull(),
+  status: text('status', {
+    enum: ['uploaded', 'transcribed', 'queued', 'generating', 'generated', 'duplicate', 'failed'],
+  }).notNull(),
   error: text('error'),
   generationJson: text('generation_json'),
   cardId: text('card_id'),
   createdAt: integer('created_at').notNull(),
+  transcribedAt: integer('transcribed_at'),
+  duplicateOf: text('duplicate_of'),
+})
+
+export const generationJobs = sqliteTable('generation_jobs', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['new', 'regenerate', 'rerecognized'] }).notNull(),
+  captureId: text('capture_id'),
+  cardId: text('card_id'),
+  status: text('status', { enum: ['queued', 'running', 'done', 'failed'] }).notNull(),
+  attempts: integer('attempts').notNull(),
+  // Counts only non-retryable failures (spec §6); see migrations/002-generation-queue.sql.
+  failures: integer('failures').notNull(),
+  nextAttemptAt: integer('next_attempt_at').notNull(),
+  lastError: text('last_error'),
+  createdAt: integer('created_at').notNull(),
+  finishedAt: integer('finished_at'),
 })
 
 export const ttsClips = sqliteTable('tts_clips', {

@@ -4,6 +4,7 @@ import {
   GeneratedCardSchema,
   GenerationError,
   geminiGenerator,
+  isRetryableRequestError,
   responseSchemaFor,
   toCardFields,
 } from './index'
@@ -199,6 +200,48 @@ describe('geminiGenerator.fromDictation', () => {
     const generate = ok(FULL)
     await expect(make(generate).fromDictation('   ')).rejects.toThrow(GenerationError)
     expect(generate).not.toHaveBeenCalled()
+  })
+})
+
+describe('retryable generation failures', () => {
+  const failWith = (err: unknown) => vi.fn().mockRejectedValue(err)
+  const make429 = () => Object.assign(new Error('Resource exhausted'), { status: 429 })
+
+  it('marks an HTTP 429 as retryable', async () => {
+    const err = await make(failWith(make429())).fromDictation('kot').catch((e) => e)
+    expect(err).toBeInstanceOf(GenerationError)
+    expect(err.retryable).toBe(true)
+  })
+
+  // The exact shape Vertex produced in production: the status is only in the
+  // JSON inside the message.
+  it('marks a 429 carried only in the message JSON as retryable', () => {
+    const err = new Error('{"error":{"code":429,"message":"Resource exhausted.","status":"RESOURCE_EXHAUSTED"}}')
+    expect(isRetryableRequestError(err)).toBe(true)
+  })
+
+  it('marks 500 and 503 as retryable, and a 400 as not', () => {
+    expect(isRetryableRequestError(Object.assign(new Error('x'), { status: 500 }))).toBe(true)
+    expect(isRetryableRequestError(Object.assign(new Error('x'), { status: 503 }))).toBe(true)
+    expect(isRetryableRequestError(Object.assign(new Error('x'), { status: 400 }))).toBe(false)
+  })
+
+  it('marks a network failure, which has no HTTP status at all, as retryable', () => {
+    expect(isRetryableRequestError(new TypeError('fetch failed'))).toBe(true)
+    expect(isRetryableRequestError(new Error('read ECONNRESET'))).toBe(true)
+  })
+
+  it('never marks an unusable response as retryable', async () => {
+    const noText = vi.fn().mockResolvedValue({ text: '' })
+    expect((await make(noText).fromDictation('kot').catch((e) => e)).retryable).toBe(false)
+    const notJson = vi.fn().mockResolvedValue({ text: 'not json' })
+    expect((await make(notJson).fromDictation('kot').catch((e) => e)).retryable).toBe(false)
+    const wrongShape = ok({ answer_pl: 'kot' })
+    expect((await make(wrongShape).fromDictation('kot').catch((e) => e)).retryable).toBe(false)
+  })
+
+  it('never marks an empty transcript as retryable', async () => {
+    expect((await make(ok(FULL)).fromDictation('  ').catch((e) => e)).retryable).toBe(false)
   })
 })
 

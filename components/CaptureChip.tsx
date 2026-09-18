@@ -1,10 +1,8 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
-import type { CardType } from '@/lib/cards/service'
-import { hasForms } from '@/lib/cards/forms'
-import { CardTypeSwitch } from '@/components/CardTypeSwitch'
+import { REVIEW_MS } from '@/lib/queue/review'
 import { t } from '@/i18n/pl'
 
 /**
@@ -26,6 +24,13 @@ import { t } from '@/i18n/pl'
  * once. That brief overlap is expected and self-corrects on the next poll;
  * nothing here tries to eagerly suppress it, since doing so would require
  * correlating the two unrelated id spaces.
+ *
+ * The chip itself is status-only (Task 8): no audio player, no type switch,
+ * no tap-to-edit form. A recording under review offers po polsku / po
+ * rosyjsku and usuń, with a bar draining toward approval; a failed
+ * recognition offers ponów instead. There is nothing here for a card the
+ * recording turned into — an on-screen recording is by definition still
+ * uploaded, failed, or under review (see `listOnScreen`).
  */
 export type ChipItem =
   | { kind: 'outbox'; id: string; createdAt: number }
@@ -46,77 +51,27 @@ export function chipCreatedAt(item: ChipItem): number {
 // screen clears it easily.
 const SWIPE_THRESHOLD_PX = 60
 
-type EditableFields = {
-  promptText: string | null
-  promptHint: string | null
-  answerPl: string
-  examplePl: string | null
-  exampleRu: string | null
-  grammarNote: string | null
-}
-
 export function CaptureChip({
   item,
   onRetry,
   onDelete,
   onRelanguage,
-  onSetType,
   pending = false,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
-  onRelanguage: (id: string, lang: DictationLang) => void
   onDelete: (item: ChipItem) => void
-  onSetType: (cardId: string, type: CardType) => void
-  /**
-   * A re-recognition or type switch for this capture is in flight (the page
-   * owns that state). Re-recognition is Speech-to-Text plus a Gemini call,
-   * ~30 s is normal, so the controls that would start another one are
-   * disabled and the chip says it is working.
-   */
+  onRelanguage: (id: string, lang: DictationLang) => void
+  /** A recognition for this recording (ponów or a re-recognition) is in flight; its language controls are disabled until it lands. */
   pending?: boolean
 }) {
-  // Hooks must run unconditionally, before the outbox early return below —
-  // an outbox chip never uses this state, but React doesn't allow a
-  // conditional hook count between renders of the same component.
-  //
-  // A ref, not state, for the gesture's start position: it is pure bookkeeping
-  // between one pointerdown and the pointerup that follows it, never itself
-  // drives what's rendered, and — unlike state — is written and read
-  // synchronously with no render in between, so back-to-back pointerdown/
-  // pointerup handlers (as a real swipe fires, and as a test firing both
-  // events in one `act()` batch does too) always see the value the other one
-  // just set. Same pattern as hooks/useHoldToRecord.ts's gesture refs.
+  // A ref, not state: bookkeeping between one pointerdown and the pointerup
+  // after it, read synchronously with no render in between. Declared before
+  // the outbox return, since hook count may not vary between renders.
   const pointerStartX = useRef<number | null>(null)
-  const [fields, setFields] = useState<EditableFields | null>(null)
-  const [saveError, setSaveError] = useState(false)
-
-  // `fields` is a snapshot of the card taken when the form expanded. A
-  // re-recognition (a new transcript) or a type switch rebuilds the card under
-  // it, and pressing zapisz after that would PATCH the old answer and prompt
-  // straight back over the rebuild — so the form closes whenever either
-  // changes, and reopening it loads the card as it now is. Adjusted during
-  // render (React's pattern for resetting state on a prop change), so the
-  // stale form is never painted.
-  const cardVersion =
-    item.kind === 'capture' ? JSON.stringify([item.capture.transcript, item.capture.cardType]) : null
-  const [seenVersion, setSeenVersion] = useState(cardVersion)
-  if (cardVersion !== seenVersion) {
-    setSeenVersion(cardVersion)
-    setFields(null)
-  }
 
   if (item.kind === 'outbox') {
-    // No server row exists yet for this recording, so there is no id to
-    // replay audio against or to retry — rendering those controls anyway
-    // would offer buttons that can't work (the mistake Task 11's
-    // audio-eligibility fix corrected for cards). Spec §11: an upload stuck
-    // retrying still gets its own per-word chip rather than only showing up
-    // as an ambient count, so it's never unclear which word is stuck. Spec
-    // §4's swipe-to-delete/tap-to-edit affordances are for a *capture* the
-    // server already knows about (see task 17's decision: "no cardId means
-    // nothing to soft-delete", not "no server row at all") — an outbox item
-    // isn't one, so this branch stays exactly as Task 15 shipped it.
+    // No server row yet, so nothing to retry, re-recognise or delete.
     return (
       <li className="flex items-center gap-3 border-b py-3">
         <p className="flex-1 text-lg text-neutral-500">{t.uploading}</p>
@@ -125,21 +80,11 @@ export function CaptureChip({
   }
 
   const capture = item.capture
-  const expanded = fields !== null
-
-  async function loadFields() {
-    if (!capture.cardId) return
-    const res = await fetch(`/api/cards/${capture.cardId}`)
-    if (!res.ok) return
-    const { card } = (await res.json()) as { card: EditableFields }
-    setFields({
-      promptText: card.promptText,
-      promptHint: card.promptHint,
-      answerPl: card.answerPl,
-      examplePl: card.examplePl,
-      exampleRu: card.exampleRu,
-      grammarNote: card.grammarNote,
-    })
+  // Every control stops its own pointer events, or the <li> would read the
+  // press as a swipe as well.
+  const own = {
+    onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+    onPointerUp: (e: React.PointerEvent) => e.stopPropagation(),
   }
 
   function onPointerDown(e: React.PointerEvent) {
@@ -150,93 +95,32 @@ export function CaptureChip({
     if (pointerStartX.current === null) return
     const dx = e.clientX - pointerStartX.current
     pointerStartX.current = null
-    if (dx <= -SWIPE_THRESHOLD_PX) {
-      onDelete(item)
-      return
-    }
-    // Anything short of a real swipe is treated as a tap. Editing only makes
-    // sense once a card exists — a capture still uploading/transcribing/
-    // failed has nothing to edit yet, so tapping it does nothing.
-    if (Math.abs(dx) < SWIPE_THRESHOLD_PX && capture.cardId) {
-      if (expanded) {
-        setFields(null)
-      } else {
-        void loadFields()
-      }
-    }
-  }
-
-  function updateField<K extends keyof EditableFields>(key: K, value: EditableFields[K]) {
-    setFields((f) => (f ? { ...f, [key]: value } : f))
-  }
-
-  async function save() {
-    if (!fields || !capture.cardId) return
-    const res = await fetch(`/api/cards/${capture.cardId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(fields),
-    })
-    if (!res.ok) {
-      setSaveError(true)
-      return
-    }
-    setSaveError(false)
-    setFields(null)
+    if (dx <= -SWIPE_THRESHOLD_PX) onDelete(item)
   }
 
   return (
-    <li
-      className="flex flex-col gap-2 border-b py-3"
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-    >
+    <li className="flex flex-col gap-2 border-b py-3" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
       <div className="flex items-center gap-3">
         <div className="flex-1">
-          <p className="text-lg">{capture.transcript ?? t.transcribing}</p>
+          {/* "rozpoznawanie…" is only for a recording still waiting on its
+              first transcript (§7.1) — a failed one shows only its error
+              below, never this placeholder beside it. */}
+          <p className="text-lg">{capture.transcript ?? (capture.status === 'uploaded' ? t.transcribing : null)}</p>
           {capture.duplicateOf && <p className="text-sm text-amber-600">{t.alreadyHave}</p>}
-          {/* Shown whenever there is an error, not only when the status is
-              'failed': a transient Vertex 429 leaves a capture 'generated'
-              WITH an error and a stranded card, which is how a card ends up
-              needing repair with nothing on screen saying why. A failed
-              re-recognition lands the same way. */}
           {capture.error && <p className="text-sm text-red-600">{capture.error}</p>}
         </div>
-        {/* Pressing ▶ or "ponów" is itself a pointerdown+pointerup pair that
-            would otherwise bubble to the `<li>` and register as a tap or a
-            swipe on top of whatever the control itself does. */}
-        {capture.audioMediaId && (
-          <audio
-            controls
-            preload="none"
-            src={`/api/media/${capture.audioMediaId}`}
-            aria-label={t.play}
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-          />
-        )}
         {capture.status === 'failed' && (
-          <button
-            onClick={() => onRetry(capture.id)}
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-            className="text-sm underline"
-          >
+          <button onClick={() => onRetry(capture.id)} {...own} className="text-sm underline">
             {t.retry}
           </button>
         )}
       </div>
 
-      {/* Dictation is recognised as Polish, because that is what nearly all of
-          it is: measured on the real API, a two-language recognizer swallows
-          Russian whole (spoken "склеп" came back "sklep"). So a Russian
-          recording is repaired here instead, from the stored audio — the wrong
-          transcript keeps no trace of what was actually said, which is why
-          regenerating from the card could never fix it. Both directions are
-          offered rather than a toggle, so a mistaken re-recognition is undone
-          the same way it was made. Each control stops its own pointer events,
-          or the <li> would read the press as a tap or a swipe as well. */}
-      {capture.audioMediaId && (
+      {/* Recognition is Polish by default; a two-language recognizer
+          demonstrably swallows Russian (spoken "склеп" came back "sklep"), so a
+          Russian recording is re-recognised here, from its stored audio, while
+          it is still under review — which restarts the 10 s. */}
+      {capture.inReview && (
         <div className="flex items-center gap-3 pl-2 text-sm">
           <span className="text-neutral-500">{t.recognizeAs}</span>
           {([
@@ -246,8 +130,7 @@ export function CaptureChip({
             <button
               key={lang}
               onClick={() => onRelanguage(capture.id, lang)}
-              onPointerDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
+              {...own}
               disabled={pending}
               className="underline disabled:text-neutral-400"
             >
@@ -258,60 +141,20 @@ export function CaptureChip({
         </div>
       )}
 
-      {/* Only once generation has classified the word as one with forms:
-          before that there is nothing to switch to, and a phrase never has
-          forms to drill (spec 2026-09-18 §7.1). */}
-      {capture.cardId && capture.cardType && hasForms(capture.wordKind) && (
-        <div className="pl-2">
-          <CardTypeSwitch
-            type={capture.cardType}
-            onChange={(type) => onSetType(capture.cardId!, type)}
-            disabled={pending}
-          />
-        </div>
-      )}
-
-      {/* Swipe-left always deleted a chip, but nothing on screen said so —
-          the user asked for a delete that already existed because they could
-          not see it. Swipe stays as a shortcut. */}
-      <button
-        onClick={() => onDelete(item)}
-        onPointerDown={(e) => e.stopPropagation()}
-        onPointerUp={(e) => e.stopPropagation()}
-        className="self-end text-sm text-red-600 underline"
-      >
+      <button onClick={() => onDelete(item)} {...own} className="self-end text-sm text-red-600 underline">
         {t.deleteItem}
       </button>
 
-      {expanded && fields && (
-        // Stops the same bubbling the controls above guard against: tapping
-        // into a field to edit it is itself a pointerdown+pointerup pair, and
-        // without this the `<li>`'s own handler would read that as "tap while
-        // expanded" and collapse the form the instant the user tries to type.
-        <div
-          className="flex flex-col gap-2 pl-2"
-          onPointerDown={(e) => e.stopPropagation()}
-          onPointerUp={(e) => e.stopPropagation()}
-        >
-          <input
-            value={fields.answerPl}
-            onChange={(e) => updateField('answerPl', e.target.value)}
-            className="rounded border p-2 text-lg"
+      {/* The review window (spec 2026-09-18-generation-queue §3). Cosmetic:
+          the server decides approval; this only shows what it says is left,
+          stepping each poll and gliding between steps. */}
+      {capture.inReview && capture.reviewRemainingMs !== null && (
+        <div className="h-0.5 w-full bg-neutral-200" aria-hidden="true">
+          <div
+            data-review-bar
+            className="h-full bg-neutral-500"
+            style={{ width: `${(capture.reviewRemainingMs / REVIEW_MS) * 100}%`, transition: 'width 1s linear' }}
           />
-          <input
-            value={fields.promptText ?? ''}
-            onChange={(e) => updateField('promptText', e.target.value || null)}
-            className="rounded border p-2 text-sm"
-          />
-          <input
-            value={fields.promptHint ?? ''}
-            onChange={(e) => updateField('promptHint', e.target.value || null)}
-            className="rounded border p-2 text-sm"
-          />
-          <button onClick={() => void save()} className="self-start text-sm underline">
-            {t.save}
-          </button>
-          {saveError && <p className="text-sm text-red-600">{t.chipSaveFailed}</p>}
         </div>
       )}
     </li>

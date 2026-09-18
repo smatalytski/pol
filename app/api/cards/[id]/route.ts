@@ -5,6 +5,7 @@ import { db } from '@/lib/db/client'
 import { cards } from '@/lib/db/schema'
 import { deleteCard, updateCard } from '@/lib/cards/service'
 import { creatorCaptureId } from '@/lib/capture/pipeline'
+import { hasActiveJob } from '@/lib/queue/jobs'
 
 const Patch = z.object({
   promptText: z.string().nullable().optional(),
@@ -17,11 +18,10 @@ const Patch = z.object({
 })
 
 /**
- * Not in the task brief's literal file list — added because
- * `components/CaptureChip.tsx`'s "tap to expand and edit" needs a way to load
- * a specific card's current fields before editing them, and there was no
- * existing single-card lookup route (`GET /api/cards` only searches/lists).
- * Excludes a soft-deleted card the same way every other listing query does.
+ * One card's current fields, for the card screen (`app/fiszki/[id]/page.tsx`),
+ * which loads them before editing and polls this while a queued job rewrites
+ * the card. `GET /api/cards` only searches and lists. Excludes a soft-deleted
+ * card the same way every other listing query does.
  */
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -35,10 +35,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // The capture whose recording produced this card, so the detail screen can
   // offer "recognise this again in Russian" — and only offer it when there is
   // audio to re-recognise, rather than showing a control that must fail.
-  // Earliest, not latest: see creatorCaptureId, which retranscribe uses too.
+  // Earliest, not latest: see creatorCaptureId, which applyRerecognized uses too.
   // Re-recognising a later duplicate's audio would not rewrite this card at
-  // all — it would build that recording its own card.
-  return NextResponse.json({ card, captureId: creatorCaptureId(db, id) })
+  // all — it would go through createCard instead, producing a new card (or,
+  // via dedup, resolving to an existing one). `generating` tells the page a
+  // queued job will rewrite this card, so it can show that as not-yet-final.
+  return NextResponse.json({ card, captureId: creatorCaptureId(db, id), generating: hasActiveJob(db, id) })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

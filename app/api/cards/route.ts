@@ -2,10 +2,18 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
 import { createCard, searchCards } from '@/lib/cards/service'
+import { pendingCaptures } from '@/lib/capture/pipeline'
+import { activeJobCardIds } from '@/lib/queue/jobs'
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams.get('q') ?? ''
-  return NextResponse.json({ cards: searchCards(db, q) })
+  return NextResponse.json({
+    cards: searchCards(db, q),
+    // Words approved and waiting for, or in, generation (§7.2), and cards
+    // with a regeneration in flight — both shown as not-yet-final.
+    pending: pendingCaptures(db),
+    generatingCardIds: activeJobCardIds(db),
+  })
 }
 
 const Body = z.object({

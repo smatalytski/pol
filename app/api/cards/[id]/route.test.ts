@@ -11,7 +11,7 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, PATCH, DELETE } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { captures, cards, media, reviews } = await import('@/lib/db/schema')
+const { captures, cards, generationJobs, media, reviews } = await import('@/lib/db/schema')
 const { newState } = await import('@/lib/scheduler')
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -58,11 +58,12 @@ function del(id: string) {
 }
 
 beforeEach(() => {
-  // Order matters: reviews and captures both carry a foreign key to cards, so
-  // clearing cards first fails with FOREIGN KEY constraint failed. Media goes
-  // last, since captures reference it.
+  // Order matters: reviews, captures and generationJobs all carry a foreign
+  // key to cards, so clearing cards first fails with FOREIGN KEY constraint
+  // failed. Media goes last, since captures reference it.
   db.delete(reviews).run()
   db.delete(captures).run()
+  db.delete(generationJobs).run()
   db.delete(cards).run()
   db.delete(media).run()
 })
@@ -106,6 +107,33 @@ describe('GET /api/cards/:id', () => {
     seedCard({ id: 'c2' })
     await del('c2')
     expect((await get('c2')).status).toBe(404)
+  })
+
+  it('says generating is true with a queued job for the card', async () => {
+    seedCard({ id: 'c8' })
+    db.insert(generationJobs)
+      .values({
+        id: 'job1',
+        kind: 'regenerate',
+        captureId: null,
+        cardId: 'c8',
+        status: 'queued',
+        attempts: 0,
+        failures: 0,
+        nextAttemptAt: NOW.getTime(),
+        lastError: null,
+        createdAt: NOW.getTime(),
+        finishedAt: null,
+      })
+      .run()
+    const body = await (await get('c8')).json()
+    expect(body.generating).toBe(true)
+  })
+
+  it('says generating is false without a job for the card', async () => {
+    seedCard({ id: 'c9' })
+    const body = await (await get('c9')).json()
+    expect(body.generating).toBe(false)
   })
 })
 

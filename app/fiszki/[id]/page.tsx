@@ -23,18 +23,22 @@ export default function CardDetailPage() {
   const [missing, setMissing] = useState(false)
   const [saveError, setSaveError] = useState(false)
   const [regenError, setRegenError] = useState(false)
-  const [regenDuplicate, setRegenDuplicate] = useState(false)
   // The recording this card came from, when there is one. Supplied by the GET
   // so the re-recognition controls are offered only where they can work: a
   // hand-typed card has no audio behind it.
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [langError, setLangError] = useState(false)
-  // Re-recognition is Speech-to-Text plus a Gemini call, and ~30 s is normal:
-  // without a visible pending state the user taps again and starts a second
-  // one on the same capture.
+  // The re-recognition request runs Speech-to-Text before it answers (the
+  // Gemini half is queued), a round trip of a few seconds: without a visible
+  // pending state the user taps again and starts a second one on the same
+  // capture.
   const [langPending, setLangPending] = useState(false)
   const [typeError, setTypeError] = useState(false)
   const [typeDuplicate, setTypeDuplicate] = useState(false)
+  // A queued job (from wygeneruj ponownie or a re-recognition) rewrites this
+  // card asynchronously; the GET tells us one is in flight so the page can
+  // show that instead of the card looking silently unchanged.
+  const [generating, setGenerating] = useState(false)
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/cards/${id}`)
@@ -42,14 +46,24 @@ export default function CardDetailPage() {
       setMissing(true)
       return
     }
-    const body = (await res.json()) as { card: CardRow; captureId?: string | null }
+    const body = (await res.json()) as { card: CardRow; captureId?: string | null; generating?: boolean }
     setCard(body.card)
     setCaptureId(body.captureId ?? null)
+    setGenerating(body.generating ?? false)
   }, [id])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  // A queued job will rewrite this card (spec 2026-09-18-generation-queue
+  // §7.3); reload until it has. The inputs are keyed on server values, so the
+  // rebuilt text replaces what is on screen and nothing stale is saved back.
+  useEffect(() => {
+    if (!generating) return
+    const id = setInterval(() => void load(), 2_000)
+    return () => clearInterval(id)
+  }, [generating, load])
 
   // Every write goes through here so a rejected one always surfaces: the
   // fields are uncontrolled `defaultValue` inputs, so a silently failed PATCH
@@ -68,6 +82,9 @@ export default function CardDetailPage() {
     setCard(((await res.json()) as { card: CardRow }).card)
   }
 
+  // Queues the rebuild and answers 202 at once (Task 7); Gemini runs in the
+  // generation queue, not this request, so there is no rebuilt card to read
+  // here — the `generating` poll above picks it up once the job finishes.
   async function regenerate() {
     const res = await fetch(`/api/cards/${id}/regeneruj`, { method: 'POST' })
     if (!res.ok) {
@@ -75,9 +92,7 @@ export default function CardDetailPage() {
       return
     }
     setRegenError(false)
-    const body = (await res.json()) as { card: CardRow; duplicateOf: string | null }
-    setCard(body.card)
-    setRegenDuplicate(body.duplicateOf !== null)
+    setGenerating(true)
   }
 
   // A 200 can still carry a clash: the card is left as it was and duplicateOf
@@ -106,9 +121,11 @@ export default function CardDetailPage() {
   // keeps no trace of what was said, which is why `wygeneruj ponownie` (which
   // re-generates from the stored answer) could never fix it.
   //
-  // The route answers 200 with any provider failure in `error`, since the
-  // capture keeps its old transcript and card either way — so checking
-  // `res.ok` alone would show nothing when re-recognition fails.
+  // The route answers 200 with a Speech-to-Text failure in `error`, and with
+  // `queued: true` when the card's rebuild is now waiting in the generation
+  // queue rather than already done — so checking `res.ok` alone would show
+  // nothing when re-recognition fails, and reloading unconditionally would
+  // show the pre-rebuild card as if the job had already finished.
   async function relanguage(lang: DictationLang) {
     if (!captureId) return
     setLangPending(true)
@@ -122,10 +139,10 @@ export default function CardDetailPage() {
         setLangError(true)
         return
       }
-      const body = (await res.json()) as { duplicateOf: string | null; error: string | null }
+      const body = (await res.json()) as { queued: boolean; error: string | null }
       setLangError(body.error !== null)
-      setRegenDuplicate(body.duplicateOf !== null)
-      await load()
+      if (body.queued) setGenerating(true)
+      else await load()
     } catch {
       setLangError(true)
     } finally {
@@ -206,9 +223,13 @@ export default function CardDetailPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-4 text-sm">
+      <div className="flex flex-wrap items-center gap-4 text-sm">
         {card.status === 'needs_input' && (
-          <button onClick={() => void regenerate()} className="underline">
+          <button
+            onClick={() => void regenerate()}
+            disabled={generating || langPending}
+            className="underline disabled:text-neutral-400"
+          >
             {t.regenerate}
           </button>
         )}
@@ -221,6 +242,11 @@ export default function CardDetailPage() {
         <button onClick={() => void remove()} className="underline text-red-600">
           {t.deleteItem}
         </button>
+        {/* A queued job (wygeneruj ponownie or a re-recognition) rewrites this
+            card asynchronously, so this can show regardless of whether the
+            card has a recording behind it — unlike the language controls
+            below, this is not gated on captureId. */}
+        {generating && <span className="text-neutral-500">{t.generating}</span>}
       </div>
 
       {captureId && (
@@ -233,7 +259,7 @@ export default function CardDetailPage() {
             <button
               key={lang}
               onClick={() => void relanguage(lang)}
-              disabled={langPending}
+              disabled={langPending || generating}
               className="underline disabled:text-neutral-400"
             >
               {label}
@@ -245,7 +271,6 @@ export default function CardDetailPage() {
 
       {saveError && <p className="text-sm text-red-600">{t.saveFailed}</p>}
       {regenError && <p className="text-sm text-red-600">{t.regenerateFailed}</p>}
-      {regenDuplicate && <p className="text-sm text-amber-600">{t.regenerateDuplicate}</p>}
       {langError && <p className="text-sm text-red-600">{t.languageFailed}</p>}
       {typeError && <p className="text-sm text-red-600">{t.typeFailed}</p>}
       {typeDuplicate && <p className="text-sm text-amber-600">{t.typeDuplicate}</p>}

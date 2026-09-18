@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CaptureChip, type ChipItem } from './CaptureChip'
 import type { CaptureView } from '@/lib/capture/pipeline'
@@ -9,17 +9,8 @@ function captureItem(over: Partial<CaptureView> = {}): ChipItem {
   return {
     kind: 'capture',
     capture: {
-      id: 'cap-1',
-      status: 'generated',
-      transcript: 'злобный',
-      error: null,
-      cardId: null,
-      duplicateOf: null,
-      audioMediaId: null,
-      createdAt: 1,
-      cardType: null,
-      wordKind: null,
-      ...over,
+      id: 'cap-1', status: 'transcribed', transcript: 'kot', error: null, duplicateOf: null,
+      createdAt: 1, inReview: true, reviewRemainingMs: 6_000, ...over,
     },
   }
 }
@@ -37,217 +28,25 @@ describe('CaptureChip', () => {
 
   it('leaves an outbox chip exactly as before — no swipe/tap wiring', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={{ kind: 'outbox', id: 'o1', createdAt: 1 }} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
+    render(<CaptureChip item={{ kind: 'outbox', id: 'o1', createdAt: 1 }} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
     const li = screen.getByRole('listitem')
     swipe(li, -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
 
-  it('swiping left past the threshold calls onDelete with the item, whether or not it has a card', () => {
+  it('swiping left past the threshold calls onDelete with the item', () => {
     const onDelete = vi.fn()
-    const item = captureItem({ cardId: null })
-    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
+    const item = captureItem()
+    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
     swipe(screen.getByRole('listitem'), -100)
     expect(onDelete).toHaveBeenCalledWith(item)
   })
 
   it('a short swipe under the threshold does not delete', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
     swipe(screen.getByRole('listitem'), -20)
     expect(onDelete).not.toHaveBeenCalled()
-  })
-
-  it('tapping a capture with no card yet does nothing — there is nothing to edit', () => {
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    render(<CaptureChip item={captureItem({ cardId: null })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    swipe(screen.getByRole('listitem'), 0) // pointerdown+pointerup at the same point = a tap
-    expect(fetchMock).not.toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: t.save })).toBeNull()
-  })
-
-  it('tapping a capture with a card fetches its fields and expands an edit form', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              card: {
-                promptText: 'злобный',
-                promptHint: 'прилагательное',
-                answerPl: 'złośliwy',
-                examplePl: null,
-                exampleRu: null,
-                grammarNote: null,
-              },
-            }),
-        }) as unknown as Promise<Response>,
-      ),
-    )
-    render(<CaptureChip item={captureItem({ cardId: 'card-1' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    await act(async () => {
-      swipe(screen.getByRole('listitem'), 0)
-    })
-    expect(await screen.findByDisplayValue('złośliwy')).toBeTruthy()
-    expect(screen.getByRole('button', { name: t.save })).toBeTruthy()
-  })
-
-  it('tapping again collapses the edit form without saving', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              card: { promptText: null, promptHint: null, answerPl: 'złośliwy', examplePl: null, exampleRu: null, grammarNote: null },
-            }),
-        }) as unknown as Promise<Response>,
-      ),
-    )
-    render(<CaptureChip item={captureItem({ cardId: 'card-1' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    const li = screen.getByRole('listitem')
-    await act(async () => {
-      swipe(li, 0)
-    })
-    expect(await screen.findByDisplayValue('złośliwy')).toBeTruthy()
-    await act(async () => {
-      swipe(li, 0)
-    })
-    expect(screen.queryByDisplayValue('złośliwy')).toBeNull()
-  })
-
-  // Real bug this guards against: a native tap to focus an input inside the
-  // expanded form is itself a pointerdown+pointerup pair, which bubbles up to
-  // the `<li>`'s own swipe/tap handler. Without stopping that propagation,
-  // tapping into the answer field to edit it would read as "tap while
-  // expanded" and immediately collapse the form out from under the user.
-  it('tapping into an input inside the expanded form does not collapse it', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              card: { promptText: null, promptHint: null, answerPl: 'złośliwy', examplePl: null, exampleRu: null, grammarNote: null },
-            }),
-        }) as unknown as Promise<Response>,
-      ),
-    )
-    render(<CaptureChip item={captureItem({ cardId: 'card-1' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    swipe(screen.getByRole('listitem'), 0)
-    const answerInput = await screen.findByDisplayValue('złośliwy')
-    swipe(answerInput, 0) // the tap-to-focus gesture a real edit starts with
-    expect(screen.queryByDisplayValue('złośliwy')).toBeTruthy()
-  })
-
-  it('saving PATCHes the card with the edited fields and collapses', async () => {
-    const calls: Array<{ url: string; method?: string; body?: unknown }> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
-        calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(init.body as string) : undefined })
-        if (!init?.method) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                card: { promptText: 'злобный', promptHint: null, answerPl: 'złośliwy', examplePl: null, exampleRu: null, grammarNote: null },
-              }),
-          }) as unknown as Promise<Response>
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
-      }),
-    )
-    render(<CaptureChip item={captureItem({ cardId: 'card-1' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    await act(async () => {
-      swipe(screen.getByRole('listitem'), 0)
-    })
-    const answerInput = await screen.findByDisplayValue('złośliwy')
-    fireEvent.change(answerInput, { target: { value: 'wredny' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: t.save }))
-    })
-    const patchCall = calls.find((c) => c.method === 'PATCH')
-    expect(patchCall?.url).toBe('/api/cards/card-1')
-    expect(patchCall?.body).toMatchObject({ answerPl: 'wredny' })
-    expect(screen.queryByDisplayValue('wredny')).toBeNull() // collapsed after save
-  })
-
-  // Important review finding (A3): save() never checked the response status.
-  it('shows an error and keeps the form open when the PATCH is rejected', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init?: RequestInit) => {
-        if (!init?.method) {
-          return Promise.resolve({
-            ok: true,
-            json: () =>
-              Promise.resolve({
-                card: { promptText: null, promptHint: null, answerPl: 'złośliwy', examplePl: null, exampleRu: null, grammarNote: null },
-              }),
-          }) as unknown as Promise<Response>
-        }
-        return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
-      }),
-    )
-    render(<CaptureChip item={captureItem({ cardId: 'card-1' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    await act(async () => {
-      swipe(screen.getByRole('listitem'), 0)
-    })
-    const answerInput = await screen.findByDisplayValue('złośliwy')
-    fireEvent.change(answerInput, { target: { value: 'wredny' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: t.save }))
-    })
-    expect(await screen.findByText(t.chipSaveFailed)).toBeTruthy()
-    // Form stays open with the edit intact, rather than silently collapsing
-    // as if the save had succeeded.
-    expect(screen.getByDisplayValue('wredny')).toBeTruthy()
-  })
-
-  it('does not throw if the card is gone by the time the chip is tapped (404)', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 404 }) as unknown as Promise<Response>))
-    render(<CaptureChip item={captureItem({ cardId: 'gone' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
-    await act(async () => {
-      swipe(screen.getByRole('listitem'), 0)
-    })
-    expect(screen.queryByRole('button', { name: t.save })).toBeNull()
-  })
-
-  // Dictation is recognised as Polish, because that is what nearly all of it
-  // is and because a two-language recognizer demonstrably swallows Russian
-  // (spoken "склеп" came back "sklep"). A Russian recording is fixed here,
-  // from the audio — the wrong transcript keeps no trace of what was said.
-  it('offers both languages for a capture that has audio', () => {
-    render(
-      <CaptureChip
-        item={captureItem({ audioMediaId: 'm1' })}
-        onRetry={vi.fn()}
-        onDelete={vi.fn()}
-        onRelanguage={vi.fn()}
-        onSetType={vi.fn()}
-      />,
-    )
-    expect(screen.getByText(t.asPolish)).toBeTruthy()
-    expect(screen.getByText(t.asRussian)).toBeTruthy()
-  })
-
-  it('offers no language controls when there is no audio to re-recognise', () => {
-    render(
-      <CaptureChip
-        item={captureItem({ audioMediaId: null })}
-        onRetry={vi.fn()}
-        onDelete={vi.fn()}
-        onRelanguage={vi.fn()}
-        onSetType={vi.fn()}
-      />,
-    )
-    expect(screen.queryByText(t.asRussian)).toBeNull()
   })
 
   it('offers no language controls on an outbox chip, which has no server row yet', () => {
@@ -257,7 +56,6 @@ describe('CaptureChip', () => {
         onRetry={vi.fn()}
         onDelete={vi.fn()}
         onRelanguage={vi.fn()}
-        onSetType={vi.fn()}
       />,
     )
     expect(screen.queryByText(t.asRussian)).toBeNull()
@@ -266,13 +64,7 @@ describe('CaptureChip', () => {
   it('asks for Russian re-recognition of this capture', () => {
     const onRelanguage = vi.fn()
     render(
-      <CaptureChip
-        item={captureItem({ audioMediaId: 'm1' })}
-        onRetry={vi.fn()}
-        onDelete={vi.fn()}
-        onRelanguage={onRelanguage}
-        onSetType={vi.fn()}
-      />,
+      <CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={onRelanguage} />,
     )
     fireEvent.click(screen.getByText(t.asRussian))
     expect(onRelanguage).toHaveBeenCalledWith('cap-1', 'ru')
@@ -280,78 +72,12 @@ describe('CaptureChip', () => {
 
   // Every control on this chip has to stop its own pointer events: the <li>
   // reads pointerdown+pointerup as a tap or a swipe, so without this, pressing
-  // the control would also delete or expand the chip.
+  // the control would also delete the chip.
   it('pressing a language control does not also swipe the chip away', () => {
     const onDelete = vi.fn()
-    render(
-      <CaptureChip
-        item={captureItem({ audioMediaId: 'm1' })}
-        onRetry={vi.fn()}
-        onDelete={onDelete}
-        onRelanguage={vi.fn()}
-        onSetType={vi.fn()}
-      />,
-    )
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
     swipe(screen.getByText(t.asRussian), -100)
     expect(onDelete).not.toHaveBeenCalled()
-  })
-
-  // A capture can carry an error while still having produced a card: that is
-  // exactly what a transient Vertex 429 does, and it is how the user's
-  // "Zdrów jak ryba" card ended up stranded with nothing on screen saying
-  // why. A failed re-recognition lands the same way — error set, status left
-  // alone — so the error is shown whenever there is one, not only when the
-  // capture's status is 'failed'.
-  it('shows an error on a capture that still produced a card', () => {
-    render(
-      <CaptureChip
-        item={captureItem({ status: 'generated', error: '429 RESOURCE_EXHAUSTED', audioMediaId: 'm1' })}
-        onRetry={vi.fn()}
-        onDelete={vi.fn()}
-        onRelanguage={vi.fn()}
-        onSetType={vi.fn()}
-      />,
-    )
-    expect(screen.getByText(/RESOURCE_EXHAUSTED/)).toBeTruthy()
-  })
-
-  it('offers the type switch for a word with forms', () => {
-    render(
-      <CaptureChip
-        item={captureItem({ cardId: 'c1', cardType: 'ru_to_pl', wordKind: 'rzeczownik' })}
-        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()}
-      />,
-    )
-    expect(screen.getByText(t.typePlPl)).toBeTruthy()
-  })
-
-  it('offers no type switch for a phrase, or before a card exists', () => {
-    const { rerender } = render(
-      <CaptureChip
-        item={captureItem({ cardId: 'c1', cardType: 'ru_to_pl', wordKind: 'fraza' })}
-        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()}
-      />,
-    )
-    expect(screen.queryByText(t.typePlPl)).toBeNull()
-    rerender(
-      <CaptureChip
-        item={captureItem({ cardId: null })}
-        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={vi.fn()}
-      />,
-    )
-    expect(screen.queryByText(t.typePlPl)).toBeNull()
-  })
-
-  it('asks to make this capture card forms-only', () => {
-    const onSetType = vi.fn()
-    render(
-      <CaptureChip
-        item={captureItem({ cardId: 'c1', cardType: 'ru_to_pl', wordKind: 'rzeczownik' })}
-        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} onSetType={onSetType}
-      />,
-    )
-    fireEvent.click(screen.getByText(t.typePlPl))
-    expect(onSetType).toHaveBeenCalledWith('c1', 'pl_to_pl')
   })
 
   // Spec §7.1: swipe-left always deleted a chip, but nothing on screen said
@@ -359,23 +85,11 @@ describe('CaptureChip', () => {
   // not see it.
   it('has a visible delete control', () => {
     const onDelete = vi.fn()
-    const item = captureItem({ cardId: 'c1' })
-    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
+    const item = captureItem()
+    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
     fireEvent.click(screen.getByText(t.deleteItem))
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onDelete).toHaveBeenCalledWith(item)
-  })
-
-  it('pressing the type switch does not also swipe the chip away', () => {
-    const onDelete = vi.fn()
-    render(
-      <CaptureChip
-        item={captureItem({ cardId: 'c1', cardType: 'ru_to_pl', wordKind: 'rzeczownik' })}
-        onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()}
-      />,
-    )
-    swipe(screen.getByText(t.typePlPl), -100)
-    expect(onDelete).not.toHaveBeenCalled()
   })
 
   // The delete button's own onClick already covers "clicking it deletes
@@ -385,46 +99,58 @@ describe('CaptureChip', () => {
   // <li>'s own swipe handler and trigger a second, uncontrolled delete.
   it('swiping across the delete button does not also trigger the li swipe handler', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem({ cardId: 'c1' })} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} onSetType={vi.fn()} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
     swipe(screen.getByText(t.deleteItem), -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
 
-  // Ruling 15: the edit form's fields are a snapshot taken when it expanded.
-  // A re-recognition (new transcript) or a type switch rebuilds the card under
-  // it, and pressing zapisz afterwards would PATCH the old answer and prompt
-  // back over the rebuilt card — so the form closes when either changes.
-  it('closes the edit form when the capture is re-recognised or its type changes', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              card: { promptText: 'магазин', promptHint: null, answerPl: 'sklep', examplePl: null, exampleRu: null, grammarNote: null },
-            }),
-        }) as unknown as Promise<Response>,
-      ),
+  it('shows no audio player — the chip is status only', () => {
+    const { container } = render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />)
+    expect(container.querySelector('audio')).toBeNull()
+  })
+
+  it('offers re-recognition while under review', () => {
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />)
+    expect(screen.getByText(t.asRussian)).toBeTruthy()
+  })
+
+  it('offers ponów, not re-recognition, when recognition failed', () => {
+    render(
+      <CaptureChip
+        item={captureItem({ status: 'failed', transcript: null, error: 'unintelligible', inReview: false, reviewRemainingMs: null })}
+        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()}
+      />,
     )
-    const props = { onRetry: vi.fn(), onDelete: vi.fn(), onRelanguage: vi.fn(), onSetType: vi.fn() }
-    const base = { cardId: 'card-1', transcript: 'sklep', cardType: 'ru_to_pl' as const, wordKind: 'rzeczownik' as const }
-    const { rerender } = render(<CaptureChip item={captureItem(base)} {...props} />)
-    const expand = async () => {
-      await act(async () => {
-        swipe(screen.getByRole('listitem'), 0)
-      })
-      expect(await screen.findByDisplayValue('магазин')).toBeTruthy()
-    }
+    expect(screen.getByText(t.retry)).toBeTruthy()
+    expect(screen.queryByText(t.asRussian)).toBeNull()
+    expect(screen.getByText('unintelligible')).toBeTruthy()
+    // Spec §7.1: a failed row shows only the error, not "rozpoznawanie…"
+    // beside it — that placeholder is for a recording still being recognised.
+    expect(screen.queryByText(t.transcribing)).toBeNull()
+  })
 
-    await expand()
-    rerender(<CaptureChip item={captureItem({ ...base, transcript: 'склеп' })} {...props} />)
-    expect(screen.queryByDisplayValue('магазин')).toBeNull()
-    expect(screen.queryByRole('button', { name: t.save })).toBeNull()
+  it('says już masz for a word already in the deck', () => {
+    render(<CaptureChip item={captureItem({ duplicateOf: 'card-9' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />)
+    expect(screen.getByText(t.alreadyHave)).toBeTruthy()
+  })
 
-    await expand()
-    rerender(<CaptureChip item={captureItem({ ...base, transcript: 'склеп', cardType: 'pl_to_pl' })} {...props} />)
-    expect(screen.queryByDisplayValue('магазин')).toBeNull()
-    expect(screen.queryByRole('button', { name: t.save })).toBeNull()
+  // The bar is cosmetic — the server decides — but it must track what the
+  // server says is left, so the fade never looks like a glitch.
+  it('draws the review bar from the server-computed remaining time', () => {
+    const { container } = render(
+      <CaptureChip item={captureItem({ reviewRemainingMs: 2_500 })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />,
+    )
+    const bar = container.querySelector('[data-review-bar]') as HTMLElement
+    expect(bar.style.width).toBe('25%')
+  })
+
+  it('shows rozpoznawanie… while recognition runs', () => {
+    render(
+      <CaptureChip
+        item={captureItem({ status: 'uploaded', transcript: null, inReview: false, reviewRemainingMs: null })}
+        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(t.transcribing)).toBeTruthy()
   })
 })

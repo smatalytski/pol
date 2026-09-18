@@ -222,12 +222,13 @@ export function deleteCard(db: Db, id: string, now: Date): void {
 }
 
 /**
- * Repairs a card stranded by a failed generation. A transient Vertex 429 is
- * enough to produce one: the capture pipeline deliberately keeps the word and
- * marks the card `needs_input` rather than losing the dictation, but neither
- * of the other recovery routes actually repairs it — `processCapture` returns
- * early once a capture has a card, and re-dictating dedups into the stranded
- * card without writing the new prompt. That left hand-typing the Russian as
+ * Repairs a card stranded by a failed generation. A generation job that gives
+ * up produces one: the capture pipeline deliberately keeps the word and marks
+ * the card `needs_input` rather than losing the dictation (`giveUpNewCard`),
+ * but neither of the other recovery routes actually repairs it — a recording
+ * that has a card is never generated again as new (`generateNewCard` returns
+ * early), and re-dictating dedups into the stranded card without writing the
+ * new prompt. That left hand-typing the Russian as
  * the only fix, which assumes the user already knows the very thing the card
  * exists to teach them.
  *
@@ -327,7 +328,7 @@ export function setCardType(
  *   keeps its answer identity (type, answer, kind, forms: on a pl_to_pl card
  *   the forms ARE the answer) and still gets the generated prompt, hint,
  *   examples and grammar note, which are what it was missing.
- * - `untouched` — `retranscribe`, rebuilding a card a recording created. The
+ * - `untouched` — `applyRerecognized`, rebuilding a card a recording created. The
  *   new prompt belongs to the new word, so writing it onto the old answer
  *   would build a card out of two words; the card is left exactly as it was.
  */
@@ -336,7 +337,7 @@ export type ClashPolicy = 'keepAnswer' | 'untouched'
 /**
  * Writes a fresh generation over an existing card, with one collision check
  * shared by everything that re-generates: `regenerateCard` here, and
- * `retranscribe` in the capture pipeline. Each caller names its policy for a
+ * `applyRerecognized` in the capture pipeline. Each caller names its policy for a
  * clash (see `ClashPolicy`).
  *
  * Writing the generated answer is the point of re-generating at all — it is

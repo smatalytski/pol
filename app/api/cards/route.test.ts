@@ -11,10 +11,14 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, POST } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { cards } = await import('@/lib/db/schema')
+const { captures, cards, generationJobs } = await import('@/lib/db/schema')
 const { deleteCard } = await import('@/lib/cards/service')
 
+const NOW = new Date('2026-09-18T10:00:00')
+
 beforeEach(() => {
+  db.delete(generationJobs).run()
+  db.delete(captures).run()
   db.delete(cards).run()
 })
 
@@ -47,6 +51,40 @@ describe('GET /api/cards', () => {
     deleteCard(db, created.cardId, new Date())
     const body = await (await get('')).json()
     expect(body.cards).toEqual([])
+  })
+
+  it('lists a queued capture as pending and a card with a queued job as generating', async () => {
+    db.insert(captures)
+      .values({
+        id: 'cap1',
+        audioMediaId: null,
+        transcript: 'słowo',
+        status: 'queued',
+        error: null,
+        generationJson: null,
+        cardId: null,
+        createdAt: NOW.getTime(),
+      })
+      .run()
+    const created = await (await post({ type: 'ru_to_pl', promptText: null, promptHint: null, answerPl: 'cześć' })).json()
+    db.insert(generationJobs)
+      .values({
+        id: 'job1',
+        kind: 'regenerate',
+        captureId: null,
+        cardId: created.cardId,
+        status: 'queued',
+        attempts: 0,
+        failures: 0,
+        nextAttemptAt: NOW.getTime(),
+        lastError: null,
+        createdAt: NOW.getTime(),
+        finishedAt: null,
+      })
+      .run()
+    const body = await (await get('')).json()
+    expect(body.pending).toEqual([expect.objectContaining({ id: 'cap1', status: 'queued' })])
+    expect(body.generatingCardIds).toEqual([created.cardId])
   })
 })
 

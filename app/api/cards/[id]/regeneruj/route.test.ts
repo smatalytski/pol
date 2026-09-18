@@ -1,37 +1,17 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
-import type { GeneratedCard } from '@/lib/generate'
 
 const tmpDir = mkdtempSync(path.join(tmpdir(), 'fiszki-regen-route-'))
 process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
 afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
-const fromDictationMock = vi.fn().mockResolvedValue({
-  prompt_ru: 'здоров как бык',
-  prompt_hint: 'идиома',
-  answer_pl: 'zdrów jak ryba',
-  example_pl: 'Czuję się zdrów jak ryba.',
-  example_ru: 'Чувствую себя здоровым.',
-  grammar_note: 'краткая форма',
-  kind: 'fraza',
-  forms_basic: [],
-  forms_extended: [],
-} satisfies GeneratedCard)
-
-// Mocks only the generation seam, so the route's own db lookups run unmocked.
-vi.mock('@/lib/generate', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/generate')>()
-  return { ...actual, getGenerator: () => ({ ...actual.getGenerator(), fromDictation: fromDictationMock }) }
-})
-
 const { POST } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { cards } = await import('@/lib/db/schema')
+const { cards, generationJobs } = await import('@/lib/db/schema')
 const { newState } = await import('@/lib/scheduler')
-const { GenerationError } = await import('@/lib/generate')
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -64,36 +44,34 @@ function post(id: string) {
 }
 
 beforeEach(() => {
+  db.delete(generationJobs).run()
   db.delete(cards).run()
-  fromDictationMock.mockClear()
 })
 
 describe('POST /api/cards/:id/regeneruj', () => {
-  it('repairs a stranded card and returns it', async () => {
+  it('queues a regenerate job and answers 202 at once', async () => {
     seedStranded('c1')
     const res = await post('c1')
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.duplicateOf).toBeNull()
-    expect(body.card.status).toBe('ready')
-    expect(body.card.promptText).toBe('здоров как бык')
-    expect(db.select().from(cards).where(eq(cards.id, 'c1')).get()!.status).toBe('ready')
+    expect(res.status).toBe(202)
+    expect(await res.json()).toEqual({ queued: true })
+    const jobs = db.select().from(generationJobs).all()
+    expect(jobs).toEqual([expect.objectContaining({ kind: 'regenerate', cardId: 'c1', status: 'queued' })])
   })
 
-  // A second 429 is the expected failure for this route specifically — a
-  // transient 429 is what stranded the card in the first place. It must come
-  // back as something the row can display, and must leave the card stranded
-  // rather than half-written, so the button can be pressed again.
-  it('surfaces a generation failure as a client error and leaves the card stranded', async () => {
+  it('does not queue a second job while one is waiting', async () => {
     seedStranded('c2')
-    fromDictationMock.mockRejectedValueOnce(
-      new GenerationError('generation request failed: 429 RESOURCE_EXHAUSTED'),
-    )
-    const res = await post('c2')
-    expect(res.status).toBe(502)
-    expect((await res.json()).error).toMatch(/RESOURCE_EXHAUSTED/)
-    const row = db.select().from(cards).where(eq(cards.id, 'c2')).get()!
-    expect(row.status).toBe('needs_input')
-    expect(row.promptText).toBeNull()
+    await post('c2')
+    await post('c2')
+    expect(db.select().from(generationJobs).all()).toHaveLength(1)
+  })
+
+  it('refuses a card that is not needs_input', async () => {
+    seedStranded('c3')
+    db.update(cards).set({ status: 'ready' }).where(eq(cards.id, 'c3')).run()
+    expect((await post('c3')).status).toBe(400)
+  })
+
+  it('answers 404 for an unknown card', async () => {
+    expect((await post('nope')).status).toBe(404)
   })
 })
