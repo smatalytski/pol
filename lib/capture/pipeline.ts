@@ -1,14 +1,15 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { captures, cards } from '../db/schema'
+import { captures, cards, topics } from '../db/schema'
 import { applyGeneratedFields, createCard, regenerateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
-import { toCardFields, type Generator } from '../generate'
+import { toCardFields, type Generator, type Meaning, type Suggester } from '../generate'
 import type { DictationLang, Transcriber } from '../transcribe'
 import { enqueueJob, hasQueuedJobFor, underReview, type JobHandlers } from '../queue/jobs'
 import { approvedIds, reviewRemainingMs } from '../queue/review'
+import { runSuggest } from '../topics/service'
 
 export type CaptureDeps = { db: Db; transcriber: Transcriber; generator: Generator }
 
@@ -298,7 +299,14 @@ export function pendingCaptures(db: Db): { id: string; transcript: string | null
     .all() as { id: string; transcript: string | null; status: 'queued' | 'generating' }[]
 }
 
-/** Job `new`: an approved recording becomes a card. A generation failure is thrown for the queue to classify. */
+/** A topic item's intended sense and situation; undefined for a dictation. */
+function meaningOf(db: Db, capture: { topicId: string | null; glossRu: string | null }): Meaning | undefined {
+  if (!capture.topicId || !capture.glossRu) return undefined
+  const topic = db.select({ context: topics.context }).from(topics).where(eq(topics.id, capture.topicId)).get()
+  return topic ? { glossRu: capture.glossRu, context: topic.context } : undefined
+}
+
+/** Job `new`: an approved recording, or an accepted topic item, becomes a card. A generation failure is thrown for the queue to classify. */
 export async function generateNewCard(deps: CaptureDeps, captureId: string, now: Date): Promise<void> {
   const { db, generator } = deps
   const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
@@ -311,7 +319,9 @@ export async function generateNewCard(deps: CaptureDeps, captureId: string, now:
     return
   }
   const transcript = capture.transcript
-  const generated = await generator.fromDictation(transcript)
+  const meaning = meaningOf(db, capture)
+  // Called with the transcript alone for a dictation, exactly as before.
+  const generated = meaning ? await generator.fromDictation(transcript, meaning) : await generator.fromDictation(transcript)
   const fields = toCardFields(generated)
   // A stale read from before the await is never trusted for a decision that
   // creates something durable: the recording may have been deleted meanwhile.
@@ -324,7 +334,7 @@ export async function generateNewCard(deps: CaptureDeps, captureId: string, now:
   // always wins.
   const { cardId, duplicateOf } = createCard(
     db,
-    { type: 'ru_to_pl', ...fields, status: 'ready', fallbackAnswerKey: answerKey(transcript) },
+    { type: 'ru_to_pl', ...fields, status: 'ready', fallbackAnswerKey: answerKey(transcript), topicId: capture.topicId },
     now,
   )
   // Not one transaction with the insert above: if the process dies between
@@ -342,7 +352,7 @@ export function giveUpNewCard(db: Db, captureId: string, lastError: string, now:
   if (!capture || capture.cardId || !capture.transcript) return
   const { cardId, duplicateOf } = createCard(
     db,
-    { type: 'ru_to_pl', ...strandedFields(capture.transcript), status: 'needs_input' },
+    { type: 'ru_to_pl', ...strandedFields(capture.transcript), status: 'needs_input', topicId: capture.topicId },
     now,
   )
   db.update(captures)
@@ -388,8 +398,8 @@ export function giveUpRerecognized(db: Db, captureId: string, lastError: string)
   db.update(captures).set({ error: lastError }).where(eq(captures.id, captureId)).run()
 }
 
-/** The three job kinds (§5), wired to their bodies. */
-export function jobHandlers(deps: CaptureDeps): JobHandlers {
+/** The four job kinds, wired to their bodies. */
+export function jobHandlers(deps: CaptureDeps & { suggester: Suggester }): JobHandlers {
   return {
     new: {
       run: (job, now) => generateNewCard(deps, job.captureId!, now),
@@ -408,6 +418,12 @@ export function jobHandlers(deps: CaptureDeps): JobHandlers {
         if (card?.status !== 'needs_input') return
         await regenerateCard(deps.db, deps.generator, job.cardId!, now)
       },
+      giveUp: () => {},
+    },
+    // No give-up action: the job's `failed` status and last_error are the
+    // record, and the topic page offers `spróbuj ponownie` (§6.1).
+    suggest: {
+      run: (job, now) => runSuggest({ db: deps.db, suggester: deps.suggester }, job, now),
       giveUp: () => {},
     },
   }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, lte, sql } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
-import { cards, reviews } from '../db/schema'
+import { cards, reviews, topics } from '../db/schema'
 import { newState } from '../scheduler'
-import { buildQueue, interleave, newCardsIntroducedToday, startOfLocalDay } from './queue'
+import { buildQueue, interleave, newCardsIntroducedToday, REVIEWABLE, startOfLocalDay } from './queue'
 import { setSetting } from '../settings'
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -35,6 +35,20 @@ function insertCard(
     .run()
   return id
 }
+
+describe('the due query', () => {
+  it('uses the cards_due index', () => {
+    const { db, sqlite } = createTestDb()
+    const q = db
+      .select({ id: cards.id })
+      .from(cards)
+      .where(and(REVIEWABLE, sql`${cards.state} != 0`, lte(cards.due, 0)))
+      .orderBy(asc(cards.due))
+      .toSQL()
+    const plan = sqlite.prepare(`EXPLAIN QUERY PLAN ${q.sql}`).all(...q.params) as { detail: string }[]
+    expect(plan.map((p) => p.detail).join('\n')).toMatch(/cards_due/)
+  })
+})
 
 describe('interleave', () => {
   it('spaces new cards through the due cards rather than front-loading them', () => {
@@ -214,6 +228,36 @@ describe('buildQueue', () => {
       .run()
     const q = await buildQueue(db, NOW)
     expect(q.filter((c) => c.isNew).map((c) => c.id)).toContain('y')
+  })
+})
+
+describe('topics in review', () => {
+  function withTopic(db: ReturnType<typeof createTestDb>['db'], suspendedAt: number | null) {
+    db.insert(topics).values({ id: 't1', name: 'x', context: 'x', suspendedAt, createdAt: 1 }).run()
+  }
+
+  it('leaves out a card whose topic is switched off', async () => {
+    const { db } = createTestDb()
+    withTopic(db, NOW.getTime())
+    insertCard(db, { id: 'a', topicId: 't1' })
+    insertCard(db, { id: 'b', answerPl: 'kot', answerKey: 'kot' })
+    expect((await buildQueue(db, NOW)).map((c) => c.id)).toEqual(['b'])
+  })
+
+  it('serves it again once the topic is switched back on', async () => {
+    const { db } = createTestDb()
+    withTopic(db, null)
+    insertCard(db, { id: 'a', topicId: 't1' })
+    expect((await buildQueue(db, NOW)).map((c) => c.id)).toEqual(['a'])
+  })
+
+  // The topic switch never writes cards.suspended_at, so a card suspended on
+  // its own stays suspended whatever its topic does (spec §3.5).
+  it('keeps an individually suspended card out under a topic that is on', async () => {
+    const { db } = createTestDb()
+    withTopic(db, null)
+    insertCard(db, { id: 'a', topicId: 't1', suspendedAt: 1 })
+    expect(await buildQueue(db, NOW)).toEqual([])
   })
 })
 

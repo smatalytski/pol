@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, lte, notExists, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
-import { cards, reviews } from '../db/schema'
+import { cards, reviews, topics } from '../db/schema'
 import { getSettings } from '../settings'
 import type { CardType } from '../cards/service'
 import { parseForms, type CardForms, type WordKind } from '../cards/forms'
@@ -93,7 +93,16 @@ const SELECTION = {
 // NULL AND status = 'ready'`), so SQLite can still use that index for this
 // query — no index migration needed. Authorized change to this otherwise
 // frozen module (task 17 brief).
-export const REVIEWABLE = and(isNull(cards.suspendedAt), isNull(cards.deletedAt), eq(cards.status, 'ready'))
+// A card is also out of review while its topic is switched off (spec
+// 2026-09-18-topic-generation §3.5). That is a separate condition from the
+// card's own suspended_at, so switching a topic back on never revives a card
+// suspended by hand.
+export const REVIEWABLE = and(
+  isNull(cards.suspendedAt),
+  isNull(cards.deletedAt),
+  eq(cards.status, 'ready'),
+  sql`(${cards.topicId} IS NULL OR NOT EXISTS (SELECT 1 FROM ${topics} WHERE ${topics.id} = ${cards.topicId} AND ${topics.suspendedAt} IS NOT NULL))`,
+)
 
 export async function buildQueue(db: Db, now: Date): Promise<QueueItem[]> {
   const { newPerDay } = getSettings(db)

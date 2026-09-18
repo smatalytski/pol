@@ -42,6 +42,7 @@ function cardRow(over: Partial<CardRow> = {}): CardRow {
     lapses: 0,
     state: 0,
     lastReview: null,
+    topicId: null,
     ...over,
   }
 }
@@ -50,7 +51,12 @@ type PendingRow = { id: string; transcript: string | null; status: 'queued' | 'g
 
 function stubFetch(
   rows: () => CardRow[],
-  extra: { pending?: PendingRow[]; generatingCardIds?: string[] } = {},
+  extra: {
+    pending?: PendingRow[]
+    generatingCardIds?: string[]
+    topicNames?: Record<string, string>
+    suspendedTopicIds?: string[]
+  } = {},
 ) {
   const calls: string[] = []
   vi.stubGlobal(
@@ -64,6 +70,8 @@ function stubFetch(
             cards: rows(),
             pending: extra.pending ?? [],
             generatingCardIds: extra.generatingCardIds ?? [],
+            topicNames: extra.topicNames ?? {},
+            suspendedTopicIds: extra.suspendedTopicIds ?? [],
           }),
       }) as unknown as Promise<Response>
     }),
@@ -177,5 +185,28 @@ describe('CardsPage (browse list)', () => {
     await screen.findByText('wścieklizna')
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'kot' } })
     await waitFor(() => expect(screen.queryByText('wścieklizna')).toBeNull())
+  })
+
+  it('shows a card’s topic name beside it', async () => {
+    stubFetch(() => [cardRow({ id: 'a', answerPl: 'gorączka', topicId: 't1' })], { topicNames: { t1: 'U lekarza' } })
+    render(<CardsPage />)
+    expect(await screen.findByText('U lekarza')).toBeTruthy()
+    expect(screen.getByText('U lekarza').closest('li')).toBe(screen.getByText('gorączka').closest('li'))
+  })
+
+  // A card in a switched-off topic is out of review just like an
+  // individually suspended one (spec §3.5); it must look the part here too.
+  it('badges a card whose topic is switched off', async () => {
+    stubFetch(
+      () => [
+        cardRow({ id: 'a', answerPl: 'gorączka', topicId: 't1' }),
+        cardRow({ id: 'b', answerPl: 'katar', topicId: 't2' }),
+      ],
+      { suspendedTopicIds: ['t1'] },
+    )
+    render(<CardsPage />)
+    await waitFor(() => expect(screen.getByText('katar')).toBeTruthy())
+    expect(screen.getAllByText(t.topicOff)).toHaveLength(1)
+    expect(screen.getByText(t.topicOff).closest('li')).toBe(screen.getByText('gorączka').closest('li'))
   })
 })

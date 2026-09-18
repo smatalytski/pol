@@ -1,5 +1,6 @@
 import { blob, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { WORD_KINDS } from '../cards/forms'
+import { SUGGESTION_KINDS } from '../topics/rounds'
 
 export const media = sqliteTable('media', {
   id: text('id').primaryKey(),
@@ -36,6 +37,7 @@ export const cards = sqliteTable('cards', {
   lapses: integer('lapses').notNull(),
   state: integer('state').notNull(),
   lastReview: integer('last_review'),
+  topicId: text('topic_id'),
 })
 
 export const reviews = sqliteTable('reviews', {
@@ -61,11 +63,13 @@ export const captures = sqliteTable('captures', {
   createdAt: integer('created_at').notNull(),
   transcribedAt: integer('transcribed_at'),
   duplicateOf: text('duplicate_of'),
+  topicId: text('topic_id'),
+  glossRu: text('gloss_ru'),
 })
 
 export const generationJobs = sqliteTable('generation_jobs', {
   id: text('id').primaryKey(),
-  kind: text('kind', { enum: ['new', 'regenerate', 'rerecognized'] }).notNull(),
+  kind: text('kind', { enum: ['new', 'regenerate', 'rerecognized', 'suggest'] }).notNull(),
   captureId: text('capture_id'),
   cardId: text('card_id'),
   status: text('status', { enum: ['queued', 'running', 'done', 'failed'] }).notNull(),
@@ -76,6 +80,8 @@ export const generationJobs = sqliteTable('generation_jobs', {
   lastError: text('last_error'),
   createdAt: integer('created_at').notNull(),
   finishedAt: integer('finished_at'),
+  topicId: text('topic_id'),
+  paramsJson: text('params_json'),
 })
 
 export const ttsClips = sqliteTable('tts_clips', {
@@ -84,6 +90,26 @@ export const ttsClips = sqliteTable('tts_clips', {
   lang: text('lang', { enum: ['pl', 'ru'] }).notNull(),
   voice: text('voice').notNull(),
   text: text('text').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const topics = sqliteTable('topics', {
+  id: text('id').primaryKey(),
+  name: text('name'),
+  context: text('context').notNull(),
+  suspendedAt: integer('suspended_at'),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const suggestions = sqliteTable('suggestions', {
+  id: text('id').primaryKey(),
+  topicId: text('topic_id').notNull(),
+  round: integer('round').notNull(),
+  answerPl: text('answer_pl').notNull(),
+  glossRu: text('gloss_ru').notNull(),
+  kind: text('kind', { enum: SUGGESTION_KINDS }).notNull(),
+  status: text('status', { enum: ['proposed', 'accepted', 'rejected'] }).notNull(),
+  captureId: text('capture_id'),
   createdAt: integer('created_at').notNull(),
 })
 

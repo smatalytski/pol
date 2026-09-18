@@ -11,7 +11,7 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, PATCH, DELETE } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { captures, cards, generationJobs, media, reviews } = await import('@/lib/db/schema')
+const { captures, cards, generationJobs, media, reviews, topics } = await import('@/lib/db/schema')
 const { newState } = await import('@/lib/scheduler')
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -66,6 +66,7 @@ beforeEach(() => {
   db.delete(generationJobs).run()
   db.delete(cards).run()
   db.delete(media).run()
+  db.delete(topics).run()
 })
 
 describe('GET /api/cards/:id', () => {
@@ -134,6 +135,14 @@ describe('GET /api/cards/:id', () => {
     seedCard({ id: 'c9' })
     const body = await (await get('c9')).json()
     expect(body.generating).toBe(false)
+  })
+
+  it('names the card’s topic, or null without one', async () => {
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1 }).run()
+    seedCard({ id: 'k1', topicId: 't1' })
+    seedCard({ id: 'k2', answerPl: 'kot', answerKey: 'kot' })
+    expect((await (await get('k1')).json()).topic).toEqual({ id: 't1', name: 'U lekarza' })
+    expect((await (await get('k2')).json()).topic).toBeNull()
   })
 })
 

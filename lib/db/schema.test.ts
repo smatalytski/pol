@@ -41,7 +41,7 @@ describe('schema', () => {
 
   it('exports nothing unexpected', () => {
     expect(Object.keys(schema).sort()).toEqual(
-      ['captures', 'cards', 'generationJobs', 'media', 'reviews', 'settings', 'ttsClips'].sort(),
+      ['captures', 'cards', 'generationJobs', 'media', 'reviews', 'settings', 'suggestions', 'topics', 'ttsClips'].sort(),
     )
   })
 })

@@ -22,7 +22,7 @@ function capture(db: ReturnType<typeof createTestDb>['db'], id: string, over: Pa
 function fakeHandlers(run = vi.fn().mockResolvedValue(undefined)) {
   const giveUp = vi.fn()
   const h = { run, giveUp }
-  return { handlers: { new: h, regenerate: h, rerecognized: h } as JobHandlers, run, giveUp }
+  return { handlers: { new: h, regenerate: h, rerecognized: h, suggest: h } as JobHandlers, run, giveUp }
 }
 
 const job = (db: ReturnType<typeof createTestDb>['db'], id: string) =>
@@ -157,6 +157,28 @@ describe('runNextJob', () => {
     const state = { pausedUntil: 0 }
     expect(await runNextJob(db, handlers, state, at(0), zero)).toBe('retry')
     expect(state.pausedUntil).toBe(0)
+  })
+
+  // A round is something you are watching the screen for; a card is not
+  // (spec 2026-09-18-topic-generation §6.1).
+  it('takes a due suggest job before an older job of another kind', async () => {
+    const { db } = createTestDb()
+    const older = enqueueJob(db, { kind: 'regenerate', cardId: null }, at(0))
+    const round = enqueueJob(db, { kind: 'suggest', paramsJson: '{}' }, at(5))
+    const { handlers, run } = fakeHandlers()
+    await runNextJob(db, handlers, { pausedUntil: 0 }, at(10), zero)
+    expect(run.mock.calls[0][0].id).toBe(round)
+    expect(job(db, older).status).toBe('queued')
+  })
+
+  it('still respects next_attempt_at for a suggest job', async () => {
+    const { db } = createTestDb()
+    const older = enqueueJob(db, { kind: 'regenerate', cardId: null }, at(0))
+    const round = enqueueJob(db, { kind: 'suggest', paramsJson: '{}' }, at(5))
+    db.update(generationJobs).set({ nextAttemptAt: T + 1_000 }).where(eq(generationJobs.id, round)).run()
+    const { handlers, run } = fakeHandlers()
+    await runNextJob(db, handlers, { pausedUntil: 0 }, at(10), zero)
+    expect(run.mock.calls[0][0].id).toBe(older)
   })
 
   it('shows a new recording as generating while its job runs, and queued again after a 429', async () => {

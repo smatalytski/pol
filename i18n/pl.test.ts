@@ -11,6 +11,8 @@ describe('strings', () => {
       'suspend', 'unsuspend', 'needsInput', 'queued', 'generating',
       'saveFailed',
       'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
+      'topics', 'newTopic', 'propose', 'searching', 'acceptAndMore', 'acceptAndFinish', 'tryAgain',
+      'topicsLoadFailed', 'topicSaveFailed',
     ]
     for (const key of required) expect(t).toHaveProperty(key)
   })

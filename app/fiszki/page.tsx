@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
+import { CardListItem } from '@/components/CardListItem'
 import type { CardRow } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
@@ -20,13 +20,23 @@ export default function CardsPage() {
   const [rows, setRows] = useState<CardRow[]>([])
   const [pending, setPending] = useState<PendingRow[]>([])
   const [generatingIds, setGeneratingIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [topicNames, setTopicNames] = useState<Record<string, string>>({})
+  const [suspendedTopicIds, setSuspendedTopicIds] = useState<ReadonlySet<string>>(() => new Set())
 
   const load = useCallback(async (query: string) => {
     const res = await fetch(`/api/cards?q=${encodeURIComponent(query)}`)
-    const body = (await res.json()) as { cards: CardRow[]; pending: PendingRow[]; generatingCardIds: string[] }
+    const body = (await res.json()) as {
+      cards: CardRow[]
+      pending: PendingRow[]
+      generatingCardIds: string[]
+      topicNames: Record<string, string>
+      suspendedTopicIds: string[]
+    }
     setRows(body.cards)
     setPending(body.pending)
     setGeneratingIds(new Set(body.generatingCardIds))
+    setTopicNames(body.topicNames)
+    setSuspendedTopicIds(new Set(body.suspendedTopicIds))
   }, [])
 
   useEffect(() => {
@@ -64,21 +74,13 @@ export default function CardsPage() {
           </li>
         ))}
         {rows.map((c) => (
-          <li key={c.id} className="border-b">
-            <Link href={`/fiszki/${c.id}`} className="flex items-baseline justify-between gap-3 py-3">
-              <span className="text-lg">{c.answerPl}</span>
-              <span className="flex shrink-0 gap-2 text-xs">
-                {c.type === 'pl_to_pl' && <span className="text-sky-700">{t.formsBadge}</span>}
-                {c.status === 'needs_input' && <span className="text-amber-600">{t.needsInput}</span>}
-                {/* A suspended card is otherwise indistinguishable from an
-                    active one, leaving no way to see why it never comes up in
-                    review. Compared against null rather than truthiness so a
-                    0 timestamp could not render as a bare "0". */}
-                {c.suspendedAt !== null && <span className="text-neutral-500">{t.suspended}</span>}
-                {generatingIds.has(c.id) && <span className="text-sky-700">{t.generating}</span>}
-              </span>
-            </Link>
-          </li>
+          <CardListItem
+            key={c.id}
+            card={c}
+            topicName={c.topicId ? topicNames[c.topicId] : null}
+            topicSuspended={c.topicId ? suspendedTopicIds.has(c.topicId) : false}
+            generating={generatingIds.has(c.id)}
+          />
         ))}
       </ul>
     </div>

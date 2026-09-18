@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
-import { cards } from '@/lib/db/schema'
+import { cards, topics } from '@/lib/db/schema'
 import { deleteCard, updateCard } from '@/lib/cards/service'
 import { creatorCaptureId } from '@/lib/capture/pipeline'
 import { hasActiveJob } from '@/lib/queue/jobs'
@@ -32,6 +32,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .get()
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
+  // The topic this card belongs to, for the detail screen's link back to it —
+  // null without one; its name is null while still pending its first round.
+  const topic = card.topicId
+    ? (db.select({ id: topics.id, name: topics.name }).from(topics).where(eq(topics.id, card.topicId)).get() ?? null)
+    : null
+
   // The capture whose recording produced this card, so the detail screen can
   // offer "recognise this again in Russian" — and only offer it when there is
   // audio to re-recognise, rather than showing a control that must fail.
@@ -40,7 +46,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // all — it would go through createCard instead, producing a new card (or,
   // via dedup, resolving to an existing one). `generating` tells the page a
   // queued job will rewrite this card, so it can show that as not-yet-final.
-  return NextResponse.json({ card, captureId: creatorCaptureId(db, id), generating: hasActiveJob(db, id) })
+  return NextResponse.json({ card, captureId: creatorCaptureId(db, id), generating: hasActiveJob(db, id), topic })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

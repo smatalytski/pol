@@ -27,6 +27,10 @@ export default function CardDetailPage() {
   // so the re-recognition controls are offered only where they can work: a
   // hand-typed card has no audio behind it.
   const [captureId, setCaptureId] = useState<string | null>(null)
+  // The topic this card belongs to, if any, so the detail screen can link
+  // back to it. A named topic shows its name; one still awaiting its first
+  // round shows the placeholder instead.
+  const [topic, setTopic] = useState<{ id: string; name: string | null } | null>(null)
   const [langError, setLangError] = useState(false)
   // The re-recognition request runs Speech-to-Text before it answers (the
   // Gemini half is queued), a round trip of a few seconds: without a visible
@@ -46,10 +50,16 @@ export default function CardDetailPage() {
       setMissing(true)
       return
     }
-    const body = (await res.json()) as { card: CardRow; captureId?: string | null; generating?: boolean }
+    const body = (await res.json()) as {
+      card: CardRow
+      captureId?: string | null
+      generating?: boolean
+      topic?: { id: string; name: string | null } | null
+    }
     setCard(body.card)
     setCaptureId(body.captureId ?? null)
     setGenerating(body.generating ?? false)
+    setTopic(body.topic ?? null)
   }, [id])
 
   useEffect(() => {
@@ -169,6 +179,12 @@ export default function CardDetailPage() {
       <Link href="/fiszki" className="text-sm underline">
         {t.backToCards}
       </Link>
+
+      {topic && (
+        <Link href={`/tematy/${topic.id}`} className="text-sm text-neutral-500 underline">
+          {topic.name ?? t.unnamedTopic}
+        </Link>
+      )}
 
       {/* Keyed on the value the server holds, so a card rebuilt underneath
           this screen — by re-recognition or regeneration — remounts the input

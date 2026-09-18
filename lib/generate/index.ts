@@ -2,6 +2,7 @@ import { GoogleGenAI, type GenerateContentParameters } from '@google/genai'
 import { z } from 'zod'
 import { gcpProject, vertexLocation } from '../gcp/clients'
 import { WORD_KINDS, hasForms, serializeForms } from '../cards/forms'
+import { SUGGESTION_KINDS } from '../topics/rounds'
 
 const FormRowSchema = z.object({
   label: z.string().describe('Short Polish grammatical label, e.g. "D. l.poj." or "tryb rozk."'),
@@ -21,7 +22,21 @@ export const GeneratedCardSchema = z.object({
 })
 export type GeneratedCard = z.infer<typeof GeneratedCardSchema>
 
-type RowSchema = z.ZodObject<Record<string, z.ZodString>>
+export const SuggestionSchema = z.object({
+  topic_name: z.string().describe('Short Polish name of the situation, 2–5 words, e.g. "U lekarza z dzieckiem"'),
+  items: z
+    .array(
+      z.object({
+        answer_pl: z.string().describe('Polish word in dictionary form, or a phrase, with diacritics'),
+        gloss_ru: z.string().describe('Short Russian gloss: one to three comma-separated senses'),
+        kind: z.enum(SUGGESTION_KINDS).describe('slowo for a single word (a się verb counts as one), fraza for anything longer'),
+      }),
+    )
+    .describe('Most useful first'),
+})
+export type Suggestion = z.infer<typeof SuggestionSchema>
+
+type RowSchema = z.ZodObject<Record<string, z.ZodString | z.ZodEnum>>
 export type SupportedField = z.ZodString | z.ZodEnum | z.ZodArray<RowSchema>
 
 function fieldSchema(field: SupportedField): Record<string, unknown> {
@@ -38,8 +53,9 @@ function fieldSchema(field: SupportedField): Record<string, unknown> {
  * Derive Gemini's responseSchema from the Zod schema, so the schema is declared
  * exactly once. Supports exactly three field shapes, because those are all the
  * cards need: a required string, a string enum (the word's kind), and an array
- * of objects whose fields are all strings (a list of form rows). Anything else
- * throws — extend this function rather than work around it, as before.
+ * of objects whose fields are strings or string enums (form rows; suggestion
+ * items). Anything else throws — extend this function rather than work around
+ * it, as before.
  */
 export function responseSchemaFor(schema: z.ZodObject<Record<string, SupportedField>>) {
   const shape = schema.shape
@@ -111,6 +127,21 @@ const SYSTEM = `Ты помогаешь взрослому человеку, к�
   - przyslowek: forms_basic — «przymiotnik», от которого он образован; forms_extended пустой.
 - Если поле не нужно, верни пустую строку.`
 
+const SUGGEST_SYSTEM = `Ты помогаешь взрослому человеку, который уже свободно читает и говорит по-польски, подготовиться к конкретной ситуации. Он описывает ситуацию, а ты предлагаешь польскую лексику, которая ему там понадобится.
+
+Правила:
+- Человек знает польский хорошо. Не предлагай базовую повседневную лексику (для визита к врачу — не «lekarz», «dziecko», «chory»). Предлагай то, что специфично для этой ситуации и чего носителю другого языка, скорее всего, не хватает: термины, устойчивые сочетания, типичные вопросы и ответы.
+- kind:
+  - slowo — одно слово в словарной форме; возвратный глагол с «się» — тоже одно слово;
+  - fraza — всё длиннее одного слова: сочетание, реплика, вопрос, ответ. Фразы — то, что реально говорят или слышат в этой ситуации, а не книжные предложения.
+- answer_pl — по-польски, с правильной диакритикой.
+- gloss_ru — короткий перевод на русский: одно-три значения через запятую, в том смысле, который нужен в этой ситуации.
+- Никогда не используй английский язык — never use English anywhere in the output.
+- Соблюдай запрошенное количество и соотношение слов и фраз.
+- Не повторяй ничего из списка «уже предлагалось» — ни то же слово, ни его другую форму.
+- Упорядочи по полезности в этой ситуации: самое нужное — первым.
+- topic_name — короткое польское название ситуации, 2–5 слов, например «U lekarza z dzieckiem».`
+
 export function toCardFields(g: GeneratedCard) {
   const orNull = (s: string) => (s.trim() === '' ? null : s)
   return {
@@ -128,8 +159,25 @@ export function toCardFields(g: GeneratedCard) {
   }
 }
 
+/** For a topic item: the Russian sense the card must be built around, and the situation. */
+export type Meaning = { glossRu: string; context: string }
+
 export interface Generator {
-  fromDictation(transcript: string): Promise<GeneratedCard>
+  fromDictation(transcript: string, meaning?: Meaning): Promise<GeneratedCard>
+}
+
+export type SuggestInput = {
+  context: string
+  /** How many items to ask for (already enlarged for dedup; lib/topics/rounds.ts requestSize). */
+  count: number
+  words: number
+  phrases: number
+  /** Every answer_pl the topic has ever been offered. */
+  exclude: readonly string[]
+}
+
+export interface Suggester {
+  suggest(input: SuggestInput): Promise<Suggestion>
 }
 
 export type GenerateFn = (req: {
@@ -149,9 +197,18 @@ function resolveModel(model?: string): string {
   return resolved
 }
 
-export function geminiGenerator(
-  opts: { generate?: GenerateFn; model?: string } = {},
-): Generator {
+type Run = <T extends z.ZodObject<Record<string, SupportedField>>>(
+  schema: T,
+  systemInstruction: string,
+  parts: unknown[],
+) => Promise<z.infer<T>>
+
+/**
+ * One structured Gemini call, shared by card generation and suggestions so
+ * both classify failures the same way (retryable request errors; unusable
+ * responses are not).
+ */
+function geminiRunner(opts: { generate?: GenerateFn; model?: string }): Run {
   const model = resolveModel(opts.model)
 
   const generate: GenerateFn =
@@ -221,21 +278,60 @@ export function geminiGenerator(
     return parsed.data
   }
 
+  return run
+}
+
+/** The user message for a card. Without a meaning it is exactly what a dictation always sent. */
+export function dictationMessage(text: string, meaning?: Meaning): string {
+  const lines = [`Продиктовано: «${text}»`]
+  if (meaning) {
+    lines.push(
+      `Имеется в виду значение: «${meaning.glossRu}». Ситуация, для которой нужна карточка: «${meaning.context}».`,
+    )
+  }
+  lines.push('Сделай карточку.')
+  return lines.join('\n\n')
+}
+
+export function geminiGenerator(opts: { generate?: GenerateFn; model?: string } = {}): Generator {
+  const run = geminiRunner(opts)
   return {
-    async fromDictation(transcript) {
+    async fromDictation(transcript, meaning) {
       const text = transcript.trim()
       if (!text) throw new GenerationError('empty transcript')
       // Deliberately does not name the language. The transcript may be Polish
       // or Russian and the alphabet already says which; claiming one here
       // would be asserting something false in the one place the model cannot
       // check it against the audio.
-      return run(GeneratedCardSchema, SYSTEM, [
-        { text: `Продиктовано: «${text}»\n\nСделай карточку.` },
-      ])
+      return run(GeneratedCardSchema, SYSTEM, [{ text: dictationMessage(text, meaning) }])
+    },
+  }
+}
+
+export function suggestMessage(input: SuggestInput): string {
+  const exclude = input.exclude.length > 0 ? input.exclude.join('; ') : 'ничего'
+  return [
+    `Ситуация: «${input.context}»`,
+    `Нужно ${input.count}: примерно ${input.words} отдельных слов и ${input.phrases} фраз.`,
+    `Уже предлагалось, не повторяй: ${exclude}`,
+  ].join('\n\n')
+}
+
+export function geminiSuggester(opts: { generate?: GenerateFn; model?: string } = {}): Suggester {
+  const run = geminiRunner(opts)
+  return {
+    async suggest(input) {
+      const context = input.context.trim()
+      if (!context) throw new GenerationError('empty context')
+      return run(SuggestionSchema, SUGGEST_SYSTEM, [{ text: suggestMessage({ ...input, context }) }])
     },
   }
 }
 
 export function getGenerator(): Generator {
   return geminiGenerator()
+}
+
+export function getSuggester(): Suggester {
+  return geminiSuggester()
 }
