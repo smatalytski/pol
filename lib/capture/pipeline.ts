@@ -2,9 +2,8 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, cards } from '../db/schema'
-import { applyGeneratedFields, createCard, regenerateCard, type CardType, type GeneratedFields } from '../cards/service'
+import { applyGeneratedFields, createCard, regenerateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
-import type { WordKind } from '../cards/forms'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator } from '../generate'
 import type { DictationLang, Transcriber } from '../transcribe'
@@ -18,12 +17,8 @@ export type CaptureView = {
   status: string
   transcript: string | null
   error: string | null
-  cardId: string | null
   duplicateOf: string | null
-  audioMediaId: string | null
   createdAt: number
-  cardType: CardType | null
-  wordKind: WordKind | null
   /** Transcribed and not yet approved: rejectable, with the bar running (§3). */
   inReview: boolean
   /** Server-computed, so the phone's clock cannot distort the bar. Null when not under review. */
@@ -251,15 +246,10 @@ export function listOnScreen(db: Db, since: number, now: Date): CaptureView[] {
       status: captures.status,
       transcript: captures.transcript,
       error: captures.error,
-      cardId: captures.cardId,
       duplicateOf: captures.duplicateOf,
-      audioMediaId: captures.audioMediaId,
       createdAt: captures.createdAt,
-      cardType: cards.type,
-      wordKind: cards.wordKind,
     })
     .from(captures)
-    .leftJoin(cards, eq(cards.id, captures.cardId))
     .where(and(gt(captures.createdAt, since), inArray(captures.status, ['uploaded', 'transcribed', 'failed'])))
     .orderBy(desc(captures.createdAt))
     .all()

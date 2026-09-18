@@ -6,14 +6,11 @@ import { useWakeLock } from '@/hooks/useWakeLock'
 import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbox'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
-import type { CardType } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
-type Notice = 'typeFailed' | 'typeDuplicate' | 'languageFailed' | 'deleteFailed'
+type Notice = 'languageFailed' | 'deleteFailed'
 
 const NOTICE_TEXT: Record<Notice, string> = {
-  typeFailed: t.typeFailed,
-  typeDuplicate: t.typeDuplicate,
   languageFailed: t.languageFailed,
   deleteFailed: t.deleteFailed,
 }
@@ -25,8 +22,8 @@ export default function AddPage() {
   // One notice line for the chip controls' outcomes. A failed or refused
   // request would otherwise look exactly like a dead button.
   const [notice, setNotice] = useState<Notice | null>(null)
-  // Captures whose re-recognition or type switch is in flight. Re-recognition
-  // is Speech-to-Text plus a Gemini call, and ~30 s is normal, so without this
+  // Captures whose re-recognition is in flight. Re-recognition is
+  // Speech-to-Text plus a Gemini call, and ~30 s is normal, so without this
   // the user taps again and starts a second one on the same capture.
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
@@ -120,14 +117,14 @@ export default function AddPage() {
   useWakeLock(true)
 
   // Spec §9: poll, don't stream — and only while something is actually
-  // in flight. A capture is "pending" once uploaded and until the pipeline
-  // marks it generated or failed; the outbox counts as pending too, since a
-  // stalled upload still needs retrying. Polling forever on a phone-first
-  // app is a battery drain for no benefit once the screen is idle, so the
-  // interval is torn down the moment nothing is left to watch, and a fresh
-  // recording (via `outboxItems`) restarts it.
+  // in flight. Polling runs while anything is uploading, recognising or under
+  // review, since a recording under review leaves the screen only when the
+  // server stops returning it. Polling forever on a phone-first app is a
+  // battery drain for no benefit once the screen is idle, so the interval is
+  // torn down the moment nothing is left to watch, and a fresh recording (via
+  // `outboxItems`) restarts it.
   const hasPending =
-    outboxItems.length > 0 || captures.some((c) => c.status !== 'generated' && c.status !== 'failed')
+    outboxItems.length > 0 || captures.some((c) => c.status === 'uploaded' || c.inReview)
 
   useEffect(() => {
     function poll() {
@@ -196,52 +193,20 @@ export default function AddPage() {
     [whilePending],
   )
 
-  // Every dictation becomes ru_to_pl; this flips one to drilling the forms of
-  // a word already known (spec 2026-09-18 §2), then refreshes so the chip
-  // shows the new type without a reload. A 400 (e.g. a noun whose forms_json
-  // turned out empty), an unreachable server, and a 200 carrying `duplicateOf`
-  // (a pl_to_pl card for this word already exists, so nothing changed) would
-  // otherwise all look like a dead button — the notice says which one
-  // happened. Like every async setter on this page, these are behind
-  // `mountedRef`, since the fetch can resolve after the screen was navigated
-  // away from.
-  const setType = useCallback(
-    (captureId: string, cardId: string, type: CardType) => {
-      void whilePending(captureId, async () => {
-        try {
-          const res = await fetch(`/api/cards/${cardId}/typ`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ type }),
-          })
-          if (!res.ok) {
-            if (mountedRef.current) setNotice('typeFailed')
-            return
-          }
-          const { duplicateOf } = (await res.json()) as { duplicateOf: string | null }
-          if (mountedRef.current) setNotice(duplicateOf ? 'typeDuplicate' : null)
-        } catch {
-          if (mountedRef.current) setNotice('typeFailed')
-        }
-      })
-    },
-    [whilePending],
-  )
-
   // Spec §4's "swipe to delete", wired once Task 17 added the routes it
   // needs, and the visible `usuń` button (Task 9: swipe alone was invisible)
   // calls the same handler. An outbox chip never calls this (CaptureChip
   // doesn't attach either control to it — see its own comment), so this only
-  // ever sees a `capture` item: one with a card is soft-deleted (DELETE
-  // /api/cards/:id), one without a card yet (still uploaded/transcribed/
-  // failed) has its capture row removed instead (DELETE /api/captures/:id) —
-  // there is no card to delete. A refused or unreachable delete leaves the
-  // chip on screen, so the notice says the delete did not happen.
+  // ever sees a `capture` item. An on-screen recording never has a card (it
+  // is uploaded, failed or under review — see `listOnScreen`), so rejecting
+  // it always deletes the recording itself, never a card. A refused or
+  // unreachable delete leaves the chip on screen, so the notice says the
+  // delete did not happen.
   const deleteChip = useCallback(
     (item: ChipItem) => {
       if (item.kind === 'outbox') return
       const { capture } = item
-      const url = capture.cardId ? `/api/cards/${capture.cardId}` : `/api/captures/${capture.id}`
+      const url = `/api/captures/${capture.id}`
       void (async () => {
         try {
           const res = await fetch(url, { method: 'DELETE' })
@@ -272,11 +237,7 @@ export default function AddPage() {
 
   return (
     <div className="flex flex-col">
-      {notice && (
-        <p className={`p-3 text-sm ${notice === 'typeDuplicate' ? 'text-amber-600' : 'text-red-600'}`}>
-          {NOTICE_TEXT[notice]}
-        </p>
-      )}
+      {notice && <p className="p-3 text-sm text-red-600">{NOTICE_TEXT[notice]}</p>}
       {/* Bottom padding reserves the height of the fixed bar below, so the
           last chip can still be read and swiped instead of sitting under the
           button. */}
@@ -288,7 +249,6 @@ export default function AddPage() {
             onRetry={retry}
             onDelete={deleteChip}
             onRelanguage={relanguage}
-            onSetType={(cardId, type) => item.kind === 'capture' && setType(item.capture.id, cardId, type)}
             pending={item.kind === 'capture' && pending.has(item.capture.id)}
           />
         ))}

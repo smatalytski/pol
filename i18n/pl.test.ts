@@ -8,8 +8,8 @@ describe('strings', () => {
       'show', 'again', 'hard', 'good', 'easy', 'undo',
       'doneForToday', 'noCards', 'sessionReviewed', 'nextReviewAt', 'rateFailed',
       'holdToRecord', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
-      'suspend', 'unsuspend', 'save', 'needsInput',
-      'saveFailed', 'chipSaveFailed',
+      'suspend', 'unsuspend', 'needsInput',
+      'saveFailed',
       'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
     ]
     for (const key of required) expect(t).toHaveProperty(key)

@@ -35,7 +35,6 @@ export const t = {
   regenerate: 'wygeneruj ponownie',
   suspend: 'zawieś',
   unsuspend: 'przywróć',
-  save: 'zapisz',
   needsInput: 'do uzupełnienia',
   suspended: 'zawieszona',
   backToCards: '‹ Fiszki',
@@ -55,7 +54,6 @@ export const t = {
   typeFailed: 'nie udało się zmienić typu karty',
   typeDuplicate: 'taka karta już istnieje',
   saveFailed: 'nie udało się zapisać zmian',
-  chipSaveFailed: 'nie udało się zapisać zmian',
   deleteFailed: 'nie udało się usunąć',
 
   newPerDay: 'Nowe fiszki na dzień',
