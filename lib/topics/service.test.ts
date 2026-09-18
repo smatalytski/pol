@@ -224,6 +224,19 @@ describe('acceptRound', () => {
     const { db } = createTestDb()
     expect(acceptRound(db, 'nope', 1, [], null, NOW)).toBeNull()
   })
+
+  // A stale tab can still show an older, undecided round while the topic has
+  // moved on to a newer one. Posting `next` for that stale round must not
+  // queue round (latestRound + 1) out from under the current round, or the
+  // newer round's proposed items are stranded with no way to reach them.
+  it('queues no next round when the posted round is behind the latest one', () => {
+    const { db } = createTestDb()
+    topic(db)
+    suggestion(db, 'gorączka', { round: 2 })
+    expect(acceptRound(db, 't1', 1, [], { count: 10, mix: 'mieszane' }, NOW)).toEqual({ accepted: 0, nextJobId: null })
+    expect(db.select().from(generationJobs).where(eq(generationJobs.kind, 'suggest')).all()).toHaveLength(0)
+    expect(db.select().from(suggestions).where(eq(suggestions.round, 2)).get()!.status).toBe('proposed')
+  })
 })
 
 describe('createTopic', () => {

@@ -179,7 +179,12 @@ export function acceptRound(
       t.update(suggestions).set({ status: 'accepted', captureId }).where(eq(suggestions.id, s.id)).run()
       accepted++
     }
-    return { accepted, nextJobId: next ? enqueueSuggest(t, topicId, next, now) : null }
+    // A stale page can post an old `:round` after the topic has already moved
+    // on to a newer one; queueing round+1 in that case would jump past the
+    // newer round's still-undecided items and strand them. Only the current
+    // round may ask for the next one.
+    const current = round >= latestRound(t, topicId)
+    return { accepted, nextJobId: next && current ? enqueueSuggest(t, topicId, next, now) : null }
   })
 }
 
