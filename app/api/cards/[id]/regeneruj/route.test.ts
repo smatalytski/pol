@@ -3,24 +3,28 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
+import type { GeneratedCard } from '@/lib/generate'
 
 const tmpDir = mkdtempSync(path.join(tmpdir(), 'fiszki-regen-route-'))
 process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
 afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
-const fromPolishMock = vi.fn().mockResolvedValue({
+const fromDictationMock = vi.fn().mockResolvedValue({
   prompt_ru: 'здоров как бык',
   prompt_hint: 'идиома',
   answer_pl: 'zdrów jak ryba',
   example_pl: 'Czuję się zdrów jak ryba.',
   example_ru: 'Чувствую себя здоровым.',
   grammar_note: 'краткая форма',
-})
+  kind: 'fraza',
+  forms_basic: [],
+  forms_extended: [],
+} satisfies GeneratedCard)
 
-// Mocks only the generation seam, same approach as the formy route's test.
+// Mocks only the generation seam, so the route's own db lookups run unmocked.
 vi.mock('@/lib/generate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/generate')>()
-  return { ...actual, getGenerator: () => ({ ...actual.getGenerator(), fromPolish: fromPolishMock }) }
+  return { ...actual, getGenerator: () => ({ ...actual.getGenerator(), fromDictation: fromDictationMock }) }
 })
 
 const { POST } = await import('./route')
@@ -38,14 +42,12 @@ function seedStranded(id: string) {
       type: 'ru_to_pl',
       promptText: null,
       promptHint: null,
-      promptMediaId: null,
       answerPl: 'Zdrów jak ryba.',
       answerKey: 'zdrów jak ryba',
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
       status: 'needs_input',
-      parentCardId: null,
       suspendedAt: null,
       createdAt: NOW.getTime(),
       updatedAt: NOW.getTime(),
@@ -63,7 +65,7 @@ function post(id: string) {
 
 beforeEach(() => {
   db.delete(cards).run()
-  fromPolishMock.mockClear()
+  fromDictationMock.mockClear()
 })
 
 describe('POST /api/cards/:id/regeneruj', () => {
@@ -84,7 +86,7 @@ describe('POST /api/cards/:id/regeneruj', () => {
   // rather than half-written, so the button can be pressed again.
   it('surfaces a generation failure as a client error and leaves the card stranded', async () => {
     seedStranded('c2')
-    fromPolishMock.mockRejectedValueOnce(
+    fromDictationMock.mockRejectedValueOnce(
       new GenerationError('generation request failed: 429 RESOURCE_EXHAUSTED'),
     )
     const res = await post('c2')

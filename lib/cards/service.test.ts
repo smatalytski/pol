@@ -3,8 +3,17 @@ import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
 import { createCard, type CreateCardInput } from './service'
-import type { Generator } from '../generate'
-import { createFormsCard, deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
+import type { Generator, GeneratedCard } from '../generate'
+import {
+  applyGeneratedFields,
+  CardTypeError,
+  deleteCard,
+  findDuplicate,
+  regenerateCard,
+  searchCards,
+  setCardType,
+  updateCard,
+} from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -12,13 +21,13 @@ const input = (over: Partial<CreateCardInput> = {}): CreateCardInput => ({
   type: 'ru_to_pl',
   promptText: 'злобный',
   promptHint: null,
-  promptMediaId: null,
   answerPl: 'Złośliwy!',
   examplePl: null,
   exampleRu: null,
   grammarNote: null,
+  wordKind: null,
+  formsJson: null,
   status: 'ready',
-  parentCardId: null,
   ...over,
 })
 
@@ -46,7 +55,7 @@ describe('createCard', () => {
   it('treats the same answer under a different card type as a different card', () => {
     const { db } = createTestDb()
     createCard(db, input(), NOW)
-    const forms = createCard(db, input({ type: 'pl_forms', promptText: 'złośliwy — formy' }), NOW)
+    const forms = createCard(db, input({ type: 'pl_to_pl', promptText: 'złośliwy — formy' }), NOW)
     expect(forms.duplicateOf).toBeNull()
     expect(db.select().from(cards).all()).toHaveLength(2)
   })
@@ -101,7 +110,7 @@ describe('createCard', () => {
 
     it('scopes the fallback lookup by type, like the primary lookup', () => {
       const { db } = createTestDb()
-      const forms = createCard(db, input({ type: 'pl_forms', answerPl: 'zloslivy' }), NOW)
+      const forms = createCard(db, input({ type: 'pl_to_pl', answerPl: 'zloslivy' }), NOW)
       const ruToPl = createCard(
         db,
         input({ type: 'ru_to_pl', answerPl: 'złośliwy', fallbackAnswerKey: 'zloslivy' }),
@@ -237,28 +246,6 @@ describe('deleteCard', () => {
     expect(() => deleteCard(db, 'ghost', NOW)).not.toThrow()
   })
 
-  // Important review finding: deleting a word must also retire its pl_forms
-  // conjugation/declension drill — otherwise you delete a word and keep being
-  // drilled on it, which feels identical to a deleted card reappearing.
-  // createFormsCard already treats parent_card_id as authoritative in the
-  // other direction (idempotent lookup by parent); deleteCard must honor the
-  // same link.
-  it('cascades to the pl_forms child it owns', async () => {
-    const { db } = createTestDb()
-    const generator = {
-      forms: vi.fn().mockResolvedValue({ prompt_pl: 'przyzwyczaić się — formy', answer_pl: '| … |' }),
-    } as unknown as Generator
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const child = await createFormsCard(db, generator, parent.cardId, NOW)
-
-    deleteCard(db, parent.cardId, NOW)
-
-    const parentRow = db.select().from(cards).where(eq(cards.id, parent.cardId)).get()!
-    const childRow = db.select().from(cards).where(eq(cards.id, child.cardId)).get()!
-    expect(parentRow.deletedAt).toBe(NOW.getTime())
-    expect(childRow.deletedAt).toBe(NOW.getTime())
-  })
-
   it('does not delete an unrelated card that merely shares no parent link', () => {
     const { db } = createTestDb()
     const a = createCard(db, input({ answerPl: 'jeden' }), NOW)
@@ -320,64 +307,98 @@ describe('findDuplicate and soft delete', () => {
   })
 })
 
-describe('createFormsCard', () => {
-  const generator = {
-    forms: vi.fn().mockResolvedValue({ prompt_pl: 'przyzwyczaić się — formy', answer_pl: '| … |' }),
-  } as unknown as Generator
+describe('applyGeneratedFields and the card type', () => {
+  const nounFields = {
+    promptText: 'кот', promptHint: null, answerPl: 'kot', examplePl: null, exampleRu: null, grammarNote: null,
+    wordKind: 'rzeczownik' as const,
+    formsJson: JSON.stringify({ basic: [{ label: 'M. l.mn.', value: 'koty' }], extended: [] }),
+  }
 
-  it('creates a pl_forms child linked to its parent', async () => {
+  // Spec §5: a pl_to_pl card's whole answer is its forms. If a regeneration
+  // reclassifies the word as having none, leaving it pl_to_pl would leave a
+  // card with no answer at all.
+  it('reverts a pl_to_pl card to ru_to_pl when the new generation has no forms', () => {
     const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const child = await createFormsCard(db, generator, parent.cardId, NOW)
-    const row = db.select().from(cards).where(eq(cards.id, child.cardId)).get()!
-    expect(row.type).toBe('pl_forms')
-    expect(row.parentCardId).toBe(parent.cardId)
-    expect(row.promptText).toBe('przyzwyczaić się — formy')
-    expect(row.answerPl).toBe('| … |')
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const fields = { ...nounFields, wordKind: 'fraza' as const, formsJson: null }
+    const { card: after } = applyGeneratedFields(db, card, fields, NOW, { onClash: 'keepAnswer' })
+    expect(after.type).toBe('ru_to_pl')
   })
 
-  it('is idempotent — asking twice does not make two drills', async () => {
+  // Ruling 11: the kind alone is not enough. A noun whose generation came back
+  // with no rows would leave a pl_to_pl card with nothing on its answer side —
+  // the state setCardType refuses to create.
+  it('reverts a pl_to_pl card to ru_to_pl when the new generation keeps the kind but has no forms', () => {
     const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const first = await createFormsCard(db, generator, parent.cardId, NOW)
-    const second = await createFormsCard(db, generator, parent.cardId, NOW)
-    expect(second.cardId).toBe(first.cardId)
-    expect(db.select().from(cards).all()).toHaveLength(2)
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const fields = { ...nounFields, formsJson: null }
+    const { card: after } = applyGeneratedFields(db, card, fields, NOW, { onClash: 'keepAnswer' })
+    expect(after.type).toBe('ru_to_pl')
   })
 
-  it('throws on an unknown parent', async () => {
+  // The revert re-scopes the clash check to ru_to_pl, and here that word is
+  // already a ru_to_pl card. Outcome: the card keeps its whole answer identity
+  // — type, answer, kind and forms — and the clash is reported. Reverting
+  // would fork the word into two ru_to_pl cards with one answer key, and
+  // staying pl_to_pl is safe because the forms it keeps are the ones it was
+  // already drilled on (a card only becomes or stays pl_to_pl with drillable
+  // forms). Under keepAnswer the prompt and examples are still written.
+  it('keeps a pl_to_pl card whole when reverting it would clash with a ru_to_pl card', () => {
     const { db } = createTestDb()
-    await expect(createFormsCard(db, generator, 'ghost', NOW)).rejects.toThrow(/ghost/)
+    const ruCard = createCard(db, input({ ...nounFields }), NOW)
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after, duplicateOf } = applyGeneratedFields(
+      db,
+      card,
+      { ...nounFields, promptText: 'котик', wordKind: 'inne', formsJson: null },
+      NOW,
+      { onClash: 'keepAnswer' },
+    )
+    expect(duplicateOf).toBe(ruCard.cardId)
+    expect(after.type).toBe('pl_to_pl')
+    expect(after.answerPl).toBe('kot')
+    expect(after.wordKind).toBe('rzeczownik')
+    expect(after.formsJson).toBe(nounFields.formsJson)
+    expect(after.promptText).toBe('котик')
   })
 
-  it('throws on a soft-deleted parent, same as an unknown one', async () => {
+  it('leaves the card exactly as it was on a clash under the untouched policy', () => {
     const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    deleteCard(db, parent.cardId, NOW)
-    await expect(createFormsCard(db, generator, parent.cardId, NOW)).rejects.toThrow(/no such card/)
+    const other = createCard(db, input({ answerPl: 'pies' }), NOW)
+    const { cardId } = createCard(db, input({ ...nounFields }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const later = new Date(NOW.getTime() + 60_000)
+    const { card: after, duplicateOf } = applyGeneratedFields(
+      db,
+      card,
+      { ...nounFields, answerPl: 'pies', promptText: 'собака', wordKind: 'rzeczownik', formsJson: null },
+      later,
+      { onClash: 'untouched' },
+    )
+    expect(duplicateOf).toBe(other.cardId)
+    expect(after).toEqual(card)
+    expect(db.select().from(cards).where(eq(cards.id, cardId)).get()).toEqual(card)
   })
 
-  it('generates a fresh child once the previous forms child was soft-deleted', async () => {
+  it('keeps a pl_to_pl card pl_to_pl when forms remain', () => {
     const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const first = await createFormsCard(db, generator, parent.cardId, NOW)
-    deleteCard(db, first.cardId, NOW)
-    const second = await createFormsCard(db, generator, parent.cardId, NOW)
-    expect(second.cardId).not.toBe(first.cardId)
-    expect(second.duplicateOf).toBeNull()
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW, { onClash: 'keepAnswer' })
+    expect(after.type).toBe('pl_to_pl')
+    expect(after.formsJson).toBe(nounFields.formsJson)
   })
 
-  // Important review finding: nothing stopped a pl_forms card from being
-  // used as the *parent* of another forms request — one tap would send a
-  // whole Markdown table to generator.forms() as a "lemma", burning a model
-  // call and inserting a nonsense grandchild. Rejected here, not just hidden
-  // in the UI, because the route is reachable directly (e.g. by curl).
-  it('refuses to generate forms for a pl_forms parent', async () => {
+  it('writes kind and forms onto a ru_to_pl card', () => {
     const { db } = createTestDb()
-    const word = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const forms = await createFormsCard(db, generator, word.cardId, NOW)
-    await expect(createFormsCard(db, generator, forms.cardId, NOW)).rejects.toThrow(/pl_forms/)
-    expect(generator.forms).not.toHaveBeenCalledWith('| … |')
+    const { cardId } = createCard(db, input({ answerPl: 'kot', wordKind: null, formsJson: null }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW, { onClash: 'keepAnswer' })
+    expect(after.wordKind).toBe('rzeczownik')
+    expect(after.formsJson).toBe(nounFields.formsJson)
   })
 })
 
@@ -385,15 +406,18 @@ describe('regenerateCard', () => {
   // What a successful generation looks like: the model restores diacritics and
   // drops the dictation's sentence punctuation, which is why `answer_pl` here
   // differs from the transcript the card was stranded with.
-  const generated = {
+  const generated: GeneratedCard = {
     prompt_ru: '\u0437\u0434\u043e\u0440\u043e\u0432 \u043a\u0430\u043a \u0431\u044b\u043a',
     prompt_hint: '\u0438\u0434\u0438\u043e\u043c\u0430',
     answer_pl: 'zdr\u00f3w jak ryba',
     example_pl: 'Czuj\u0119 si\u0119 zdr\u00f3w jak ryba.',
     example_ru: '\u0427\u0443\u0432\u0441\u0442\u0432\u0443\u044e \u0441\u0435\u0431\u044f \u0437\u0434\u043e\u0440\u043e\u0432\u044b\u043c.',
     grammar_note: '\u043a\u0440\u0430\u0442\u043a\u0430\u044f \u0444\u043e\u0440\u043c\u0430',
+    kind: 'fraza',
+    forms_basic: [],
+    forms_extended: [],
   }
-  const gen = () => ({ fromPolish: vi.fn().mockResolvedValue(generated) }) as unknown as Generator
+  const gen = () => ({ fromDictation: vi.fn().mockResolvedValue(generated) }) as unknown as Generator
 
   const stranded = (over: Partial<CreateCardInput> = {}) =>
     input({ status: 'needs_input', promptText: null, answerPl: 'Zdr\u00f3w jak ryba.', ...over })
@@ -403,7 +427,7 @@ describe('regenerateCard', () => {
     const generator = gen()
     const { cardId } = createCard(db, stranded(), NOW)
     const { card } = await regenerateCard(db, generator, cardId, NOW)
-    expect(generator.fromPolish).toHaveBeenCalledWith('Zdr\u00f3w jak ryba.')
+    expect(generator.fromDictation).toHaveBeenCalledWith('Zdr\u00f3w jak ryba.')
     expect(card.status).toBe('ready')
     expect(card.promptText).toBe(generated.prompt_ru)
     expect(card.promptHint).toBe(generated.prompt_hint)
@@ -439,6 +463,38 @@ describe('regenerateCard', () => {
     expect(card.status).toBe('ready')
   })
 
+  // Ruling 12: the answer's identity includes its kind and forms — on a
+  // pl_to_pl card the forms ARE the answer — so a clash keeps them with the
+  // answer instead of hanging another word's forms on it.
+  it('keeps the card kind and forms with its answer on a clash', async () => {
+    const { db } = createTestDb()
+    const OWN = JSON.stringify({ basic: [{ label: 'M. l.mn.', value: 'ryby' }], extended: [] })
+    const nounGen = {
+      fromDictation: vi.fn().mockResolvedValue({
+        ...generated,
+        kind: 'przymiotnik',
+        forms_basic: [{ label: 'przysłówek', value: 'zdrowo' }],
+      }),
+    } as unknown as Generator
+    createCard(db, input({ answerPl: 'zdr\u00f3w jak ryba' }), NOW)
+    const { cardId } = createCard(
+      db,
+      stranded({ answerPl: 'Zdrow jak ryba.', wordKind: 'rzeczownik', formsJson: OWN }),
+      NOW,
+    )
+    const { card, duplicateOf } = await regenerateCard(db, nounGen, cardId, NOW)
+    expect(duplicateOf).not.toBeNull()
+    expect(card.answerPl).toBe('Zdrow jak ryba.')
+    expect(card.wordKind).toBe('rzeczownik')
+    expect(card.formsJson).toBe(OWN)
+    // Everything else from the generation is still written.
+    expect(card.promptText).toBe(generated.prompt_ru)
+    expect(card.promptHint).toBe(generated.prompt_hint)
+    expect(card.examplePl).toBe(generated.example_pl)
+    expect(card.exampleRu).toBe(generated.example_ru)
+    expect(card.grammarNote).toBe(generated.grammar_note)
+  })
+
   it('refuses a card that is not needs_input', async () => {
     const { db } = createTestDb()
     const { cardId } = createCard(db, input(), NOW)
@@ -450,5 +506,69 @@ describe('regenerateCard', () => {
     const { cardId } = createCard(db, stranded(), NOW)
     deleteCard(db, cardId, NOW)
     await expect(regenerateCard(db, gen(), cardId, NOW)).rejects.toThrow(/no such card/)
+  })
+})
+
+describe('setCardType', () => {
+  const FORMS = JSON.stringify({ basic: [{ label: 'M. l.mn.', value: 'koty' }], extended: [] })
+  const noun = () => input({ answerPl: 'kot', promptText: 'кот', wordKind: 'rzeczownik', formsJson: FORMS })
+  const LATER = new Date('2026-09-20T10:00:00')
+
+  it('switches a word with forms to pl_to_pl', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    const { card, duplicateOf } = setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(card.type).toBe('pl_to_pl')
+    expect(duplicateOf).toBeNull()
+  })
+
+  // Spec §6: recalling a word from Russian and recalling its forms are
+  // different tasks, so the schedule earned by one says nothing about the
+  // other. Review rows are not touched.
+  it('resets the schedule when the type changes', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    db.update(cards).set({ reps: 5, state: 2, due: NOW.getTime() + 1e9 }).where(eq(cards.id, cardId)).run()
+    const { card } = setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(card.reps).toBe(0)
+    expect(card.state).toBe(0)
+    expect(card.due).toBe(LATER.getTime())
+  })
+
+  it('is a no-op that keeps the schedule when the type is unchanged', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    db.update(cards).set({ reps: 5 }).where(eq(cards.id, cardId)).run()
+    expect(setCardType(db, cardId, 'ru_to_pl', LATER).card.reps).toBe(5)
+  })
+
+  it('keeps the Russian prompt, so switching back restores the ru_to_pl card', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(setCardType(db, cardId, 'ru_to_pl', LATER).card.promptText).toBe('кот')
+  })
+
+  it('refuses pl_to_pl for a phrase', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ answerPl: 'zdrów jak ryba', wordKind: 'fraza', formsJson: null }), NOW)
+    expect(() => setCardType(db, cardId, 'pl_to_pl', LATER)).toThrow(CardTypeError)
+  })
+
+  // A noun whose generation returned no rows would become a forms card with
+  // nothing on its answer side.
+  it('refuses pl_to_pl for a word of a kind with forms that has none stored', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ answerPl: 'kot', wordKind: 'rzeczownik', formsJson: null }), NOW)
+    expect(() => setCardType(db, cardId, 'pl_to_pl', LATER)).toThrow(CardTypeError)
+  })
+
+  it('reports the clash and changes nothing when that card already exists', () => {
+    const { db } = createTestDb()
+    const existing = createCard(db, { ...noun(), type: 'pl_to_pl' }, NOW)
+    const { cardId } = createCard(db, noun(), NOW)
+    const { card, duplicateOf } = setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(duplicateOf).toBe(existing.cardId)
+    expect(card.type).toBe('ru_to_pl')
   })
 })

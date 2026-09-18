@@ -11,7 +11,7 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, PATCH, DELETE } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { cards, reviews } = await import('@/lib/db/schema')
+const { captures, cards, media, reviews } = await import('@/lib/db/schema')
 const { newState } = await import('@/lib/scheduler')
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -22,14 +22,12 @@ function seedCard(overrides: Partial<typeof cards.$inferInsert> & { id: string }
       type: 'ru_to_pl',
       promptText: 'злобный',
       promptHint: null,
-      promptMediaId: null,
       answerPl: 'złośliwy',
       answerKey: 'złośliwy',
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
       status: 'ready',
-      parentCardId: null,
       suspendedAt: null,
       createdAt: NOW.getTime(),
       updatedAt: NOW.getTime(),
@@ -60,8 +58,13 @@ function del(id: string) {
 }
 
 beforeEach(() => {
-  db.delete(cards).run()
+  // Order matters: reviews and captures both carry a foreign key to cards, so
+  // clearing cards first fails with FOREIGN KEY constraint failed. Media goes
+  // last, since captures reference it.
   db.delete(reviews).run()
+  db.delete(captures).run()
+  db.delete(cards).run()
+  db.delete(media).run()
 })
 
 describe('GET /api/cards/:id', () => {
@@ -69,6 +72,30 @@ describe('GET /api/cards/:id', () => {
     seedCard({ id: 'c1' })
     const body = await (await get('c1')).json()
     expect(body.card.answerPl).toBe('złośliwy')
+  })
+
+  // The detail screen offers "re-recognise this recording in Russian" only
+  // when there is a recording to re-recognise, so it needs to know. Dedup
+  // means several captures can point at one card (a duplicate dictation
+  // resolves to the card it matched), so this is the capture that CREATED the
+  // card — the earliest — not whichever one most recently pointed at it.
+  // Re-recognising a later duplicate's audio would rewrite a card that
+  // recording never made.
+  it('returns the id of the capture that created the card', async () => {
+    seedCard({ id: 'with-audio' })
+    const mediaId = 'm1'
+    db.insert(media).values({ id: mediaId, kind: 'audio', mime: 'audio/webm', bytes: Buffer.from([1]), byteSize: 1, createdAt: 1 }).run()
+    db.insert(captures).values({ id: 'first', audioMediaId: mediaId, transcript: 'x', status: 'generated', error: null, generationJson: null, cardId: 'with-audio', createdAt: 100 }).run()
+    db.insert(captures).values({ id: 'later-duplicate', audioMediaId: mediaId, transcript: 'x', status: 'generated', error: null, generationJson: null, cardId: 'with-audio', createdAt: 200 }).run()
+
+    const body = await (await GET(new Request('http://test'), { params: Promise.resolve({ id: 'with-audio' }) })).json()
+    expect(body.captureId).toBe('first')
+  })
+
+  it('returns no capture id for a card that was never dictated', async () => {
+    seedCard({ id: 'typed' })
+    const body = await (await GET(new Request('http://test'), { params: Promise.resolve({ id: 'typed' }) })).json()
+    expect(body.captureId).toBeNull()
   })
 
   it('404s on an unknown id', async () => {

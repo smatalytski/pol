@@ -2,17 +2,19 @@ import { and, asc, eq, isNull, lte, notExists, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { cards, reviews } from '../db/schema'
 import { getSettings } from '../settings'
+import type { CardType } from '../cards/service'
+import { parseForms, type CardForms, type WordKind } from '../cards/forms'
 
 export type QueueItem = {
   id: string
-  type: 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
+  type: CardType
   promptText: string | null
   promptHint: string | null
-  promptMediaId: string | null
   answerPl: string
   examplePl: string | null
-  exampleRu: string | null
   grammarNote: string | null
+  wordKind: WordKind | null
+  forms: CardForms | null
   isNew: boolean
 }
 
@@ -78,11 +80,11 @@ const SELECTION = {
   type: cards.type,
   promptText: cards.promptText,
   promptHint: cards.promptHint,
-  promptMediaId: cards.promptMediaId,
   answerPl: cards.answerPl,
   examplePl: cards.examplePl,
-  exampleRu: cards.exampleRu,
   grammarNote: cards.grammarNote,
+  wordKind: cards.wordKind,
+  formsJson: cards.formsJson,
 }
 
 // Soft delete (decided 2026-09-16, spec §7/§9): a deleted card must never be
@@ -128,8 +130,16 @@ export async function buildQueue(db: Db, now: Date): Promise<QueueItem[]> {
           .limit(remaining)
           .all()
 
+  // forms_json is parsed here, once, so the review screen receives rows rather
+  // than a string it would have to know how to decode.
+  const toItem = ({ formsJson, ...c }: (typeof due)[number], isNew: boolean): QueueItem => ({
+    ...c,
+    forms: parseForms(formsJson),
+    isNew,
+  })
+
   return interleave(
-    due.map((c) => ({ ...c, isNew: false })),
-    fresh.map((c) => ({ ...c, isNew: true })),
+    due.map((c) => toItem(c, false)),
+    fresh.map((c) => toItem(c, true)),
   )
 }

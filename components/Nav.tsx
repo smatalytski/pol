@@ -4,7 +4,6 @@ import { t } from '@/i18n/pl'
 const LINKS = [
   { href: '/powtorki', label: t.review },
   { href: '/dodaj', label: t.add },
-  { href: '/obrazki', label: t.images },
   { href: '/fiszki', label: t.cards },
   { href: '/ustawienia', label: t.settings },
 ]

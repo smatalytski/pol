@@ -26,6 +26,28 @@ describe('speechTranscriber', () => {
     expect(req.config.model).toMatch(/^chirp/)
   })
 
+  // Measured, not assumed: with ['pl-PL','ru-RU'] the Polish model swallows
+  // Russian whole — spoken "\u0441\u043a\u043b\u0435\u043f" came back "sklep", "\u0447\u0430\u0441" came back "czas",
+  // and "\u0431\u0435\u0448\u0435\u043d\u0441\u0442\u0432\u043e" came back "wskieklo\u015b\u0107", in both code orders. A single
+  // code was correct on every word in both languages. So the language is
+  // always exactly one code, chosen by the caller, never a list to detect
+  // between.
+  it('asks for Russian when told the recording is Russian', async () => {
+    const recognize = ok('\u0441\u043a\u043b\u0435\u043f')
+    await make(recognize).transcribe({ ...audio, lang: 'ru' })
+    const req = recognize.mock.calls[0][0] as { config: { languageCodes: string[] } }
+    expect(req.config.languageCodes).toEqual(['ru-RU'])
+  })
+
+  it('never sends more than one language code, whichever language is asked for', async () => {
+    for (const lang of ['pl', 'ru'] as const) {
+      const recognize = ok('x')
+      await make(recognize).transcribe({ ...audio, lang })
+      const req = recognize.mock.calls[0][0] as { config: { languageCodes: string[] } }
+      expect(req.config.languageCodes).toHaveLength(1)
+    }
+  })
+
   it('targets a regional recognizer, because Polish is only served from eu', async () => {
     const recognize = ok('x')
     await make(recognize).transcribe(audio)

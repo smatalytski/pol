@@ -1,6 +1,10 @@
 'use client'
 import { useRef, useState } from 'react'
 import type { CaptureView } from '@/lib/capture/pipeline'
+import type { DictationLang } from '@/lib/transcribe'
+import type { CardType } from '@/lib/cards/service'
+import { hasForms } from '@/lib/cards/forms'
+import { CardTypeSwitch } from '@/components/CardTypeSwitch'
 import { t } from '@/i18n/pl'
 
 /**
@@ -55,10 +59,22 @@ export function CaptureChip({
   item,
   onRetry,
   onDelete,
+  onRelanguage,
+  onSetType,
+  pending = false,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
+  onRelanguage: (id: string, lang: DictationLang) => void
   onDelete: (item: ChipItem) => void
+  onSetType: (cardId: string, type: CardType) => void
+  /**
+   * A re-recognition or type switch for this capture is in flight (the page
+   * owns that state). Re-recognition is Speech-to-Text plus a Gemini call,
+   * ~30 s is normal, so the controls that would start another one are
+   * disabled and the chip says it is working.
+   */
+  pending?: boolean
 }) {
   // Hooks must run unconditionally, before the outbox early return below —
   // an outbox chip never uses this state, but React doesn't allow a
@@ -74,6 +90,21 @@ export function CaptureChip({
   const pointerStartX = useRef<number | null>(null)
   const [fields, setFields] = useState<EditableFields | null>(null)
   const [saveError, setSaveError] = useState(false)
+
+  // `fields` is a snapshot of the card taken when the form expanded. A
+  // re-recognition (a new transcript) or a type switch rebuilds the card under
+  // it, and pressing zapisz after that would PATCH the old answer and prompt
+  // straight back over the rebuild — so the form closes whenever either
+  // changes, and reopening it loads the card as it now is. Adjusted during
+  // render (React's pattern for resetting state on a prop change), so the
+  // stale form is never painted.
+  const cardVersion =
+    item.kind === 'capture' ? JSON.stringify([item.capture.transcript, item.capture.cardType]) : null
+  const [seenVersion, setSeenVersion] = useState(cardVersion)
+  if (cardVersion !== seenVersion) {
+    setSeenVersion(cardVersion)
+    setFields(null)
+  }
 
   if (item.kind === 'outbox') {
     // No server row exists yet for this recording, so there is no id to
@@ -164,7 +195,12 @@ export function CaptureChip({
         <div className="flex-1">
           <p className="text-lg">{capture.transcript ?? t.transcribing}</p>
           {capture.duplicateOf && <p className="text-sm text-amber-600">{t.alreadyHave}</p>}
-          {capture.status === 'failed' && <p className="text-sm text-red-600">{capture.error}</p>}
+          {/* Shown whenever there is an error, not only when the status is
+              'failed': a transient Vertex 429 leaves a capture 'generated'
+              WITH an error and a stranded card, which is how a card ends up
+              needing repair with nothing on screen saying why. A failed
+              re-recognition lands the same way. */}
+          {capture.error && <p className="text-sm text-red-600">{capture.error}</p>}
         </div>
         {/* Pressing ▶ or "ponów" is itself a pointerdown+pointerup pair that
             would otherwise bubble to the `<li>` and register as a tap or a
@@ -190,6 +226,62 @@ export function CaptureChip({
           </button>
         )}
       </div>
+
+      {/* Dictation is recognised as Polish, because that is what nearly all of
+          it is: measured on the real API, a two-language recognizer swallows
+          Russian whole (spoken "склеп" came back "sklep"). So a Russian
+          recording is repaired here instead, from the stored audio — the wrong
+          transcript keeps no trace of what was actually said, which is why
+          regenerating from the card could never fix it. Both directions are
+          offered rather than a toggle, so a mistaken re-recognition is undone
+          the same way it was made. Each control stops its own pointer events,
+          or the <li> would read the press as a tap or a swipe as well. */}
+      {capture.audioMediaId && (
+        <div className="flex items-center gap-3 pl-2 text-sm">
+          <span className="text-neutral-500">{t.recognizeAs}</span>
+          {([
+            ['pl', t.asPolish],
+            ['ru', t.asRussian],
+          ] as const).map(([lang, label]) => (
+            <button
+              key={lang}
+              onClick={() => onRelanguage(capture.id, lang)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              disabled={pending}
+              className="underline disabled:text-neutral-400"
+            >
+              {label}
+            </button>
+          ))}
+          {pending && <span className="text-neutral-500">{t.transcribing}</span>}
+        </div>
+      )}
+
+      {/* Only once generation has classified the word as one with forms:
+          before that there is nothing to switch to, and a phrase never has
+          forms to drill (spec 2026-09-18 §7.1). */}
+      {capture.cardId && capture.cardType && hasForms(capture.wordKind) && (
+        <div className="pl-2">
+          <CardTypeSwitch
+            type={capture.cardType}
+            onChange={(type) => onSetType(capture.cardId!, type)}
+            disabled={pending}
+          />
+        </div>
+      )}
+
+      {/* Swipe-left always deleted a chip, but nothing on screen said so —
+          the user asked for a delete that already existed because they could
+          not see it. Swipe stays as a shortcut. */}
+      <button
+        onClick={() => onDelete(item)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        className="self-end text-sm text-red-600 underline"
+      >
+        {t.deleteItem}
+      </button>
 
       {expanded && fields && (
         // Stops the same bubbling the controls above guard against: tapping

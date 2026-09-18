@@ -1,24 +1,25 @@
-import { and, desc, eq, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { cards } from '../db/schema'
 import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
+import { canDrillForms, type WordKind } from './forms'
 
-export type CardType = 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
+export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
 export type CreateCardInput = {
   type: CardType
   promptText: string | null
   promptHint: string | null
-  promptMediaId: string | null
   answerPl: string
   examplePl: string | null
   exampleRu: string | null
   grammarNote: string | null
+  wordKind: WordKind | null
+  formsJson: string | null
   status: 'ready' | 'needs_input'
-  parentCardId: string | null
   /**
    * A caller-supplied secondary answer-key, consulted only when the primary
    * lookup on `answerKey(answerPl)` finds nothing. This exists for the
@@ -28,7 +29,7 @@ export type CreateCardInput = {
    * string — so the primary lookup alone would miss the earlier card and
    * silently fork the word into a second one, orphaning the first. The
    * pipeline passes `answerKey(transcript)` here on its success path; a
-   * caller with no secondary key (e.g. the image route, which has no
+   * caller with no secondary key (e.g. POST /api/cards, which has no
    * transcript) simply omits it. The primary match always wins: this is
    * only ever consulted when the primary lookup found nothing.
    */
@@ -43,27 +44,17 @@ export type DuplicateLookup = {
 
 /**
  * Looks up an existing card for `answerPl`/`fallbackAnswerKey` without creating
- * anything. Split out of `createCard` so a caller whose duplicate check has a
- * side effect it wants to avoid paying on the duplicate path — e.g. the image
- * route, which must not store a media blob for a photo that turns out to
- * duplicate an existing card — can check first and only do that side effect
- * when it's actually about to create a card. `createCard` itself calls this
- * so there is exactly one implementation of the dedup logic, not two.
+ * anything. Split out of `createCard` so a caller can check for a duplicate
+ * before doing whatever creating or updating a card would otherwise trigger:
+ * `createCard` calls it before inserting a new row, and `applyGeneratedFields`
+ * calls it before re-keying a card, so there is exactly one implementation of
+ * the dedup logic, not two.
  */
 export function findDuplicate(db: Db, input: DuplicateLookup): string | null {
   const key = answerKey(input.answerPl)
-  // Dedup is scoped by (answer_key, type), not by answer_key alone. Before this
-  // function existed, the capture pipeline inlined this same lookup scoped only
-  // by answer_key — that was never wrong, merely untested at the boundary,
-  // because the pipeline is the only caller and only ever creates `ru_to_pl`
-  // cards, so a type filter was a no-op there. Now that this is shared with the
-  // image route (`image_to_pl`) and, eventually, a forms path (`pl_forms`), the
-  // type scope is a deliberate behavior change: a photo of a word and a
-  // dictation of the same word are different exercises with different
-  // retrieval cues (recognize an image vs. recall from a Russian prompt), and
-  // spec §3 treats the card types as distinct. Without this scope, dropping a
-  // photo of an already-dictated word would silently produce no new card, with
-  // no way for the user to tell why.
+  // Dedup is scoped by (answer_key, type): the same word may exist as a
+  // ru_to_pl card (recall it from Russian) and a pl_to_pl card (recall its
+  // forms), because those are different exercises (spec 2026-09-18 §2).
   //
   // Soft delete (decided 2026-09-16): a soft-deleted card must NOT be found
   // here. If it were, re-dictating a word you just deleted would silently
@@ -107,14 +98,14 @@ export function createCard(
       type: input.type,
       promptText: input.promptText,
       promptHint: input.promptHint,
-      promptMediaId: input.promptMediaId,
       answerPl: input.answerPl,
       answerKey: key,
       examplePl: input.examplePl,
       exampleRu: input.exampleRu,
       grammarNote: input.grammarNote,
+      wordKind: input.wordKind,
+      formsJson: input.formsJson,
       status: input.status,
-      parentCardId: input.parentCardId,
       suspendedAt: null,
       createdAt: now.getTime(),
       updatedAt: now.getTime(),
@@ -129,7 +120,17 @@ export type CardRow = typeof cards.$inferSelect
 export type UpdateCardPatch = Partial<
   Pick<
     CardRow,
-    'promptText' | 'promptHint' | 'answerPl' | 'examplePl' | 'exampleRu' | 'grammarNote' | 'status' | 'suspendedAt'
+    | 'type'
+    | 'promptText'
+    | 'promptHint'
+    | 'answerPl'
+    | 'examplePl'
+    | 'exampleRu'
+    | 'grammarNote'
+    | 'wordKind'
+    | 'formsJson'
+    | 'status'
+    | 'suspendedAt'
   >
 >
 
@@ -175,11 +176,11 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
   const merged = { ...current, ...patch }
   // A needs_input card becomes reviewable the moment it has a prompt, so fixing
   // one by hand does not also require remembering to flip its status.
-  const status =
-    merged.status === 'needs_input' && (merged.promptText || merged.promptMediaId) ? 'ready' : merged.status
+  const status = merged.status === 'needs_input' && merged.promptText ? 'ready' : merged.status
 
   db.update(cards)
     .set({
+      type: merged.type,
       promptText: merged.promptText,
       promptHint: merged.promptHint,
       answerPl: merged.answerPl,
@@ -187,6 +188,8 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
       examplePl: merged.examplePl,
       exampleRu: merged.exampleRu,
       grammarNote: merged.grammarNote,
+      wordKind: merged.wordKind,
+      formsJson: merged.formsJson,
       status,
       suspendedAt: merged.suspendedAt,
       updatedAt: now.getTime(),
@@ -213,65 +216,9 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
  *
  * A no-op on an unknown id, like the DELETE route it backs: deleting
  * something already gone should not be an error.
- *
- * Cascades to the card's `pl_forms` child, if it has one (important review
- * finding): `createFormsCard` already treats `parent_card_id` as
- * authoritative in the other direction (its idempotent lookup is scoped by
- * parent), so deleting the parent while leaving the child `ready` would keep
- * drilling a word the user just told the app to forget — indistinguishable,
- * from the user's side, from the delete not having worked at all.
  */
 export function deleteCard(db: Db, id: string, now: Date): void {
-  db.update(cards)
-    .set({ deletedAt: now.getTime() })
-    .where(or(eq(cards.id, id), eq(cards.parentCardId, id)))
-    .run()
-}
-
-export async function createFormsCard(
-  db: Db,
-  generator: Generator,
-  parentId: string,
-  now: Date,
-): Promise<{ cardId: string; duplicateOf: string | null }> {
-  const parent = db
-    .select()
-    .from(cards)
-    .where(and(eq(cards.id, parentId), isNull(cards.deletedAt)))
-    .get()
-  if (!parent) throw new Error(`no such card: ${parentId}`)
-  // Important review finding: a pl_forms card's answer is a Markdown table,
-  // never a lemma, and forms-of-forms has no meaning under spec §3's card
-  // model. Rejected here (not just hidden behind a button in app/fiszki) so
-  // this can't be triggered by a direct request to the route either.
-  if (parent.type === 'pl_forms') {
-    throw new Error(`cannot generate forms for a pl_forms card: ${parentId}`)
-  }
-
-  const existing = db
-    .select({ id: cards.id })
-    .from(cards)
-    .where(and(eq(cards.parentCardId, parentId), eq(cards.type, 'pl_forms'), isNull(cards.deletedAt)))
-    .get()
-  if (existing) return { cardId: existing.id, duplicateOf: existing.id }
-
-  const forms = await generator.forms(parent.answerPl)
-  return createCard(
-    db,
-    {
-      type: 'pl_forms',
-      promptText: forms.prompt_pl,
-      promptHint: null,
-      promptMediaId: null,
-      answerPl: forms.answer_pl,
-      examplePl: null,
-      exampleRu: null,
-      grammarNote: null,
-      status: 'ready',
-      parentCardId: parentId,
-    },
-    now,
-  )
+  db.update(cards).set({ deletedAt: now.getTime() }).where(eq(cards.id, id)).run()
 }
 
 /**
@@ -306,19 +253,127 @@ export async function regenerateCard(
     throw new Error(`can only regenerate a needs_input card: ${id}`)
   }
 
-  const fields = toCardFields(await generator.fromPolish(card.answerPl))
+  const fields = toCardFields(await generator.fromDictation(card.answerPl))
+  // keepAnswer, approved by the user: a clash still writes what was missing.
+  return applyGeneratedFields(db, card, fields, now, { onClash: 'keepAnswer' })
+}
 
-  // Writing the normalized answer is the point of regenerating at all: it
-  // restores diacritics a mangled transcript lost. But it also re-keys the
-  // card, so when a live card of the same type already owns that key, keep
-  // this card's answer and report the clash instead of forking the deck into
-  // two cards sharing one answer_key. The prompt and examples are still
-  // written — they are what the card was missing.
-  const owner = findDuplicate(db, { type: card.type, answerPl: fields.answerPl })
-  const duplicateOf = owner !== null && owner !== id ? owner : null
+/** The eight fields a generation produces, as `toCardFields` returns them. */
+export type GeneratedFields = {
+  promptText: string | null
+  promptHint: string | null
+  answerPl: string
+  examplePl: string | null
+  exampleRu: string | null
+  grammarNote: string | null
+  wordKind: WordKind | null
+  formsJson: string | null
+}
 
-  return {
-    card: updateCard(db, id, duplicateOf ? { ...fields, answerPl: card.answerPl } : fields, now),
-    duplicateOf,
+/** A type switch the card cannot take — answered as a 400, not a crash. */
+export class CardTypeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CardTypeError'
   }
+}
+
+/**
+ * Switches a card between ru_to_pl and pl_to_pl (spec 2026-09-18 §6). Costs no
+ * model call: one generation already stored everything both types need, and
+ * `prompt_text` keeps the Russian either way, so switching back restores the
+ * ru_to_pl card exactly.
+ *
+ * Resets the schedule, because the recall task changed — the schedule earned
+ * by recalling a word from Russian says nothing about recalling its forms.
+ * Review rows are kept. In practice the switch happens right after dictation,
+ * before any review.
+ */
+export function setCardType(
+  db: Db,
+  id: string,
+  type: CardType,
+  now: Date,
+): { card: CardRow; duplicateOf: string | null } {
+  const card = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.id, id), isNull(cards.deletedAt)))
+    .get()
+  if (!card) throw new Error(`no such card: ${id}`)
+  if (card.type === type) return { card, duplicateOf: null }
+
+  // A pl_to_pl card's whole answer is its forms. Checked on the stored forms
+  // too, not only the kind: a noun whose generation returned no rows would
+  // become a forms card with nothing on its answer side.
+  if (type === 'pl_to_pl' && !canDrillForms(card.wordKind, card.formsJson)) {
+    throw new CardTypeError(`this word has no forms to drill: ${id}`)
+  }
+
+  const owner = findDuplicate(db, { type, answerPl: card.answerPl })
+  if (owner !== null && owner !== id) return { card, duplicateOf: owner }
+
+  db.update(cards)
+    .set({ type, ...newState(now), updatedAt: now.getTime() })
+    .where(eq(cards.id, id))
+    .run()
+  return { card: db.select().from(cards).where(eq(cards.id, id)).get()!, duplicateOf: null }
+}
+
+/**
+ * What `applyGeneratedFields` does when the generated answer clashes with
+ * another live card of the target type:
+ * - `keepAnswer` — `regenerateCard`, repairing a needs_input card. The card
+ *   keeps its answer identity (type, answer, kind, forms: on a pl_to_pl card
+ *   the forms ARE the answer) and still gets the generated prompt, hint,
+ *   examples and grammar note, which are what it was missing.
+ * - `untouched` — `retranscribe`, rebuilding a card a recording created. The
+ *   new prompt belongs to the new word, so writing it onto the old answer
+ *   would build a card out of two words; the card is left exactly as it was.
+ */
+export type ClashPolicy = 'keepAnswer' | 'untouched'
+
+/**
+ * Writes a fresh generation over an existing card, with one collision check
+ * shared by everything that re-generates: `regenerateCard` here, and
+ * `retranscribe` in the capture pipeline. Each caller names its policy for a
+ * clash (see `ClashPolicy`).
+ *
+ * Writing the generated answer is the point of re-generating at all — it is
+ * what restores diacritics a mangled transcript lost, and what replaces a
+ * Polish look-alike after a recording turns out to have been Russian. But it
+ * also re-keys the card, so when a live card of the same type already owns
+ * that key, the new answer is not written and the clash is reported instead:
+ * forking the deck into two cards sharing one answer_key is worse than an
+ * answer that stays wrong and says so.
+ */
+export function applyGeneratedFields(
+  db: Db,
+  card: CardRow,
+  fields: GeneratedFields,
+  now: Date,
+  opts: { onClash: ClashPolicy },
+): { card: CardRow; duplicateOf: string | null } {
+  // Spec §5: a pl_to_pl card's whole answer is its forms. If this generation
+  // left the word with none to drill — a kind without forms, or a kind with
+  // forms but no rows — keeping it pl_to_pl would leave a card with no answer
+  // at all, so it reverts. The target type also scopes the clash check below.
+  // A revert that clashes with a ru_to_pl card for the same word does not
+  // happen: on a clash the card keeps its type with its answer and forms, and
+  // those forms are drillable — a card only becomes or stays pl_to_pl when
+  // they are.
+  const type: CardType =
+    card.type === 'pl_to_pl' && !canDrillForms(fields.wordKind, fields.formsJson) ? 'ru_to_pl' : card.type
+  const owner = findDuplicate(db, { type, answerPl: fields.answerPl })
+  const duplicateOf = owner !== null && owner !== card.id ? owner : null
+  if (!duplicateOf) return { card: updateCard(db, card.id, { ...fields, type }, now), duplicateOf: null }
+  if (opts.onClash === 'untouched') return { card, duplicateOf }
+  const patch: UpdateCardPatch = {
+    promptText: fields.promptText,
+    promptHint: fields.promptHint,
+    examplePl: fields.examplePl,
+    exampleRu: fields.exampleRu,
+    grammarNote: fields.grammarNote,
+  }
+  return { card: updateCard(db, card.id, patch, now), duplicateOf }
 }

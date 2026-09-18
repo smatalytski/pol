@@ -1,8 +1,9 @@
 import { blob, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { WORD_KINDS } from '../cards/forms'
 
 export const media = sqliteTable('media', {
   id: text('id').primaryKey(),
-  kind: text('kind', { enum: ['image', 'audio', 'tts'] }).notNull(),
+  kind: text('kind', { enum: ['audio', 'tts'] }).notNull(),
   mime: text('mime').notNull(),
   bytes: blob('bytes', { mode: 'buffer' }).notNull(),
   byteSize: integer('byte_size').notNull(),
@@ -11,17 +12,17 @@ export const media = sqliteTable('media', {
 
 export const cards = sqliteTable('cards', {
   id: text('id').primaryKey(),
-  type: text('type', { enum: ['ru_to_pl', 'image_to_pl', 'pl_forms'] }).notNull(),
+  type: text('type', { enum: ['ru_to_pl', 'pl_to_pl'] }).notNull(),
   promptText: text('prompt_text'),
   promptHint: text('prompt_hint'),
-  promptMediaId: text('prompt_media_id'),
   answerPl: text('answer_pl').notNull(),
   answerKey: text('answer_key').notNull(),
   examplePl: text('example_pl'),
   exampleRu: text('example_ru'),
   grammarNote: text('grammar_note'),
+  wordKind: text('word_kind', { enum: WORD_KINDS }),
+  formsJson: text('forms_json'),
   status: text('status', { enum: ['ready', 'needs_input'] }).notNull(),
-  parentCardId: text('parent_card_id'),
   suspendedAt: integer('suspended_at'),
   deletedAt: integer('deleted_at'),
   createdAt: integer('created_at').notNull(),

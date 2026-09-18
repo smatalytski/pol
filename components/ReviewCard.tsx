@@ -1,8 +1,8 @@
 'use client'
 import type { QueueItem } from '@/lib/review/queue'
 import type { RatingValue } from '@/lib/scheduler'
-import { FormsTable } from './FormsTable'
 import { t } from '@/i18n/pl'
+import { FormsView } from './FormsView'
 
 const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
   { value: 1, label: t.again },
@@ -10,14 +10,6 @@ const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
   { value: 3, label: t.good },
   { value: 4, label: t.easy },
 ]
-
-// Mirrors GET /api/cards/:id/audio's eligibility table exactly (Task 11): the
-// answer route 404s for pl_forms, whose answer is a declension table that is
-// never spoken. A play control here for that type would be a dead button on
-// every forms card.
-function hasAnswerAudio(type: QueueItem['type']): boolean {
-  return type !== 'pl_forms'
-}
 
 export function ReviewCard({
   card,
@@ -34,28 +26,26 @@ export function ReviewCard({
   onRate: (rating: RatingValue) => void
   onUndo: () => void
 }) {
+  const isForms = card.type === 'pl_to_pl'
   return (
     <div className="flex min-h-[70vh] flex-col gap-6">
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-        {card.promptMediaId ? (
-          <img src={`/api/media/${card.promptMediaId}`} alt={t.imagePrompt} className="max-h-64 rounded" />
-        ) : (
-          <p className="text-3xl">{card.promptText}</p>
-        )}
-        {card.promptHint && <p className="text-sm text-neutral-500">{card.promptHint}</p>}
+        {/* A pl_to_pl card asks with the Polish word itself, and carries no
+            Russian anywhere (spec 2026-09-18 §2). */}
+        <p className="text-3xl">{isForms ? card.answerPl : card.promptText}</p>
+        {!isForms && card.promptHint && <p className="text-sm text-neutral-500">{card.promptHint}</p>}
 
         {revealed && (
           <div className="mt-6 flex flex-col items-center gap-2">
-            {card.type === 'pl_forms' ? (
-              <FormsTable markdown={card.answerPl} />
-            ) : (
-              <p className="text-3xl font-semibold">{card.answerPl}</p>
-            )}
-            {hasAnswerAudio(card.type) && (
-              <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
-            )}
-            {card.examplePl && <p className="text-lg">{card.examplePl}</p>}
-            {card.exampleRu && <p className="text-sm text-neutral-500">{card.exampleRu}</p>}
+            {!isForms && <p className="text-3xl font-semibold">{card.answerPl}</p>}
+            <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
+            {/* Keyed on the card, so the extended toggle closes again for the
+                next card instead of staying open for every one after it. */}
+            <FormsView key={card.id} forms={card.forms} />
+            {/* For a ru_to_pl card, the Russian prompt above is the retrieval
+                cue, so no Russian gloss of the example is shown here on the
+                answer side (exampleRu stays stored but unrendered). */}
+            {!isForms && card.examplePl && <p className="text-lg">{card.examplePl}</p>}
             {card.grammarNote && <p className="text-sm text-neutral-500">{card.grammarNote}</p>}
           </div>
         )}

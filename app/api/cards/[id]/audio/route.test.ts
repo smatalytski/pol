@@ -35,14 +35,12 @@ function seedCard(overrides: Partial<typeof cards.$inferInsert> & { id: string }
       type: 'ru_to_pl',
       promptText: 'злобный',
       promptHint: null,
-      promptMediaId: null,
       answerPl: 'złośliwy',
       answerKey: 'złośliwy',
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
       status: 'ready',
-      parentCardId: null,
       suspendedAt: null,
       createdAt: NOW.getTime(),
       updatedAt: NOW.getTime(),
@@ -91,7 +89,7 @@ describe('GET /api/cards/:id/audio', () => {
   // own localhost, where nothing is listening. The <audio> element failed
   // silently: the clip had already been synthesized server-side, so the only
   // symptom was a play button that did nothing and a TTS bill for audio
-  // nobody could hear. The three tests above assert `status === 307` and never
+  // nobody could hear. The two tests above assert `status === 307` and never
   // look at where the redirect points, which is exactly why this shipped.
   it('Location is origin-independent, not the internal request host', async () => {
     seedCard({ id: 'c9', type: 'ru_to_pl', answerPl: 'złośliwy' })
@@ -101,35 +99,6 @@ describe('GET /api/cards/:id/audio', () => {
     )
     expect(res.status).toBe(307)
     expect(res.headers.get('location')).toBe('/api/media/media-id-stub')
-  })
-
-  it('image_to_pl answer is spoken in Polish', async () => {
-    seedCard({ id: 'c3', type: 'image_to_pl', promptText: null, answerPl: 'kot' })
-    const res = await call('c3', 'answer')
-    expect(res.status).toBe(307)
-    expect(getClipMock).toHaveBeenCalledTimes(1)
-    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
-  })
-
-  it('image_to_pl prompt has nothing to speak (image only, no gloss)', async () => {
-    seedCard({ id: 'c4', type: 'image_to_pl', promptText: null })
-    const res = await call('c4', 'prompt')
-    expect(res.status).toBe(404)
-    expect(getClipMock).not.toHaveBeenCalled()
-  })
-
-  it('pl_forms prompt has nothing to speak (it is a Polish form request, not a Russian gloss)', async () => {
-    seedCard({ id: 'c5', type: 'pl_forms', promptText: 'zamek, forms: sg/pl, all cases' })
-    const res = await call('c5', 'prompt')
-    expect(res.status).toBe(404)
-    expect(getClipMock).not.toHaveBeenCalled()
-  })
-
-  it('pl_forms answer has nothing to speak (a declension table read aloud is noise)', async () => {
-    seedCard({ id: 'c6', type: 'pl_forms', answerPl: '| case | sg | pl |\n|---|---|---|' })
-    const res = await call('c6', 'answer')
-    expect(res.status).toBe(404)
-    expect(getClipMock).not.toHaveBeenCalled()
   })
 
   it('rejects an invalid part before touching the card', async () => {
@@ -143,5 +112,22 @@ describe('GET /api/cards/:id/audio', () => {
     const res = await call('does-not-exist', 'answer')
     expect(res.status).toBe(404)
     expect(getClipMock).not.toHaveBeenCalled()
+  })
+
+  // Spec §8: a pl_to_pl card's prompt IS the Polish word, so "the prompt" is
+  // spoken in Polish from answer_pl — never the stored Russian prompt_text.
+  it('speaks a pl_to_pl prompt as the Polish word', async () => {
+    seedCard({ id: 'f1', type: 'pl_to_pl', promptText: 'кот', answerPl: 'kot' })
+    const res = await call('f1', 'prompt')
+    expect(res.status).toBe(307)
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('kot')
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
+  })
+
+  it('speaks a pl_to_pl answer as the Polish word', async () => {
+    seedCard({ id: 'f2', type: 'pl_to_pl', answerPl: 'kot' })
+    await call('f2', 'answer')
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('kot')
+    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
   })
 })

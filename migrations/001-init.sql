@@ -1,6 +1,13 @@
+-- Squashed 2026-09-18 (docs/superpowers/specs/2026-09-18-card-forms-design.md
+-- §4), replacing the original 001-init.sql and 002-deleted-at.sql. Safe only
+-- because the database was dropped at the same moment: removing
+-- prompt_media_id and parent_card_id with an appended migration would need
+-- SQLite's table rebuild, since DROP COLUMN refuses a column that carries a
+-- foreign key. Every later change appends a new migration, as before.
+
 CREATE TABLE media (
   id          TEXT PRIMARY KEY,   -- uuid
-  kind        TEXT NOT NULL,      -- 'image' | 'audio' | 'tts'
+  kind        TEXT NOT NULL,      -- 'audio' | 'tts'
   mime        TEXT NOT NULL,
   bytes       BLOB NOT NULL,
   byte_size   INTEGER NOT NULL,
@@ -9,21 +16,27 @@ CREATE TABLE media (
 
 CREATE TABLE cards (
   id              TEXT PRIMARY KEY,
-  type            TEXT NOT NULL,   -- 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
-  prompt_text     TEXT,            -- RU gloss, or PL form request; NULL for image cards
+  type            TEXT NOT NULL,   -- 'ru_to_pl' | 'pl_to_pl'
+  prompt_text     TEXT,            -- the Russian prompt; kept on a pl_to_pl card
+                                   -- too, so switching back restores it
   prompt_hint     TEXT,
-  prompt_media_id TEXT REFERENCES media(id),
-  answer_pl       TEXT NOT NULL,
+  answer_pl       TEXT NOT NULL,   -- the Polish word, phrase or sentence
   answer_key      TEXT NOT NULL,   -- normalized answer, for duplicate detection
   example_pl      TEXT,
   example_ru      TEXT,
   grammar_note    TEXT,
+  word_kind       TEXT,            -- 'fraza' | 'rzeczownik' | 'czasownik' |
+                                   -- 'przymiotnik' | 'przyslowek' | 'inne';
+                                   -- NULL only when generation failed
+  forms_json      TEXT,            -- {"basic":[{label,value}],"extended":[…]};
+                                   -- NULL when the word has none
   status          TEXT NOT NULL DEFAULT 'ready',
                                    -- 'ready' | 'needs_input'
                                    -- a card row is created only after generation
                                    -- resolves; in-flight state lives on `captures`
-  parent_card_id  TEXT REFERENCES cards(id),
   suspended_at    INTEGER,
+  deleted_at      INTEGER,         -- soft delete: the card vanishes from every
+                                   -- query while its `reviews` survive
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
 

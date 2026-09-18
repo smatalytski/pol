@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import {
   GeneratedCardSchema,
   GenerationError,
@@ -14,6 +15,9 @@ const FULL = {
   example_pl: 'Zrobił to ze złośliwości.',
   example_ru: 'Он сделал это из злобы.',
   grammar_note: '',
+  kind: 'przymiotnik' as const,
+  forms_basic: [{ label: 'przysłówek', value: 'złośliwie' }],
+  forms_extended: [],
 }
 
 const ok = (payload: unknown) => vi.fn().mockResolvedValue({ text: JSON.stringify(payload) })
@@ -21,17 +25,16 @@ const make = (generate: ReturnType<typeof ok>, model = 'gemini-pro-test') =>
   geminiGenerator({ generate: generate as never, model })
 
 describe('responseSchemaFor', () => {
-  it('derives a required-string schema from the Zod schema, so the two cannot drift', () => {
+  it('derives every field from the Zod schema, all required, so the two cannot drift', () => {
     const schema = responseSchemaFor(GeneratedCardSchema) as {
       type: string
-      properties: Record<string, { type: string; description?: string }>
+      properties: Record<string, { type: string }>
       required: string[]
     }
     const keys = Object.keys(GeneratedCardSchema.shape)
     expect(schema.type).toBe('OBJECT')
     expect(Object.keys(schema.properties)).toEqual(keys)
     expect(schema.required).toEqual(keys)
-    expect(Object.values(schema.properties).every((p) => p.type === 'STRING')).toBe(true)
   })
 
   it('carries the Zod field descriptions through, since they are the model instructions', () => {
@@ -39,6 +42,40 @@ describe('responseSchemaFor', () => {
       properties: Record<string, { description?: string }>
     }
     expect(schema.properties.answer_pl.description).toMatch(/diacritic/i)
+  })
+
+  // The enum is what makes the model's classification a fact rather than
+  // prose: Gemini cannot return "rzeczownik (m.)" against it.
+  it('emits kind as a string enum of exactly the six kinds', () => {
+    const schema = responseSchemaFor(GeneratedCardSchema) as unknown as {
+      properties: Record<string, { type: string; enum?: string[] }>
+    }
+    expect(schema.properties.kind.type).toBe('STRING')
+    expect(schema.properties.kind.enum).toEqual([
+      'fraza', 'rzeczownik', 'czasownik', 'przymiotnik', 'przyslowek', 'inne',
+    ])
+  })
+
+  it('emits each forms list as an array of required {label, value} string objects', () => {
+    const schema = responseSchemaFor(GeneratedCardSchema) as unknown as {
+      properties: Record<string, { type: string; items?: { type: string; properties: Record<string, { type: string }>; required: string[] } }>
+    }
+    for (const key of ['forms_basic', 'forms_extended']) {
+      const field = schema.properties[key]
+      expect(field.type).toBe('ARRAY')
+      expect(field.items?.type).toBe('OBJECT')
+      expect(field.items?.properties).toEqual({
+        label: expect.objectContaining({ type: 'STRING' }),
+        value: expect.objectContaining({ type: 'STRING' }),
+      })
+      expect(field.items?.required).toEqual(['label', 'value'])
+    }
+  })
+
+  // The function's contract since it was written: a field shape it does not
+  // know must fail loudly, not be silently sent to Gemini as a string.
+  it('throws on a field shape it does not support', () => {
+    expect(() => responseSchemaFor(z.object({ n: z.number() }) as never)).toThrow(/unsupported/)
   })
 })
 
@@ -51,7 +88,21 @@ describe('toCardFields', () => {
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
+      wordKind: 'przymiotnik',
+      formsJson: JSON.stringify({ basic: [{ label: 'przysłówek', value: 'złośliwie' }], extended: [] }),
     })
+  })
+
+  // The kind decides, not whatever the model put in the arrays: a phrase
+  // never carries forms, so a card cannot claim forms its kind has none of.
+  it('stores no forms for a phrase even if the model returned some', () => {
+    const f = toCardFields({ ...FULL, kind: 'fraza', forms_basic: [{ label: 'x', value: 'y' }] })
+    expect(f.wordKind).toBe('fraza')
+    expect(f.formsJson).toBeNull()
+  })
+
+  it('stores no forms for a word of a kind with forms when both lists came back empty', () => {
+    expect(toCardFields({ ...FULL, kind: 'rzeczownik', forms_basic: [], forms_extended: [] }).formsJson).toBeNull()
   })
 
   // C5 (review finding): promptText used to pass g.prompt_ru through raw,
@@ -68,14 +119,14 @@ describe('toCardFields', () => {
   })
 })
 
-describe('geminiGenerator.fromPolish', () => {
+describe('geminiGenerator.fromDictation', () => {
   it('returns the parsed card', async () => {
-    expect(await make(ok(FULL)).fromPolish('złośliwy')).toEqual(FULL)
+    expect(await make(ok(FULL)).fromDictation('złośliwy')).toEqual(FULL)
   })
 
   it('sends the transcript, the configured model, and the schema', async () => {
     const generate = ok(FULL)
-    await make(generate, 'gemini-pro-xyz').fromPolish('na wszelki wypadek')
+    await make(generate, 'gemini-pro-xyz').fromDictation('na wszelki wypadek')
     const req = generate.mock.calls[0][0] as {
       model: string
       contents: unknown
@@ -87,9 +138,32 @@ describe('geminiGenerator.fromPolish', () => {
     expect(req.config.responseSchema).toBeDefined()
   })
 
+  // The old wording opened with "\u041f\u0440\u043e\u0434\u0438\u043a\u0442\u043e\u0432\u0430\u043d\u043e \u043f\u043e-\u043f\u043e\u043b\u044c\u0441\u043a\u0438" \u2014 "dictated in
+  // Polish" \u2014 which is a lie once the transcript can be Russian, and a lie
+  // stated to the model in the one place it cannot check. The script tells it
+  // which language it got; the request must not assert one.
+  it('does not tell the model which language the transcript is in', async () => {
+    const generate = ok(FULL)
+    await make(generate).fromDictation('\u0441\u043a\u043b\u0435\u043f')
+    const contents = JSON.stringify((generate.mock.calls[0][0] as { contents: unknown }).contents)
+    expect(contents).toContain('\u0441\u043a\u043b\u0435\u043f')
+    expect(contents).not.toContain('\u043f\u043e-\u043f\u043e\u043b\u044c\u0441\u043a\u0438')
+  })
+
+  it('tells the model what to do in each direction, since the transcript can be either language', async () => {
+    const generate = ok(FULL)
+    await make(generate).fromDictation('\u0441\u043a\u043b\u0435\u043f')
+    const system = (generate.mock.calls[0][0] as { config: { systemInstruction: string } }).config
+      .systemInstruction
+    // Both branches must be spelled out: Polish in means it is the answer,
+    // Russian in means it is the prompt and the Polish answer is produced.
+    expect(system).toMatch(/\u0435\u0441\u043b\u0438 .*\u043f\u043e-\u043f\u043e\u043b\u044c\u0441\u043a\u0438/i)
+    expect(system).toMatch(/\u0435\u0441\u043b\u0438 .*\u043f\u043e-\u0440\u0443\u0441\u0441\u043a\u0438/i)
+  })
+
   it('instructs the model that answers are Polish and prompts Russian, never English', async () => {
     const generate = ok(FULL)
-    await make(generate).fromPolish('złośliwy')
+    await make(generate).fromDictation('złośliwy')
     const system = (generate.mock.calls[0][0] as { config: { systemInstruction: string } }).config
       .systemInstruction
     // Pinned to the direction-setting rule lines themselves, not merely to
@@ -104,49 +178,27 @@ describe('geminiGenerator.fromPolish', () => {
   it('throws GenerationError when the response has no text', async () => {
     const generate = vi.fn().mockResolvedValue({ text: null })
     await expect(
-      geminiGenerator({ generate: generate as never }).fromPolish('x'),
+      geminiGenerator({ generate: generate as never }).fromDictation('x'),
     ).rejects.toThrow(GenerationError)
   })
 
   it('throws GenerationError on unparseable output rather than leaking a SyntaxError', async () => {
     const generate = vi.fn().mockResolvedValue({ text: 'not json at all' })
     await expect(
-      geminiGenerator({ generate: generate as never }).fromPolish('x'),
+      geminiGenerator({ generate: generate as never }).fromDictation('x'),
     ).rejects.toThrow(GenerationError)
   })
 
   it('throws GenerationError when the payload fails the schema', async () => {
-    await expect(make(ok({ answer_pl: 'złośliwy' })).fromPolish('x')).rejects.toThrow(
+    await expect(make(ok({ answer_pl: 'złośliwy' })).fromDictation('x')).rejects.toThrow(
       GenerationError,
     )
   })
 
   it('rejects an empty transcript before spending a request', async () => {
     const generate = ok(FULL)
-    await expect(make(generate).fromPolish('   ')).rejects.toThrow(GenerationError)
+    await expect(make(generate).fromDictation('   ')).rejects.toThrow(GenerationError)
     expect(generate).not.toHaveBeenCalled()
-  })
-})
-
-describe('geminiGenerator.fromImage', () => {
-  it('sends the image as an inlineData part', async () => {
-    const generate = ok(FULL)
-    await make(generate).fromImage({ bytes: new Uint8Array([1, 2]), mime: 'image/webp' })
-    const contents = (generate.mock.calls[0][0] as {
-      contents: Array<{ parts: Array<Record<string, unknown>> }>
-    }).contents
-    const part = contents[0].parts.find((x) => 'inlineData' in x) as {
-      inlineData: { mimeType: string; data: string }
-    }
-    expect(part.inlineData.mimeType).toBe('image/webp')
-    expect(part.inlineData.data).toBe(Buffer.from([1, 2]).toString('base64'))
-  })
-})
-
-describe('geminiGenerator.forms', () => {
-  it('returns a Polish prompt and a Polish answer table', async () => {
-    const payload = { prompt_pl: 'przyzwyczaić się — wszystkie formy', answer_pl: '…' }
-    expect(await make(ok(payload)).forms('przyzwyczaić się')).toEqual(payload)
   })
 })
 

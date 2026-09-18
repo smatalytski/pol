@@ -1,12 +1,13 @@
-import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, cards } from '../db/schema'
-import { createCard } from '../cards/service'
+import { applyGeneratedFields, createCard, updateCard, type CardType, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
+import type { WordKind } from '../cards/forms'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator } from '../generate'
-import type { Transcriber } from '../transcribe'
+import type { DictationLang, Transcriber } from '../transcribe'
 
 export type CaptureDeps = { db: Db; transcriber: Transcriber; generator: Generator }
 
@@ -19,6 +20,8 @@ export type CaptureView = {
   duplicateOf: string | null
   audioMediaId: string | null
   createdAt: number
+  cardType: CardType | null
+  wordKind: WordKind | null
 }
 
 export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }, now: Date): string {
@@ -37,6 +40,20 @@ export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }
     })
     .run()
   return id
+}
+
+/** The fields a failed generation leaves behind: keep the word, lose the rest. */
+function strandedFields(transcript: string): GeneratedFields {
+  return {
+    promptText: null,
+    promptHint: null,
+    answerPl: transcript,
+    examplePl: null,
+    exampleRu: null,
+    grammarNote: null,
+    wordKind: null,
+    formsJson: null,
+  }
 }
 
 /**
@@ -77,20 +94,20 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
   let generated = null
   let generationError: string | null = null
   try {
-    generated = await generator.fromPolish(transcript)
+    generated = await generator.fromDictation(transcript)
   } catch (err) {
     generationError = String((err as Error).message ?? err)
   }
 
   const fields = generated
     ? toCardFields(generated)
-    : // Generation is down. Keep the word; the prompt is filled in later by hand.
-      { promptText: null, promptHint: null, answerPl: transcript, examplePl: null, exampleRu: null, grammarNote: null }
+    : // Generation is down. Keep the word; `wygeneruj ponownie` fills in the rest.
+      strandedFields(transcript)
 
   // Authorized addition (Task 17 review, critical finding): re-read the
   // capture row immediately before creating a card. `DELETE
   // /api/captures/:id` (spec §4's swipe-to-delete on a chip with no card yet)
-  // can land while `generator.fromPolish`, just awaited above, was in
+  // can land while `generator.fromDictation`, just awaited above, was in
   // flight — and that window is not a corner case: `status` was set to
   // 'transcribed' before this await, so "the transcript just appeared and
   // it's wrong" is exactly when a user is likely to swipe. Without this
@@ -118,13 +135,13 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
       type: 'ru_to_pl',
       promptText: fields.promptText,
       promptHint: fields.promptHint,
-      promptMediaId: null,
       answerPl: fields.answerPl,
       examplePl: fields.examplePl,
       exampleRu: fields.exampleRu,
       grammarNote: fields.grammarNote,
+      wordKind: fields.wordKind,
+      formsJson: fields.formsJson,
       status: generated ? 'ready' : 'needs_input',
-      parentCardId: null,
       fallbackAnswerKey: generated ? answerKey(transcript) : undefined,
     },
     now,
@@ -132,13 +149,13 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
 
   // The card-insert (inside createCard, above) and this capture update used to
   // be one db.transaction — extracting createCard into a Db-scoped helper
-  // (shared with the non-transactional image route) dropped that atomicity
-  // guarantee, with no `tx` handle threaded through. That's safe, not just
-  // convenient: if the process dies between the two statements, this capture
-  // is left with cardId still null, so a retry re-enters processCapture from
-  // the top, calls generator.fromPolish again, and createCard's own primary
-  // lookup finds the card just inserted rather than duplicating it — the same
-  // path 'retrying a failed capture creates exactly one card' already covers.
+  // dropped that atomicity guarantee, with no `tx` handle threaded through.
+  // That's safe, not just convenient: if the process dies between the two
+  // statements, this capture is left with cardId still null, so a retry
+  // re-enters processCapture from the top, calls generator.fromDictation
+  // again, and createCard's own primary lookup finds the card just inserted
+  // rather than duplicating it — the same path 'retrying a failed capture
+  // creates exactly one card' already covers.
   db.update(captures)
     .set({
       status: 'generated',
@@ -170,6 +187,8 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
       generationJson: captures.generationJson,
       audioMediaId: captures.audioMediaId,
       createdAt: captures.createdAt,
+      cardType: cards.type,
+      wordKind: cards.wordKind,
     })
     .from(captures)
     .leftJoin(cards, eq(cards.id, captures.cardId))
@@ -187,5 +206,153 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
         : null,
       audioMediaId: c.audioMediaId,
       createdAt: c.createdAt,
+      cardType: c.cardType,
+      wordKind: c.wordKind,
     }))
+}
+
+/**
+ * The capture whose recording created a card: the earliest capture with audio
+ * that points at it. Dedup means several captures can point at one card — a
+ * duplicate dictation resolves to the card it matched — and only the earliest
+ * one's recording actually made it. One rule for everything that needs to
+ * know: `GET /api/cards/:id` offers re-recognition of this capture's audio,
+ * and `retranscribe` rewrites a card in place only for this capture.
+ */
+export function creatorCaptureId(db: Db, cardId: string): string | null {
+  const row = db
+    .select({ id: captures.id })
+    .from(captures)
+    .where(and(eq(captures.cardId, cardId), isNotNull(captures.audioMediaId)))
+    .orderBy(asc(captures.createdAt))
+    .get()
+  return row?.id ?? null
+}
+
+/**
+ * Recognises a capture's stored audio again, in a language the user names, and
+ * rebuilds its card from the result.
+ *
+ * This exists because language detection is not safe here. Measured on the
+ * real API: with `['pl-PL','ru-RU']` the Polish model swallows Russian whole —
+ * spoken "склеп" came back "sklep", "час" came back "czas", "бешенство" came
+ * back "wściekłość" — in both code orders, while a single language code was
+ * correct on every word in both languages. So dictation stays Polish, which is
+ * what nearly all of it is, and a Russian recording is repaired afterwards.
+ *
+ * It has to work from the audio. A wrong-language transcript keeps no trace of
+ * what was actually said, so `regenerateCard` — which re-generates from the
+ * stored answer — would faithfully reproduce the same mistake. The audio is
+ * kept permanently anyway (spec §4/§9), which is what makes this possible at
+ * all.
+ *
+ * It rewrites a card in place only when this capture created it (see
+ * `creatorCaptureId`). A capture that deduped onto an earlier card does not own
+ * it: that card is a different recording's word, with its own schedule and
+ * review history, so this capture goes through `createCard` like a new
+ * dictation and is repointed at whatever card that yields.
+ */
+export async function retranscribe(
+  deps: CaptureDeps,
+  captureId: string,
+  lang: DictationLang,
+  now: Date,
+): Promise<{ cardId: string | null; duplicateOf: string | null; error: string | null }> {
+  const { db, transcriber, generator } = deps
+  const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
+  if (!capture) throw new Error(`no such capture: ${captureId}`)
+
+  const audio = capture.audioMediaId ? getMedia(db, capture.audioMediaId) : null
+  if (!audio) {
+    db.update(captures).set({ error: 'audio missing' }).where(eq(captures.id, captureId)).run()
+    return { cardId: capture.cardId, duplicateOf: null, error: 'audio missing' }
+  }
+
+  let transcript: string
+  try {
+    transcript = await transcriber.transcribe({ bytes: audio.bytes, mime: audio.mime, lang })
+  } catch (err) {
+    // The previous transcript and card are deliberately left standing: a
+    // failed re-recognition should leave the card exactly as it was, so the
+    // control can simply be pressed again.
+    const message = String((err as Error).message ?? err)
+    db.update(captures).set({ error: message }).where(eq(captures.id, captureId)).run()
+    return { cardId: capture.cardId, duplicateOf: null, error: message }
+  }
+  db.update(captures).set({ transcript, error: null }).where(eq(captures.id, captureId)).run()
+
+  let generated = null
+  let generationError: string | null = null
+  try {
+    generated = await generator.fromDictation(transcript)
+  } catch (err) {
+    generationError = String((err as Error).message ?? err)
+  }
+  const fields = generated ? toCardFields(generated) : strandedFields(transcript)
+
+  // Same stale-read guard as processCapture: the swipe-to-delete on a chip can
+  // land while the two awaits above were in flight, and a deleted capture must
+  // not have a card written for it.
+  const still = db
+    .select({ id: captures.id, cardId: captures.cardId })
+    .from(captures)
+    .where(eq(captures.id, captureId))
+    .get()
+  if (!still) return { cardId: null, duplicateOf: null, error: generationError }
+
+  const existing =
+    still.cardId && creatorCaptureId(db, still.cardId) === captureId
+      ? db
+          .select()
+          .from(cards)
+          .where(and(eq(cards.id, still.cardId), isNull(cards.deletedAt)))
+          .get()
+      : undefined
+
+  const { cardId, duplicateOf } = existing
+    ? (({ card, duplicateOf }) => {
+        // On a clash the card was left untouched (the new word belongs to
+        // another card), so there is nothing here to mark.
+        if (duplicateOf) return { cardId: card.id, duplicateOf }
+        // Same fallback processCapture's create path has always had, and the
+        // reason it is needed here was found end to end against the real
+        // providers: recognition succeeded, Gemini answered 429, and the card
+        // was left with the Cyrillic transcript as its answer, no prompt at
+        // all, and still marked 'ready' — queued for review as a card with no
+        // question. updateCard does not lower a status on its own, so say it
+        // explicitly. It also hands the card to `wygeneruj ponownie`, which
+        // only accepts needs_input and regenerates from answer_pl — by then
+        // the Russian transcript, which fromDictation reads correctly.
+        if (!generated) updateCard(db, card.id, { status: 'needs_input' }, now)
+        return { cardId: card.id, duplicateOf: null }
+      })(applyGeneratedFields(db, existing, fields, now, { onClash: 'untouched' }))
+    : createCard(
+        db,
+        {
+          type: 'ru_to_pl',
+          promptText: fields.promptText,
+          promptHint: fields.promptHint,
+          answerPl: fields.answerPl,
+          examplePl: fields.examplePl,
+          exampleRu: fields.exampleRu,
+          grammarNote: fields.grammarNote,
+          wordKind: fields.wordKind,
+          formsJson: fields.formsJson,
+          status: generated ? 'ready' : 'needs_input',
+          fallbackAnswerKey: generated ? answerKey(transcript) : undefined,
+        },
+        now,
+      )
+
+  db.update(captures)
+    .set({
+      status: 'generated',
+      cardId,
+      generationJson: generated ? JSON.stringify({ ...generated, duplicateOf }) : JSON.stringify({ duplicateOf }),
+      error: generationError,
+    })
+    .where(eq(captures.id, captureId))
+    .run()
+
+  return { cardId, duplicateOf, error: generationError }
 }

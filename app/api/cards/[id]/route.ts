@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db/client'
 import { cards } from '@/lib/db/schema'
 import { deleteCard, updateCard } from '@/lib/cards/service'
+import { creatorCaptureId } from '@/lib/capture/pipeline'
 
 const Patch = z.object({
   promptText: z.string().nullable().optional(),
@@ -30,7 +31,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .where(and(eq(cards.id, id), isNull(cards.deletedAt)))
     .get()
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  return NextResponse.json({ card })
+
+  // The capture whose recording produced this card, so the detail screen can
+  // offer "recognise this again in Russian" — and only offer it when there is
+  // audio to re-recognise, rather than showing a control that must fail.
+  // Earliest, not latest: see creatorCaptureId, which retranscribe uses too.
+  // Re-recognising a later duplicate's audio would not rewrite this card at
+  // all — it would build that recording its own card.
+  return NextResponse.json({ card, captureId: creatorCaptureId(db, id) })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

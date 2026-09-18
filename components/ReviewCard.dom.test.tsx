@@ -11,11 +11,11 @@ const card: QueueItem = {
   type: 'ru_to_pl',
   promptText: 'злобный',
   promptHint: 'прилагательное',
-  promptMediaId: null,
   answerPl: 'złośliwy',
   examplePl: 'Zrobił to ze złośliwości.',
-  exampleRu: 'Он сделал это из злобы.',
   grammarNote: null,
+  wordKind: 'przymiotnik',
+  forms: { basic: [{ label: 'przysłówek', value: 'złośliwie' }], extended: [{ label: 'x', value: 'rozszerzone' }] },
   isNew: true,
 }
 
@@ -53,20 +53,6 @@ describe('ReviewCard', () => {
     }
   })
 
-  it('renders an image prompt for a picture card', () => {
-    render(
-      <ReviewCard
-        card={{ ...card, type: 'image_to_pl', promptText: null, promptHint: null, promptMediaId: 'm1' }}
-        revealed={false}
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
-    expect(screen.getByRole('img').getAttribute('src')).toBe('/api/media/m1')
-  })
-
   it('offers undo only when there is something to undo', () => {
     const { rerender } = render(
       <ReviewCard card={card} revealed={false} canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
@@ -76,56 +62,61 @@ describe('ReviewCard', () => {
     expect(screen.getByRole('button', { name: t.undo })).toBeTruthy()
   })
 
-  // Task 11 fixed GET /api/cards/:id/audio to 404 on `part=answer` for
-  // pl_forms cards (its answer is a declension table, never spoken). A play
-  // control that always renders would point at that 404 on every forms card,
-  // so eligibility here must mirror the route's table exactly.
-  it('does not offer a play control for a pl_forms card, whose answer audio 404s', () => {
-    render(
-      <ReviewCard
-        card={{ ...card, type: 'pl_forms', promptText: 'dopełniacz l.mn.' }}
-        revealed
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
-    expect(screen.queryByLabelText(t.play)).toBeNull()
+  it('offers a play control for the answer of a ru_to_pl card', () => {
+    render(<ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
+    expect(screen.getByLabelText(t.play)).toBeTruthy()
   })
 
-  // Decided 2026-09-16: pl_forms answers are Markdown (bold + pipe tables)
-  // and must render as real elements, not literal `**pies**` syntax.
-  it('renders a pl_forms answer through FormsTable instead of as literal Markdown', () => {
-    render(
-      <ReviewCard
-        card={{ ...card, type: 'pl_forms', promptText: 'dopełniacz l.mn.', answerPl: '**pies** → o **psie**' }}
-        revealed
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
-    expect(screen.queryByText('**pies** → o **psie**')).toBeNull()
-    expect(screen.getByText('pies').tagName).toBe('STRONG')
+  it('shows the basic forms with the answer, and the extended ones only on request', async () => {
+    render(<ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
+    expect(screen.getByText('złośliwie')).toBeTruthy()
+    expect(screen.queryByText('rozszerzone')).toBeNull()
+    await userEvent.click(screen.getByText(t.showAllForms))
+    expect(screen.getByText('rozszerzone')).toBeTruthy()
   })
 
-  it('offers a play control for the answer of ru_to_pl and image_to_pl cards', () => {
+  it('does not show forms before the answer is revealed', () => {
+    render(<ReviewCard card={card} revealed={false} canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
+    expect(screen.queryByText('złośliwie')).toBeNull()
+  })
+
+  // Spec §7.2: the toggle is per card. Without a reset, opening it once would
+  // leave every following card's extended forms open.
+  it('closes the extended forms again for the next card', async () => {
     const { rerender } = render(
       <ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
     )
-    expect(screen.getByLabelText(t.play)).toBeTruthy()
+    await userEvent.click(screen.getByText(t.showAllForms))
     rerender(
-      <ReviewCard
-        card={{ ...card, type: 'image_to_pl', promptText: null, promptMediaId: 'm1' }}
-        revealed
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
+      <ReviewCard card={{ ...card, id: 'b' }} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
     )
-    expect(screen.getByLabelText(t.play)).toBeTruthy()
+    expect(screen.queryByText('rozszerzone')).toBeNull()
+  })
+
+  it('shows no forms section for a phrase', () => {
+    render(
+      <ReviewCard card={{ ...card, wordKind: 'fraza', forms: null }} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.queryByText(t.showAllForms)).toBeNull()
+  })
+
+  // Spec §2: pl_to_pl is the Polish word as the question and its forms as the
+  // answer. No Russian anywhere — not the prompt, not the hint.
+  it('asks a pl_to_pl card with the Polish word and no Russian', () => {
+    render(
+      <ReviewCard card={{ ...card, type: 'pl_to_pl' }} revealed={false} canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.getByText('złośliwy')).toBeTruthy()
+    expect(screen.queryByText('злобный')).toBeNull()
+    expect(screen.queryByText('прилагательное')).toBeNull()
+  })
+
+  it('answers a pl_to_pl card with its forms, not a second copy of the word or an example', () => {
+    render(
+      <ReviewCard card={{ ...card, type: 'pl_to_pl' }} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.getAllByText('złośliwy')).toHaveLength(1)
+    expect(screen.getByText('złośliwie')).toBeTruthy()
+    expect(screen.queryByText('Zrobił to ze złośliwości.')).toBeNull()
   })
 })

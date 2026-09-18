@@ -3,14 +3,14 @@ import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { media } from '../db/schema'
 
-export type MediaKind = 'image' | 'audio' | 'tts'
+export type MediaKind = 'audio' | 'tts'
 
 /**
- * Duplicate-id semantics (C1/C6): none of the three current callers
- * (app/api/images/route.ts, lib/tts/index.ts, lib/capture/pipeline.ts) pass
- * an explicit `id` today — each gets a fresh `randomUUID()` below, so a
- * duplicate `media.id` cannot occur in the app as it stands. `id` is still
- * accepted, and a collision tolerated as a no-op (`onConflictDoNothing`)
+ * Duplicate-id semantics (C1/C6): neither current caller (lib/tts/index.ts,
+ * lib/capture/pipeline.ts) pass an explicit `id` today — each gets a fresh
+ * `randomUUID()` below, so a duplicate `media.id` cannot occur in the app as
+ * it stands. `id` is still accepted, and a collision tolerated as a no-op
+ * (`onConflictDoNothing`)
  * rather than a thrown UNIQUE constraint error, purely defensively: it's the
  * obvious shape for a future content-addressed caller (e.g. if
  * lib/tts/index.ts's clip cache — which already content-addresses its own
@@ -25,7 +25,7 @@ export type MediaKind = 'image' | 'audio' | 'tts'
  * for a caller that doesn't exist yet.
  *
  * No-delete-path semantics: there is deliberately no `deleteMedia` here.
- * Audio, images and TTS clips are kept permanently once stored (spec §4/§9),
+ * Audio and TTS clips are kept permanently once stored (spec §4/§9),
  * even after the capture or card referencing them is gone, and no route in
  * this app should add a way to remove one.
  */

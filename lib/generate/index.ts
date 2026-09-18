@@ -1,6 +1,12 @@
 import { GoogleGenAI, type GenerateContentParameters } from '@google/genai'
 import { z } from 'zod'
 import { gcpProject, vertexLocation } from '../gcp/clients'
+import { WORD_KINDS, hasForms, serializeForms } from '../cards/forms'
+
+const FormRowSchema = z.object({
+  label: z.string().describe('Short Polish grammatical label, e.g. "D. l.poj." or "tryb rozk."'),
+  value: z.string().describe('The Polish form, or several joined with " · "'),
+})
 
 export const GeneratedCardSchema = z.object({
   answer_pl: z.string().describe('The Polish word, phrase or sentence, correctly spelled with diacritics'),
@@ -8,32 +14,38 @@ export const GeneratedCardSchema = z.object({
   prompt_hint: z.string().describe('Short Russian disambiguator: part of speech and context; "" if unnecessary'),
   example_pl: z.string().describe('One short natural Polish sentence using it; "" if not useful'),
   example_ru: z.string().describe('Russian translation of example_pl; "" if example_pl is ""'),
-  grammar_note: z.string().describe('Short Russian note on gender, aspect or case governance; "" if unremarkable'),
+  grammar_note: z.string().describe('Short POLISH note on gender, aspect or case governance; "" if unremarkable'),
+  kind: z.enum(WORD_KINDS).describe('What was dictated: fraza, or the part of speech of a single word; see the rules'),
+  forms_basic: z.array(FormRowSchema).describe('The short list always shown with the answer; [] for fraza and inne'),
+  forms_extended: z.array(FormRowSchema).describe('The full list shown on request; [] where the rules give none'),
 })
 export type GeneratedCard = z.infer<typeof GeneratedCardSchema>
 
-export const GeneratedFormsSchema = z.object({
-  prompt_pl: z.string().describe('The Polish lemma plus what forms are being asked for'),
-  answer_pl: z.string().describe('The form table as compact Markdown, Polish only'),
-})
-export type GeneratedForms = z.infer<typeof GeneratedFormsSchema>
+type RowSchema = z.ZodObject<Record<string, z.ZodString>>
+export type SupportedField = z.ZodString | z.ZodEnum | z.ZodArray<RowSchema>
+
+function fieldSchema(field: SupportedField): Record<string, unknown> {
+  const description = field.description ?? ''
+  if (field instanceof z.ZodString) return { type: 'STRING', description }
+  if (field instanceof z.ZodEnum) return { type: 'STRING', enum: [...field.options], description }
+  if (field instanceof z.ZodArray && field.element instanceof z.ZodObject) {
+    return { type: 'ARRAY', description, items: responseSchemaFor(field.element) }
+  }
+  throw new Error(`responseSchemaFor: unsupported field ${(field as z.ZodType).constructor.name}`)
+}
 
 /**
  * Derive Gemini's responseSchema from the Zod schema, so the schema is declared
- * exactly once. Sound only because every field is a required string — which is
- * a deliberate design choice, not a coincidence. A non-string field added later
- * must extend this function rather than work around it.
+ * exactly once. Supports exactly three field shapes, because those are all the
+ * cards need: a required string, a string enum (the word's kind), and an array
+ * of objects whose fields are all strings (a list of form rows). Anything else
+ * throws — extend this function rather than work around it, as before.
  */
-export function responseSchemaFor(schema: z.ZodObject<Record<string, z.ZodString>>) {
+export function responseSchemaFor(schema: z.ZodObject<Record<string, SupportedField>>) {
   const shape = schema.shape
   return {
     type: 'OBJECT',
-    properties: Object.fromEntries(
-      Object.entries(shape).map(([key, field]) => [
-        key,
-        { type: 'STRING', description: field.description ?? '' },
-      ]),
-    ),
+    properties: Object.fromEntries(Object.entries(shape).map(([key, field]) => [key, fieldSchema(field)])),
     required: Object.keys(shape),
   }
 }
@@ -52,13 +64,24 @@ const SYSTEM = `Ты помогаешь взрослому человеку, к�
 Правила:
 - answer_pl всегда на польском, с правильной орфографией и диакритикой. Вход приходит из распознавания речи и часто теряет ł, ś, ż, ć, ó — восстанавливай их. Если слово продиктовано в косвенной форме внутри фразы, приведи его к словарной форме, если это отдельное слово; фразы и предложения оставляй как есть.
 - prompt_ru всегда на русском.
+- Транскрипт приходит либо по-польски, либо по-русски — тебе не говорят заранее, определи сам по алфавиту:
+  - если он по-польски — это ответ: answer_pl это он сам (с восстановленной диакритикой), а prompt_ru ты придумываешь;
+  - если он по-русски — это вопрос: prompt_ru это он сам (почищенный от лишней пунктуации), а answer_pl — то, что человек должен суметь сказать по-польски.
 - Никогда не используй английский язык — never use English anywhere in the output.
 - Русский перевод часто неоднозначен: «злобный» может дать złośliwy, wredny или zły. Поэтому для отдельных слов заполняй prompt_hint: часть речи и короткий контекст, чтобы вопрос имел понятный ответ. Для целых предложений prompt_hint оставляй пустым.
 - example_pl — одно короткое естественное предложение. Не выдумывай книжных конструкций.
-- grammar_note заполняй только когда есть что сказать: род существительного, вид глагола и его пара, управление падежом.
+- grammar_note заполняй только когда есть что сказать: род существительного, вид глагола и его пара, управление падежом. Пиши grammar_note ПО-ПОЛЬСКИ — она показывается на обратной стороне карточки, где всё по-польски.
+- Поле kind — что продиктовано:
+  - fraza — всё, что не является одной лексической единицей: предложения, идиомы («zdrów jak ryba»), многословные именные группы («kleszczowe zapalenie mózgu»);
+  - возвратный глагол с «się» — это одно слово: «przyzwyczaić się» это czasownik, а не fraza;
+  - inne — одно слово другой части речи: междометия («cześć»), местоимения, предлоги, числительные;
+  - иначе — часть речи: rzeczownik, czasownik, przymiotnik, przyslowek.
+- forms_basic показывается вместе с ответом всегда, forms_extended — по нажатию. Каждая строка: label — короткая польская помета, value — форма, несколько форм через « · ». Только по-польски. Для fraza и inne оба списка пустые. Если формы не существует, строку пропускай, не выдумывай.
+  - rzeczownik: forms_basic — «M. l.mn.», «D. l.poj.», «D. l.mn.»; forms_extended — «C.», «B.», «Ms.», «N.», в каждой «l.poj. · l.mn.». Wołacz не нужен. Если у слова нет одного из чисел (pluralia или singularia tantum), пропусти эти формы.
+  - czasownik: forms_basic — «aspekt» (вид и видовая пара, например «ndk. → dk. zrobić»), затем «ja · ty · oni» настоящего времени, затем «tryb rozk.» для ty. У глагола совершенного вида настоящего времени нет: вместо него дай czas przyszły prosty (ja · ty · oni) с пометой «cz. przyszły». forms_extended — «cz. przeszły l.poj.» (m · ż · n), «cz. przeszły l.mn.» (m-os. · nie-m-os.), «imiesłowy» (только те, что существуют для этого вида: у совершенного нет формы на -ący), «forma bezosobowa».
+  - przymiotnik: forms_basic — «przysłówek», образованный от него; forms_extended пустой.
+  - przyslowek: forms_basic — «przymiotnik», от которого он образован; forms_extended пустой.
 - Если поле не нужно, верни пустую строку.`
-
-const FORMS_SYSTEM = `Ты делаешь карточку-тренажёр форм для польского языка. prompt_pl — польская лемма и указание, какие формы нужны. answer_pl — компактная таблица форм в Markdown, только по-польски: для глагола — спряжение в настоящем/будущем, форма прошедшего времени по родам, вид и видовая пара; для существительного — склонение в единственном и множественном числе. Никакого английского и никакого русского в answer_pl.`
 
 export function toCardFields(g: GeneratedCard) {
   const orNull = (s: string) => (s.trim() === '' ? null : s)
@@ -69,13 +92,16 @@ export function toCardFields(g: GeneratedCard) {
     examplePl: orNull(g.example_pl),
     exampleRu: orNull(g.example_ru),
     grammarNote: orNull(g.grammar_note),
+    wordKind: g.kind,
+    // The kind decides, not whatever came back in the arrays: a phrase or an
+    // `inne` word never carries forms, so a card cannot claim forms its kind
+    // has none of (spec 2026-09-18 §3.1).
+    formsJson: hasForms(g.kind) ? serializeForms({ basic: g.forms_basic, extended: g.forms_extended }) : null,
   }
 }
 
 export interface Generator {
-  fromPolish(transcript: string): Promise<GeneratedCard>
-  fromImage(image: { bytes: Uint8Array; mime: string }): Promise<GeneratedCard>
-  forms(lemma: string): Promise<GeneratedForms>
+  fromDictation(transcript: string): Promise<GeneratedCard>
 }
 
 export type GenerateFn = (req: {
@@ -127,7 +153,7 @@ export function geminiGenerator(
       return ai.models.generateContent(params)
     })
 
-  async function run<T extends z.ZodObject<Record<string, z.ZodString>>>(
+  async function run<T extends z.ZodObject<Record<string, SupportedField>>>(
     schema: T,
     systemInstruction: string,
     parts: unknown[],
@@ -166,25 +192,16 @@ export function geminiGenerator(
   }
 
   return {
-    async fromPolish(transcript) {
+    async fromDictation(transcript) {
       const text = transcript.trim()
       if (!text) throw new GenerationError('empty transcript')
+      // Deliberately does not name the language. The transcript may be Polish
+      // or Russian and the alphabet already says which; claiming one here
+      // would be asserting something false in the one place the model cannot
+      // check it against the audio.
       return run(GeneratedCardSchema, SYSTEM, [
-        { text: `Продиктовано по-польски: «${text}»\n\nСделай карточку.` },
+        { text: `Продиктовано: «${text}»\n\nСделай карточку.` },
       ])
-    },
-
-    async fromImage({ bytes, mime }) {
-      return run(GeneratedCardSchema, SYSTEM, [
-        { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString('base64') } },
-        { text: 'Назови по-польски то, что на картинке. prompt_ru — русское название, answer_pl — польское.' },
-      ])
-    },
-
-    async forms(lemma) {
-      const text = lemma.trim()
-      if (!text) throw new GenerationError('empty lemma')
-      return run(GeneratedFormsSchema, FORMS_SYSTEM, [{ text: `Лемма: «${text}»` }])
     },
   }
 }

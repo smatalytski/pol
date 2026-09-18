@@ -20,14 +20,12 @@ function insertCard(
       type: 'ru_to_pl',
       promptText: 'злобный',
       promptHint: null,
-      promptMediaId: null,
       answerPl: 'złośliwy',
       answerKey: 'złośliwy',
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
       status: 'ready',
-      parentCardId: null,
       suspendedAt: null,
       createdAt: NOW.getTime(),
       updatedAt: NOW.getTime(),
@@ -216,5 +214,23 @@ describe('buildQueue', () => {
       .run()
     const q = await buildQueue(db, NOW)
     expect(q.filter((c) => c.isNew).map((c) => c.id)).toContain('y')
+  })
+})
+
+describe('buildQueue forms', () => {
+  it('hands each card its forms parsed, ready to render', async () => {
+    const { db } = createTestDb()
+    const forms = { basic: [{ label: 'M. l.mn.', value: 'koty' }], extended: [] }
+    insertCard(db, { answerPl: 'kot', answerKey: 'kot', wordKind: 'rzeczownik', formsJson: JSON.stringify(forms) })
+    const [item] = await buildQueue(db, NOW)
+    expect(item.wordKind).toBe('rzeczownik')
+    expect(item.forms).toEqual(forms)
+  })
+
+  it('gives a card with no stored forms null forms', async () => {
+    const { db } = createTestDb()
+    insertCard(db, { wordKind: 'fraza', formsJson: null })
+    const [item] = await buildQueue(db, NOW)
+    expect(item.forms).toBeNull()
   })
 })

@@ -4,11 +4,11 @@ import { t } from './pl'
 describe('strings', () => {
   it('defines every key the screens use', () => {
     const required = [
-      'appName', 'review', 'add', 'images', 'cards', 'settings',
+      'appName', 'review', 'add', 'cards', 'settings',
       'show', 'again', 'hard', 'good', 'easy', 'undo',
       'doneForToday', 'noCards', 'sessionReviewed', 'nextReviewAt', 'rateFailed',
       'holdToRecord', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
-      'dropImages', 'imagePrompt', 'addForms', 'suspend', 'unsuspend', 'save', 'needsInput', 'formsFailed',
+      'suspend', 'unsuspend', 'save', 'needsInput',
       'saveFailed', 'chipSaveFailed',
       'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
     ]

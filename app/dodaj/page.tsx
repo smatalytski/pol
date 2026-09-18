@@ -5,18 +5,37 @@ import { useHoldToRecord, mediaRecorderFactory } from '@/hooks/useHoldToRecord'
 import { useWakeLock } from '@/hooks/useWakeLock'
 import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbox'
 import type { CaptureView } from '@/lib/capture/pipeline'
+import type { DictationLang } from '@/lib/transcribe'
+import type { CardType } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
+
+type Notice = 'typeFailed' | 'typeDuplicate' | 'languageFailed' | 'deleteFailed'
+
+const NOTICE_TEXT: Record<Notice, string> = {
+  typeFailed: t.typeFailed,
+  typeDuplicate: t.typeDuplicate,
+  languageFailed: t.languageFailed,
+  deleteFailed: t.deleteFailed,
+}
 
 export default function AddPage() {
   const [captures, setCaptures] = useState<CaptureView[]>([])
   const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([])
   const [micDenied, setMicDenied] = useState(false)
+  // One notice line for the chip controls' outcomes. A failed or refused
+  // request would otherwise look exactly like a dead button.
+  const [notice, setNotice] = useState<Notice | null>(null)
+  // Captures whose re-recognition or type switch is in flight. Re-recognition
+  // is Speech-to-Text plus a Gemini call, and ~30 s is normal, so without this
+  // the user taps again and starts a second one on the same capture.
+  const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
 
-  // Shared by every async chain below (drain, poll) that eventually calls a
-  // setter: guards against updating state after the screen has been
-  // navigated away from, rather than each chain inventing its own flag.
+  // Shared by every async chain below (drain, poll, the chip actions) that
+  // eventually calls a setter: guards against updating state after the screen
+  // has been navigated away from, rather than each chain inventing its own
+  // flag.
   const mountedRef = useRef(true)
   useEffect(() => {
     return () => {
@@ -129,21 +148,111 @@ export default function AddPage() {
     void fetch(`/api/captures/${id}/retry`, { method: 'POST' })
   }, [])
 
+  // A failed refresh after a chip action is not reported: the action's own
+  // outcome already was, and the chip is only as stale as it was before.
+  const refresh = useCallback(() => fetchCaptures().catch(() => {}), [fetchCaptures])
+
+  // Runs one slow chip action with the chip marked pending until the list has
+  // been refreshed, so its controls come back only once they show the result.
+  const whilePending = useCallback(
+    async (captureId: string, action: () => Promise<void>) => {
+      setPending((p) => new Set(p).add(captureId))
+      await action()
+      await refresh()
+      if (mountedRef.current) {
+        setPending((p) => {
+          const next = new Set(p)
+          next.delete(captureId)
+          return next
+        })
+      }
+    },
+    [refresh],
+  )
+
+  // Recognition is Polish by default, because that is what nearly all
+  // dictation is and because a two-language recognizer demonstrably swallows
+  // Russian (spoken "склеп" came back "sklep"). This re-runs recognition on
+  // the stored audio in the language the user names, then refreshes so the
+  // corrected transcript appears on the chip without a reload. A provider
+  // failure comes back as a 200 with the error recorded on the capture, which
+  // the refreshed chip shows; a refused or unreachable request gets the
+  // notice instead.
+  const relanguage = useCallback(
+    (id: string, lang: DictationLang) => {
+      void whilePending(id, async () => {
+        try {
+          const res = await fetch(`/api/captures/${id}/jezyk`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ lang }),
+          })
+          if (mountedRef.current) setNotice(res.ok ? null : 'languageFailed')
+        } catch {
+          if (mountedRef.current) setNotice('languageFailed')
+        }
+      })
+    },
+    [whilePending],
+  )
+
+  // Every dictation becomes ru_to_pl; this flips one to drilling the forms of
+  // a word already known (spec 2026-09-18 §2), then refreshes so the chip
+  // shows the new type without a reload. A 400 (e.g. a noun whose forms_json
+  // turned out empty), an unreachable server, and a 200 carrying `duplicateOf`
+  // (a pl_to_pl card for this word already exists, so nothing changed) would
+  // otherwise all look like a dead button — the notice says which one
+  // happened. Like every async setter on this page, these are behind
+  // `mountedRef`, since the fetch can resolve after the screen was navigated
+  // away from.
+  const setType = useCallback(
+    (captureId: string, cardId: string, type: CardType) => {
+      void whilePending(captureId, async () => {
+        try {
+          const res = await fetch(`/api/cards/${cardId}/typ`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type }),
+          })
+          if (!res.ok) {
+            if (mountedRef.current) setNotice('typeFailed')
+            return
+          }
+          const { duplicateOf } = (await res.json()) as { duplicateOf: string | null }
+          if (mountedRef.current) setNotice(duplicateOf ? 'typeDuplicate' : null)
+        } catch {
+          if (mountedRef.current) setNotice('typeFailed')
+        }
+      })
+    },
+    [whilePending],
+  )
+
   // Spec §4's "swipe to delete", wired once Task 17 added the routes it
-  // needs. An outbox chip never calls this (CaptureChip doesn't attach the
-  // gesture to it — see its own comment), so this only ever sees a `capture`
-  // item: one with a card is soft-deleted (DELETE /api/cards/:id), one
-  // without a card yet (still uploaded/transcribed/failed) has its capture
-  // row removed instead (DELETE /api/captures/:id) — there is no card to
-  // delete.
+  // needs, and the visible `usuń` button (Task 9: swipe alone was invisible)
+  // calls the same handler. An outbox chip never calls this (CaptureChip
+  // doesn't attach either control to it — see its own comment), so this only
+  // ever sees a `capture` item: one with a card is soft-deleted (DELETE
+  // /api/cards/:id), one without a card yet (still uploaded/transcribed/
+  // failed) has its capture row removed instead (DELETE /api/captures/:id) —
+  // there is no card to delete. A refused or unreachable delete leaves the
+  // chip on screen, so the notice says the delete did not happen.
   const deleteChip = useCallback(
     (item: ChipItem) => {
       if (item.kind === 'outbox') return
       const { capture } = item
       const url = capture.cardId ? `/api/cards/${capture.cardId}` : `/api/captures/${capture.id}`
-      void fetch(url, { method: 'DELETE' }).then(() => fetchCaptures())
+      void (async () => {
+        try {
+          const res = await fetch(url, { method: 'DELETE' })
+          if (mountedRef.current) setNotice(res.ok ? null : 'deleteFailed')
+        } catch {
+          if (mountedRef.current) setNotice('deleteFailed')
+        }
+        await refresh()
+      })()
     },
-    [fetchCaptures],
+    [refresh],
   )
 
   // Without a microphone this screen has no function at all, so say so plainly
@@ -162,23 +271,59 @@ export default function AddPage() {
   ].sort((a, b) => chipCreatedAt(b) - chipCreatedAt(a))
 
   return (
-    <div className="flex flex-col items-center gap-6">
-      <button
-        onPointerDown={() => { navigator.vibrate?.(10); start() }}
-        onPointerUp={stop}
-        onPointerCancel={stop}
-        onContextMenu={(e) => e.preventDefault()}
-        className={`h-40 w-40 select-none rounded-full text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
-        style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
-      >
-        {t.holdToRecord}
-      </button>
-
-      <ul className="w-full">
+    <div className="flex flex-col">
+      {notice && (
+        <p className={`p-3 text-sm ${notice === 'typeDuplicate' ? 'text-amber-600' : 'text-red-600'}`}>
+          {NOTICE_TEXT[notice]}
+        </p>
+      )}
+      {/* Bottom padding reserves the height of the fixed bar below, so the
+          last chip can still be read and swiped instead of sitting under the
+          button. */}
+      <ul className="w-full pb-52">
         {chips.map((item) => (
-          <CaptureChip key={chipKey(item)} item={item} onRetry={retry} onDelete={deleteChip} />
+          <CaptureChip
+            key={chipKey(item)}
+            item={item}
+            onRetry={retry}
+            onDelete={deleteChip}
+            onRelanguage={relanguage}
+            onSetType={(cardId, type) => item.kind === 'capture' && setType(item.capture.id, cardId, type)}
+            pending={item.kind === 'capture' && pending.has(item.capture.id)}
+          />
         ))}
       </ul>
+
+      {/* One-handed use: a thumb reaches the bottom of a phone screen, not the
+          top, and this list grows downward — so a button above it drifts
+          further out of reach the longer a session runs.
+          
+          Fixed, not sticky. `sticky bottom-0` shipped first and did not work:
+          sticky only pins an element once its container overflows the
+          viewport, and nothing in the shell constrains height, so with a few
+          chips the page was shorter than the screen and the button sat right
+          under them — near the top, exactly where it started. Fixed anchors it
+          to the viewport whatever the list is doing; `left-0 right-0` plus the
+          inner max-w-xl re-centres it, because a fixed element ignores the
+          shell's `mx-auto max-w-xl`. The inset padding keeps it clear of the
+          home indicator / gesture bar, and the opaque background stops chips
+          showing through as they scroll underneath. Nav is at the top of the
+          shell (components/Nav.tsx), so nothing collides down here. */}
+      <div
+        className="fixed bottom-0 left-0 right-0 flex justify-center bg-background pt-4"
+        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+      >
+        <button
+          onPointerDown={() => { navigator.vibrate?.(10); start() }}
+          onPointerUp={stop}
+          onPointerCancel={stop}
+          onContextMenu={(e) => e.preventDefault()}
+          className={`h-40 w-40 select-none rounded-full text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
+          style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
+        >
+          {t.holdToRecord}
+        </button>
+      </div>
     </div>
   )
 }

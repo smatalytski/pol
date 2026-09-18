@@ -16,6 +16,8 @@ function captureRow(id: string, status: string, createdAt = Date.now()): Capture
     duplicateOf: null,
     audioMediaId: null,
     createdAt,
+    cardType: null,
+    wordKind: null,
   }
 }
 
@@ -425,5 +427,378 @@ describe('AddPage chip deletion (spec §4: "swipe to delete", wired up once Task
     const li = await screen.findByRole('listitem')
     swipeLeft(li)
     await waitFor(() => expect(deleteCalls).toEqual(['/api/captures/c2']))
+  })
+})
+
+describe('AddPage layout', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  // One-handed use: on a phone the thumb reaches the bottom of the screen, not
+  // the top, and the chip waterfall grows downward — so a button above the
+  // list drifts further out of reach the longer a session runs.
+  it('puts the record button after the capture list, at the bottom of the screen', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'generated')] }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.holdToRecord)
+    const list = screen.getByRole('list')
+    expect(list.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+
+  // DOM order was not enough. `sticky bottom-0` shipped first, and sticky only
+  // pins an element once its container overflows the viewport — nothing in the
+  // shell constrains height, so with a few chips the page is shorter than the
+  // screen and the button rendered right under the chips, near the top, which
+  // is what the user saw. jsdom has no layout engine, so these pin the
+  // mechanism rather than the appearance: the bar is positioned against the
+  // viewport, and the list reserves room so the last chip cannot hide beneath
+  // it.
+  it('anchors the button to the viewport, not to the end of the list', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'generated')] }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    const bar = (await screen.findByText(t.holdToRecord)).closest('div')!
+    expect(bar.className).toContain('fixed')
+    expect(bar.className).toContain('bottom-0')
+    expect(bar.className).not.toContain('sticky')
+  })
+
+  it('reserves room under the list so the last chip is not covered by the button', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ captures: [captureRow('c1', 'generated')] }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    await screen.findByText(t.holdToRecord)
+    expect(screen.getByRole('list').className).toMatch(/\bpb-/)
+  })
+})
+
+describe('AddPage re-recognition', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('asks the server to re-recognise a capture in Russian, then refreshes', async () => {
+    stubMic()
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [{ ...captureRow('cap-1', 'generated'), audioMediaId: 'm1', transcript: 'sklep' }],
+              cardId: 'c1',
+              duplicateOf: null,
+              error: null,
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.url).toBe('/api/captures/cap-1/jezyk')
+    expect(post?.body).toEqual({ lang: 'ru' })
+    // The refreshed transcript has to arrive without the user reloading.
+    expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
+  })
+
+  it('asks the server to make a capture card forms-only, then refreshes', async () => {
+    stubMic()
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [
+                {
+                  ...captureRow('cap-1', 'generated'),
+                  audioMediaId: 'm1',
+                  transcript: 'kot',
+                  cardId: 'card-1',
+                  cardType: 'ru_to_pl',
+                  wordKind: 'rzeczownik',
+                },
+              ],
+              card: null,
+              duplicateOf: null,
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    const post = calls.find((c) => c.method === 'POST')
+    expect(post?.url).toBe('/api/cards/card-1/typ')
+    expect(post?.body).toEqual({ type: 'pl_to_pl' })
+    expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
+  })
+
+  // A 400 — e.g. a noun whose forms_json turned out empty — must not look like
+  // a dead button: the refresh still happens (the chip may have changed for
+  // other reasons), but the failure has to say so.
+  it('shows a failure notice when the type switch is rejected', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (method === 'POST') {
+          return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: 'no forms' }) }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [
+                {
+                  ...captureRow('cap-1', 'generated'),
+                  audioMediaId: 'm1',
+                  transcript: 'kot',
+                  cardId: 'card-1',
+                  cardType: 'ru_to_pl',
+                  wordKind: 'rzeczownik',
+                },
+              ],
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
+  })
+
+  // A 200 carrying `duplicateOf` means a pl_to_pl card for this word already
+  // exists, so this capture's card was NOT switched — that also has to be
+  // said, not left looking like a silent success.
+  it('shows a duplicate notice when a pl_to_pl card for this word already exists', async () => {
+    stubMic()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ card: null, duplicateOf: 'other' }),
+          }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              captures: [
+                {
+                  ...captureRow('cap-1', 'generated'),
+                  audioMediaId: 'm1',
+                  transcript: 'kot',
+                  cardId: 'card-1',
+                  cardType: 'ru_to_pl',
+                  wordKind: 'rzeczownik',
+                },
+              ],
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<AddPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.typeDuplicate)).toBeTruthy()
+  })
+})
+
+// Ruling 14: a re-recognition is Speech-to-Text plus a Gemini call, and ~30 s
+// is normal. With nothing on screen the user taps again and starts a second
+// retranscribe on the same capture — and a failure used to show nothing at all.
+describe('AddPage slow and failing chip controls', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  const chip = {
+    ...captureRow('cap-1', 'generated'),
+    audioMediaId: 'm1',
+    transcript: 'kot',
+    cardId: 'card-1',
+    cardType: 'ru_to_pl' as const,
+    wordKind: 'rzeczownik' as const,
+  }
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    let reject!: (e: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  /** Lists `chip`; every other request is answered by `write`. */
+  function stubWrites(write: (url: string, init: RequestInit) => Promise<unknown>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [chip] }) })
+        }
+        return write(url, init!)
+      }),
+    )
+  }
+
+  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
+
+  it('disables the chip controls and says so while a re-recognition is in flight', async () => {
+    stubMic()
+    const post = deferred<unknown>()
+    stubWrites(() => post.promise)
+    render(<AddPage />)
+    const control = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+
+    expect(screen.getByText(t.transcribing)).toBeTruthy()
+    expect(button(t.asRussian).disabled).toBe(true)
+    expect(button(t.asPolish).disabled).toBe(true)
+    expect(button(t.typePlPl).disabled).toBe(true)
+
+    await act(async () => {
+      post.resolve({ ok: true, json: () => Promise.resolve({ cardId: 'card-1', duplicateOf: null, error: null }) })
+    })
+    await waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
+    expect(button(t.asRussian).disabled).toBe(false)
+    expect(button(t.typePlPl).disabled).toBe(false)
+  })
+
+  it('disables the chip controls while a type switch is in flight', async () => {
+    stubMic()
+    const post = deferred<unknown>()
+    stubWrites(() => post.promise)
+    render(<AddPage />)
+    const control = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+
+    expect(button(t.asRussian).disabled).toBe(true)
+    expect(button(t.typePlPl).disabled).toBe(true)
+
+    await act(async () => {
+      post.resolve({ ok: true, json: () => Promise.resolve({ card: null, duplicateOf: null }) })
+    })
+    await waitFor(() => expect(button(t.typePlPl).disabled).toBe(false))
+  })
+
+  it('shows a notice when re-recognition is refused', async () => {
+    stubMic()
+    stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
+    render(<AddPage />)
+    const control = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
+    expect(button(t.asRussian).disabled).toBe(false)
+  })
+
+  it('shows a notice when re-recognition never reaches the server', async () => {
+    stubMic()
+    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<AddPage />)
+    const control = await screen.findByText(t.asRussian)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
+  })
+
+  it('shows a notice when a type switch never reaches the server', async () => {
+    stubMic()
+    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<AddPage />)
+    const control = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
+  })
+
+  it('shows a notice when a delete is refused', async () => {
+    stubMic()
+    stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
+    render(<AddPage />)
+    const control = await screen.findByText(t.deleteItem)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.deleteFailed)).toBeTruthy()
+  })
+
+  it('shows a notice when a delete never reaches the server', async () => {
+    stubMic()
+    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
+    render(<AddPage />)
+    const control = await screen.findByText(t.deleteItem)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(await screen.findByText(t.deleteFailed)).toBeTruthy()
   })
 })
