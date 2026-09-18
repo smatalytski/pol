@@ -93,7 +93,96 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+const FORMS = JSON.stringify({
+  basic: [{ label: 'M. l.mn.', value: 'koty' }],
+  extended: [{ label: 'C.', value: 'kotu · kotom' }],
+})
+const noun = () => cardRow({ answerPl: 'kot', wordKind: 'rzeczownik', formsJson: FORMS })
+
 describe('CardDetailPage', () => {
+  it('shows the basic forms, with the extended ones behind a tap', async () => {
+    stubFetch(noun)
+    render(<CardPage />)
+    expect(await screen.findByText('koty')).toBeTruthy()
+    expect(screen.queryByText('kotu · kotom')).toBeNull()
+    fireEvent.click(screen.getByText(t.showAllForms))
+    expect(screen.getByText('kotu · kotom')).toBeTruthy()
+  })
+
+  it('offers the type switch for a word with forms, and not for a phrase', async () => {
+    stubFetch(noun)
+    render(<CardPage />)
+    expect(await screen.findByText(t.typePlPl)).toBeTruthy()
+    cleanup()
+    vi.unstubAllGlobals()
+    stubFetch(() => cardRow({ wordKind: 'fraza', formsJson: null }))
+    render(<CardPage />)
+    await screen.findByDisplayValue('złośliwy')
+    expect(screen.queryByText(t.typePlPl)).toBeNull()
+  })
+
+  it('switches the card to forms-only and shows the result', async () => {
+    let type: 'ru_to_pl' | 'pl_to_pl' = 'ru_to_pl'
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
+        if (method === 'POST') type = 'pl_to_pl'
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ card: { ...noun(), type }, captureId: null, duplicateOf: null }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<CardPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(calls.find((c) => c.method === 'POST')).toEqual({
+      url: '/api/cards/c1/typ',
+      method: 'POST',
+      body: { type: 'pl_to_pl' },
+    })
+    expect((await screen.findByText(t.typePlPl)).tagName).not.toBe('BUTTON')
+  })
+
+  it('says so when that card already exists', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              (init?.method ?? 'GET') === 'GET'
+                ? { card: noun(), captureId: null }
+                : { card: noun(), duplicateOf: 'other' },
+            ),
+        }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<CardPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.typeDuplicate)).toBeTruthy()
+  })
+
+  it('shows an error when the switch is refused', async () => {
+    stubFailingWrites(noun, 400)
+    render(<CardPage />)
+    const button = await screen.findByText(t.typePlPl)
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(await screen.findByText(t.typeFailed)).toBeTruthy()
+  })
+
+
   // Forms are generated with the card now (spec §1); nothing asks for them.
   it('offers no "dodaj formy" control', async () => {
     stubFetch(() => cardRow())

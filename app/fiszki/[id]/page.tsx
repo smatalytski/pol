@@ -2,15 +2,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import type { CardRow } from '@/lib/cards/service'
+import type { CardRow, CardType } from '@/lib/cards/service'
 import type { DictationLang } from '@/lib/transcribe'
+import { hasForms, parseForms } from '@/lib/cards/forms'
+import { CardTypeSwitch } from '@/components/CardTypeSwitch'
+import { FormsView } from '@/components/FormsView'
 import { t } from '@/i18n/pl'
 
 /**
  * Everything editable about one card. The browse list used to carry all of
  * this inline on every row, which left no room for a title-only list and no
  * room for the answer audio player — the control the user went looking for on
- * the list screen, where none existed.
+ * the list screen, where none existed. A word with forms also shows them here
+ * (spec 2026-09-18 §7), with the ru→pl / tylko formy switch alongside.
  */
 export default function CardDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -25,6 +29,8 @@ export default function CardDetailPage() {
   // hand-typed card has no audio behind it.
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [langError, setLangError] = useState(false)
+  const [typeError, setTypeError] = useState(false)
+  const [typeDuplicate, setTypeDuplicate] = useState(false)
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/cards/${id}`)
@@ -68,6 +74,24 @@ export default function CardDetailPage() {
     const body = (await res.json()) as { card: CardRow; duplicateOf: string | null }
     setCard(body.card)
     setRegenDuplicate(body.duplicateOf !== null)
+  }
+
+  // A 200 can still carry a clash: the card is left as it was and duplicateOf
+  // names the card that already exists (spec 2026-09-18 §6).
+  async function setType(type: CardType) {
+    const res = await fetch(`/api/cards/${id}/typ`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type }),
+    })
+    if (!res.ok) {
+      setTypeError(true)
+      return
+    }
+    setTypeError(false)
+    const body = (await res.json()) as { card: CardRow; duplicateOf: string | null }
+    setCard(body.card)
+    setTypeDuplicate(body.duplicateOf !== null)
   }
 
   // Dictation is recognised as Polish, because that is what nearly all of it
@@ -132,6 +156,10 @@ export default function CardDetailPage() {
       />
 
       <audio controls preload="none" src={`/api/cards/${id}/audio?part=answer`} aria-label={t.play} />
+
+      <FormsView key={card.id} forms={parseForms(card.formsJson)} />
+
+      {hasForms(card.wordKind) && <CardTypeSwitch type={card.type} onChange={(type) => void setType(type)} />}
 
       <label className="flex flex-col gap-1">
         <span className="text-xs uppercase text-neutral-500">{t.detailPrompt}</span>
@@ -202,6 +230,8 @@ export default function CardDetailPage() {
       {regenError && <p className="text-sm text-red-600">{t.regenerateFailed}</p>}
       {regenDuplicate && <p className="text-sm text-amber-600">{t.regenerateDuplicate}</p>}
       {langError && <p className="text-sm text-red-600">{t.languageFailed}</p>}
+      {typeError && <p className="text-sm text-red-600">{t.typeFailed}</p>}
+      {typeDuplicate && <p className="text-sm text-amber-600">{t.typeDuplicate}</p>}
     </div>
   )
 }

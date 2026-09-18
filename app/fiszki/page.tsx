@@ -38,6 +38,7 @@ export default function CardsPage() {
             <Link href={`/fiszki/${c.id}`} className="flex items-baseline justify-between gap-3 py-3">
               <span className="text-lg">{c.answerPl}</span>
               <span className="flex shrink-0 gap-2 text-xs">
+                {c.type === 'pl_to_pl' && <span className="text-sky-700">{t.formsBadge}</span>}
                 {c.status === 'needs_input' && <span className="text-amber-600">{t.needsInput}</span>}
                 {/* A suspended card is otherwise indistinguishable from an
                     active one, leaving no way to see why it never comes up in

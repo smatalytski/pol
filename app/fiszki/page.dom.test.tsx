@@ -119,6 +119,17 @@ describe('CardsPage (browse list)', () => {
     expect(screen.getByText(t.suspended).closest('li')).toBe(screen.getByText('prać').closest('li'))
   })
 
+  it('badges a forms-only card', async () => {
+    stubFetch(() => [
+      cardRow({ id: 'a', type: 'pl_to_pl', answerPl: 'kot' }),
+      cardRow({ id: 'b', type: 'ru_to_pl', answerPl: 'pies' }),
+    ])
+    render(<CardsPage />)
+    await screen.findByText('pies')
+    expect(screen.getAllByText(t.formsBadge)).toHaveLength(1)
+    expect(screen.getByText(t.formsBadge).closest('li')).toBe(screen.getByText('kot').closest('li'))
+  })
+
   it('passes the typed query to the search endpoint', async () => {
     const calls = stubFetch(() => [cardRow()])
     render(<CardsPage />)

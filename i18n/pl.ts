@@ -51,6 +51,7 @@ export const t = {
   typeLabel: 'karta',
   typeRuPl: 'ru→pl',
   typePlPl: 'tylko formy',
+  formsBadge: 'formy',
   typeFailed: 'nie udało się zmienić typu karty',
   typeDuplicate: 'taka karta już istnieje',
   saveFailed: 'nie udało się zapisać zmian',
