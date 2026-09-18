@@ -32,8 +32,9 @@ vi.mock('@/lib/generate', async (importOriginal) => {
 
 const { POST } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { captures, cards, media } = await import('@/lib/db/schema')
-const { createCapture } = await import('@/lib/capture/pipeline')
+const { captures, cards, generationJobs, media } = await import('@/lib/db/schema')
+const { createCapture, recognizeCapture, generateNewCard } = await import('@/lib/capture/pipeline')
+const { getGenerator } = await import('@/lib/generate')
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -49,6 +50,7 @@ function post(id: string, body: unknown) {
 }
 
 beforeEach(() => {
+  db.delete(generationJobs).run()
   db.delete(captures).run()
   db.delete(cards).run()
   db.delete(media).run()
@@ -57,15 +59,36 @@ beforeEach(() => {
 })
 
 describe('POST /api/captures/:id/jezyk', () => {
-  it('re-recognises the audio in the requested language', async () => {
+  async function underReview() {
+    transcribeMock.mockResolvedValueOnce('sklep')
     const id = createCapture(db, { bytes: new Uint8Array([1, 2, 3]), mime: 'audio/webm' }, NOW)
+    await recognizeCapture({ db, transcriber: { transcribe: transcribeMock } }, id, NOW)
+    transcribeMock.mockClear()
+    return id
+  }
+
+  it('replaces the transcript of a recording under review, with no Gemini call', async () => {
+    const id = await underReview()
     const res = await post(id, { lang: 'ru' })
     expect(res.status).toBe(200)
-    const body = await res.json()
+    expect(await res.json()).toEqual({ queued: false, error: null })
     expect(transcribeMock.mock.calls[0][0].lang).toBe('ru')
-    expect(body.error).toBeNull()
-    expect(body.cardId).toBeTruthy()
     expect(db.select().from(captures).get()!.transcript).toBe('склеп')
+    expect(fromDictationMock).not.toHaveBeenCalled()
+    expect(db.select().from(cards).all()).toHaveLength(0)
+  })
+
+  it('queues the Gemini half for a recording that already has a card', async () => {
+    const id = await underReview()
+    await generateNewCard({ db, transcriber: { transcribe: transcribeMock }, generator: getGenerator() }, id, NOW)
+    fromDictationMock.mockClear()
+    const res = await post(id, { lang: 'ru' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ queued: true, error: null })
+    const jobs = db.select().from(generationJobs).all()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]).toMatchObject({ kind: 'rerecognized', captureId: id })
+    expect(fromDictationMock).not.toHaveBeenCalled()
   })
 
   it('rejects a language it does not support, rather than guessing', async () => {
@@ -75,14 +98,14 @@ describe('POST /api/captures/:id/jezyk', () => {
     expect(transcribeMock).not.toHaveBeenCalled()
   })
 
-  // Re-recognition talks to Speech-to-Text and Gemini, so it fails the way
-  // every other provider call in this app fails. The response has to carry
-  // that, because the card detail screen does not poll capture rows.
+  // Speech-to-Text fails the way every other provider call in this app
+  // fails. The response has to carry that, because the card detail screen
+  // does not poll capture rows.
   it('reports a failed re-recognition in the response', async () => {
     const id = createCapture(db, { bytes: new Uint8Array([1]), mime: 'audio/webm' }, NOW)
     transcribeMock.mockRejectedValueOnce(new Error('transcription failed: unintelligible'))
     const res = await post(id, { lang: 'ru' })
     expect(res.status).toBe(200)
-    expect((await res.json()).error).toMatch(/unintelligible/)
+    expect(await res.json()).toEqual({ queued: false, error: 'transcription failed: unintelligible' })
   })
 })

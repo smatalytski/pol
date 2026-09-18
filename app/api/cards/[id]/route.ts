@@ -35,7 +35,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // The capture whose recording produced this card, so the detail screen can
   // offer "recognise this again in Russian" — and only offer it when there is
   // audio to re-recognise, rather than showing a control that must fail.
-  // Earliest, not latest: see creatorCaptureId, which retranscribe uses too.
+  // Earliest, not latest: see creatorCaptureId, which applyRerecognized uses too.
   // Re-recognising a later duplicate's audio would not rewrite this card at
   // all — it would build that recording its own card.
   return NextResponse.json({ card, captureId: creatorCaptureId(db, id) })

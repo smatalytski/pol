@@ -106,9 +106,10 @@ export default function CardDetailPage() {
   // keeps no trace of what was said, which is why `wygeneruj ponownie` (which
   // re-generates from the stored answer) could never fix it.
   //
-  // The route answers 200 with any provider failure in `error`, since the
-  // capture keeps its old transcript and card either way — so checking
-  // `res.ok` alone would show nothing when re-recognition fails.
+  // The route answers 200 with a Speech-to-Text failure in `error`, and with
+  // `queued: true` when the card's regeneration is now waiting in the
+  // generation queue — so checking `res.ok` alone would show nothing when
+  // re-recognition fails.
   async function relanguage(lang: DictationLang) {
     if (!captureId) return
     setLangPending(true)
@@ -122,9 +123,8 @@ export default function CardDetailPage() {
         setLangError(true)
         return
       }
-      const body = (await res.json()) as { duplicateOf: string | null; error: string | null }
+      const body = (await res.json()) as { queued: boolean; error: string | null }
       setLangError(body.error !== null)
-      setRegenDuplicate(body.duplicateOf !== null)
       await load()
     } catch {
       setLangError(true)

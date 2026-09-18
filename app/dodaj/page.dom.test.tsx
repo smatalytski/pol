@@ -18,6 +18,8 @@ function captureRow(id: string, status: string, createdAt = Date.now()): Capture
     createdAt,
     cardType: null,
     wordKind: null,
+    inReview: false,
+    reviewRemainingMs: null,
   }
 }
 
@@ -661,9 +663,10 @@ describe('AddPage re-recognition', () => {
   })
 })
 
-// Ruling 14: a re-recognition is Speech-to-Text plus a Gemini call, and ~30 s
-// is normal. With nothing on screen the user taps again and starts a second
-// retranscribe on the same capture — and a failure used to show nothing at all.
+// Ruling 14: a re-recognition used to be Speech-to-Text plus a Gemini call, and
+// ~30 s was normal. With nothing on screen the user taps again and starts a
+// second re-recognition (rerecognize) on the same capture — and a failure used
+// to show nothing at all.
 describe('AddPage slow and failing chip controls', () => {
   afterEach(() => {
     vi.restoreAllMocks()

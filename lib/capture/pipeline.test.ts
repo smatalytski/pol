@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
-import { cards, captures, media } from '../db/schema'
-import { deleteCard } from '../cards/service'
-import type { Generator, GeneratedCard } from '../generate'
+import { cards, captures, generationJobs, media } from '../db/schema'
+import { createCard, deleteCard, type CreateCardInput } from '../cards/service'
+import { GenerationError, type Generator, type GeneratedCard } from '../generate'
 import type { Transcriber } from '../transcribe'
-import { createCapture, listCaptures, processCapture, retranscribe } from './pipeline'
+import { enqueueJob } from '../queue/jobs'
+import {
+  createCapture, recognizeCapture, rerecognize, listOnScreen, pendingCaptures, knownCardFor,
+  generateNewCard, giveUpNewCard, applyRerecognized, giveUpRerecognized, jobHandlers, creatorCaptureId,
+} from './pipeline'
 
 const NOW = new Date('2026-09-12T10:00:00')
 const AUDIO = { bytes: new Uint8Array([9, 9, 9]), mime: 'audio/webm' }
@@ -21,6 +25,32 @@ const GENERATED: GeneratedCard = {
   forms_basic: [{ label: 'przysłówek', value: 'złośliwie' }],
   forms_extended: [],
 }
+
+const RU_GENERATED: GeneratedCard = {
+  answer_pl: 'krypta',
+  prompt_ru: 'склеп',
+  prompt_hint: '',
+  example_pl: 'Krypta pod kościołem.',
+  example_ru: 'Склеп под церковью.',
+  grammar_note: 'rzeczownik rodzaju żeńskiego',
+  kind: 'rzeczownik',
+  forms_basic: [{ label: 'M. l.mn.', value: 'krypty' }],
+  forms_extended: [],
+}
+
+const input = (over: Partial<CreateCardInput> = {}): CreateCardInput => ({
+  type: 'ru_to_pl',
+  promptText: 'злобный',
+  promptHint: null,
+  answerPl: 'złośliwy',
+  examplePl: null,
+  exampleRu: null,
+  grammarNote: null,
+  wordKind: null,
+  formsJson: null,
+  status: 'ready',
+  ...over,
+})
 
 function deps(over: { transcriber?: Partial<Transcriber>; generator?: Partial<Generator> } = {}) {
   const { db } = createTestDb()
@@ -49,203 +79,125 @@ describe('createCapture', () => {
   })
 })
 
-describe('processCapture', () => {
-  it('creates a ready card from the generated fields', async () => {
+async function recognized(d: ReturnType<typeof deps>, transcript: string, now = NOW) {
+  d.transcriber.transcribe = vi.fn().mockResolvedValue(transcript)
+  const id = createCapture(d.db, AUDIO, now)
+  await recognizeCapture(d, id, now)
+  return id
+}
+
+const row = (d: ReturnType<typeof deps>, id: string) =>
+  d.db.select().from(captures).where(eq(captures.id, id)).get()!
+
+function insertCapture(d: ReturnType<typeof deps>, over: Partial<typeof captures.$inferInsert> & { id: string }) {
+  d.db.insert(captures).values({
+    audioMediaId: null, transcript: null, status: 'uploaded', error: null, generationJson: null,
+    cardId: null, createdAt: NOW.getTime(), transcribedAt: null, duplicateOf: null, ...over,
+  }).run()
+}
+
+describe('recognizeCapture', () => {
+  it('stores the transcript and opens the review window', async () => {
     const d = deps()
+    const id = await recognized(d, 'złośliwy')
+    expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'złośliwy', transcribedAt: NOW.getTime(), duplicateOf: null })
+  })
+
+  it('makes no Gemini call — generation is queued, not run here', async () => {
+    const d = deps()
+    await recognized(d, 'złośliwy')
+    expect(d.generator.fromDictation).not.toHaveBeenCalled()
+    expect(d.db.select().from(cards).all()).toHaveLength(0)
+  })
+
+  it('keeps the audio and marks failed when recognition fails', async () => {
+    const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('unintelligible')) } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-
-    const card = d.db.select().from(cards).get()!
-    expect(card.type).toBe('ru_to_pl')
-    expect(card.status).toBe('ready')
-    expect(card.answerPl).toBe('złośliwy')
-    expect(card.promptText).toBe('злобный')
-    expect(card.answerKey).toBe('złośliwy')
-    expect(card.grammarNote).toBeNull()
-    expect(card.state).toBe(0)
-
-    const capture = d.db.select().from(captures).where(eq(captures.id, id)).get()!
-    expect(capture.status).toBe('generated')
-    expect(capture.transcript).toBe('zloslivy')
-    expect(capture.cardId).toBe(card.id)
-  })
-
-  it('keys the card off the NORMALIZED Polish answer, not the raw transcript', async () => {
-    const d = deps()
-    await processCapture(d, createCapture(d.db, AUDIO, NOW), NOW)
-    expect(d.db.select().from(cards).get()!.answerKey).toBe('złośliwy')
-  })
-
-  it('surfaces a duplicate instead of creating a second card', async () => {
-    const d = deps()
-    await processCapture(d, createCapture(d.db, AUDIO, NOW), NOW)
-    const second = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, second, NOW)
-
-    expect(d.db.select().from(cards).all()).toHaveLength(1)
-    const view = listCaptures(d.db, 0).find((c) => c.id === second)!
-    expect(view.duplicateOf).toBe(d.db.select().from(cards).get()!.id)
-    expect(view.status).toBe('generated')
-  })
-
-  it('surfaces a duplicate across a needs_input/ready pair via the transcript-key fallback', async () => {
-    // First dictation: generation is down, so the card is keyed by the raw transcript
-    // ('zloslivy') and lands needs_input. Second dictation of the SAME word: generation
-    // succeeds and would key the card by the restored 'złośliwy' — a different string — so
-    // the primary answer-key lookup alone would miss the first card entirely and silently
-    // fork the word into a second, orphaning the first.
-    const fromDictation = vi.fn().mockRejectedValueOnce(new Error('llm down')).mockResolvedValue(GENERATED)
-    const d = deps({ generator: { fromDictation } })
-
-    const first = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, first, NOW)
-    const firstCard = d.db.select().from(cards).get()!
-    expect(firstCard.status).toBe('needs_input')
-    expect(firstCard.answerKey).toBe('zloslivy')
-
-    const second = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, second, NOW)
-
-    expect(d.db.select().from(cards).all()).toHaveLength(1)
-    const view = listCaptures(d.db, 0).find((c) => c.id === second)!
-    expect(view.duplicateOf).toBe(firstCard.id)
-    expect(view.status).toBe('generated')
-  })
-
-  it('keeps the audio and allows retry when transcription fails', async () => {
-    const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('stt down')) } })
-    const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-
-    const row = d.db.select().from(captures).where(eq(captures.id, id)).get()!
-    expect(row.status).toBe('failed')
-    expect(row.error).toContain('stt down')
-    expect(row.audioMediaId).not.toBeNull()
+    await recognizeCapture(d, id, NOW)
+    expect(row(d, id)).toMatchObject({ status: 'failed', error: 'unintelligible' })
+    expect(row(d, id).audioMediaId).not.toBeNull()
     expect(d.db.select().from(media).all()).toHaveLength(1)
     expect(d.db.select().from(cards).all()).toHaveLength(0)
   })
 
-  it('still creates a card when generation fails, flagged needs_input', async () => {
-    const d = deps({ generator: { fromDictation: vi.fn().mockRejectedValue(new Error('llm down')) } })
+  it('writes nothing for a recording rejected while Speech-to-Text ran', async () => {
+    const d = deps()
     const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-
-    const card = d.db.select().from(cards).get()!
-    expect(card.status).toBe('needs_input')
-    expect(card.answerPl).toBe('zloslivy')
-    expect(card.promptText).toBeNull()
-    const row = d.db.select().from(captures).where(eq(captures.id, id)).get()!
-    expect(row.cardId).toBe(card.id)
-    expect(row.error).toContain('llm down')
+    d.transcriber.transcribe = vi.fn(async () => {
+      d.db.delete(captures).where(eq(captures.id, id)).run()
+      return 'kot'
+    })
+    await recognizeCapture(d, id, NOW)
+    expect(d.db.select().from(captures).all()).toHaveLength(0)
   })
 
-  it('retrying a failed capture creates exactly one card', async () => {
-    const transcribe = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('stt down'))
-      .mockResolvedValue('zloslivy')
+  it('flags a word already in the deck as już masz', async () => {
+    const d = deps()
+    const { cardId } = createCard(d.db, input({ answerPl: 'kot' }), NOW)
+    const id = await recognized(d, 'Kot.')
+    expect(row(d, id).duplicateOf).toBe(cardId)
+  })
+
+  it('retries a failed recognition, and the recording then yields exactly one card', async () => {
+    const transcribe = vi.fn().mockRejectedValueOnce(new Error('stt down')).mockResolvedValue('zloslivy')
     const d = deps({ transcriber: { transcribe } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-    await processCapture(d, id, NOW)
+    await recognizeCapture(d, id, NOW)
+    expect(row(d, id).status).toBe('failed')
+    await recognizeCapture(d, id, NOW)
+    expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'zloslivy', error: null })
+    await generateNewCard(d, id, NOW)
     expect(d.db.select().from(cards).all()).toHaveLength(1)
-    expect(d.db.select().from(captures).where(eq(captures.id, id)).get()!.status).toBe('generated')
+    expect(row(d, id).status).toBe('generated')
   })
 
-  it('is a no-op on a capture that already produced a card', async () => {
+  it('does not re-recognise a recording that is past recognition', async () => {
     const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-    await processCapture(d, id, NOW)
-    expect(d.db.select().from(cards).all()).toHaveLength(1)
+    const id = await recognized(d, 'zloslivy')
+    await generateNewCard(d, id, NOW)
+    await recognizeCapture(d, id, NOW)
     expect(d.transcriber.transcribe).toHaveBeenCalledTimes(1)
+    expect(row(d, id).status).toBe('generated')
   })
 
-  it('stores the kind and forms the generation returned', async () => {
+  it('marks a recording with no audio failed without calling Speech-to-Text', async () => {
     const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-    const card = d.db.select().from(cards).get()!
-    expect(card.wordKind).toBe(GENERATED.kind)
-    expect(JSON.parse(card.formsJson!)).toEqual({ basic: GENERATED.forms_basic, extended: GENERATED.forms_extended })
-  })
-
-  it('stores no kind and no forms when generation fails', async () => {
-    const d = deps({ generator: { fromDictation: vi.fn().mockRejectedValue(new Error('429')) } })
-    const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-    const card = d.db.select().from(cards).get()!
-    expect(card.wordKind).toBeNull()
-    expect(card.formsJson).toBeNull()
-  })
-
-  // Critical race from review: DELETE /api/captures/:id (swipe-to-delete on a
-  // chip with no card yet) can land while this exact function is mid-flight —
-  // transcription has already landed (status: 'transcribed', set BEFORE this
-  // await) when the word turns out to be wrong, which is precisely when a
-  // user is most likely to swipe. Without a re-check, `createCard` below
-  // still runs after the capture row is gone, producing a live, reviewable
-  // card for a capture the user just told the app to forget — and the chip
-  // never comes back, since /dodaj only requests captures from the last 60s.
-  it('creates no card if the capture is deleted while generation is in flight (simulates a mid-pipeline swipe-delete)', async () => {
-    const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    // Overriding the mock after construction, rather than passing it into
-    // `deps()`, so the mock's closure can reference `id` without a `var`
-    // hoisting trick.
-    d.generator.fromDictation = vi.fn().mockImplementation(async () => {
-      // The user swiped the chip away right as generation was in flight —
-      // exactly the window this test exercises.
-      d.db.delete(captures).where(eq(captures.id, id)).run()
-      return GENERATED
-    })
-
-    await processCapture(d, id, NOW)
-
-    expect(d.db.select().from(cards).all()).toHaveLength(0)
-    expect(d.db.select().from(captures).where(eq(captures.id, id)).all()).toHaveLength(0)
+    insertCapture(d, { id: 'no-audio' })
+    await recognizeCapture(d, 'no-audio', NOW)
+    expect(row(d, 'no-audio')).toMatchObject({ status: 'failed', error: 'no audio' })
+    expect(d.transcriber.transcribe).not.toHaveBeenCalled()
   })
 })
 
-describe('listCaptures', () => {
-  it('returns captures newer than the cursor, newest first', () => {
+describe('knownCardFor', () => {
+  it('matches a Latin transcript on the answer key', () => {
     const d = deps()
-    const older = createCapture(d.db, AUDIO, new Date(NOW.getTime() - 10_000))
-    const newer = createCapture(d.db, AUDIO, NOW)
-    expect(listCaptures(d.db, 0).map((c) => c.id)).toEqual([newer, older])
-    expect(listCaptures(d.db, NOW.getTime() - 5_000).map((c) => c.id)).toEqual([newer])
+    const { cardId } = createCard(d.db, input({ answerPl: 'wścieklizna' }), NOW)
+    expect(knownCardFor(d.db, 'Wścieklizna!')).toBe(cardId)
   })
 
-  // Important review finding (A4): swipe-to-delete on a finished chip
-  // soft-deletes its card, not its capture row. Without filtering here, the
-  // chip stayed on screen looking undeleted — and /dodaj's `since` cursor is
-  // pinned at mount, so it would never age out on its own.
-  it('omits a capture whose card has been soft-deleted', async () => {
+  it('matches a Cyrillic transcript on the Russian prompt', () => {
     const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-    const view = listCaptures(d.db, 0).find((c) => c.id === id)!
-    expect(view.cardId).not.toBeNull()
-
-    deleteCard(d.db, view.cardId!, NOW)
-    expect(listCaptures(d.db, 0).find((c) => c.id === id)).toBeUndefined()
+    const { cardId } = createCard(d.db, input({ answerPl: 'grobowiec', promptText: 'склеп' }), NOW)
+    expect(knownCardFor(d.db, 'Склеп.')).toBe(cardId)
   })
 
-  it('keeps a capture with no card at all (nothing to soft-delete)', () => {
+  // Spec §4: best-effort by design. answerKey never strips diacritics, so a
+  // transcript that lost one does not match — the generation-time dedup
+  // catches it instead.
+  it('misses a transcript that lost a diacritic', () => {
     const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    expect(listCaptures(d.db, 0).find((c) => c.id === id)).toBeDefined()
+    createCard(d.db, input({ answerPl: 'wścieklizna' }), NOW)
+    expect(knownCardFor(d.db, 'wscieklizna')).toBeNull()
   })
 
-  // The chip offers the type switch only once generation has classified the
-  // word as one with forms, so it needs the card's type and kind.
-  it('exposes the card type and word kind of each capture', async () => {
+  it('ignores deleted cards and pl_to_pl cards', () => {
     const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW)
-    const [view] = listCaptures(d.db, 0)
-    expect(view.cardType).toBe('ru_to_pl')
-    expect(view.wordKind).toBe(GENERATED.kind)
+    const { cardId } = createCard(d.db, input({ answerPl: 'kot' }), NOW)
+    deleteCard(d.db, cardId, NOW)
+    createCard(d.db, input({ answerPl: 'pies', type: 'pl_to_pl' }), NOW)
+    expect(knownCardFor(d.db, 'kot')).toBeNull()
+    expect(knownCardFor(d.db, 'pies')).toBeNull()
   })
 })
 
@@ -254,280 +206,445 @@ describe('listCaptures', () => {
 // "sklep" and "бешенство" came back "wściekłość". So dictation stays Polish
 // and a Russian recording is fixed afterwards — which only works from the
 // stored audio, since the wrong transcript carries no trace of what was said.
-describe('retranscribe', () => {
-  const RU_GENERATED: GeneratedCard = {
-    answer_pl: 'krypta',
-    prompt_ru: 'склеп',
-    prompt_hint: '',
-    example_pl: 'Krypta pod kościołem.',
-    example_ru: 'Склеп под церковью.',
-    grammar_note: 'rzeczownik rodzaju żeńskiego',
-    kind: 'rzeczownik',
-    forms_basic: [{ label: 'M. l.mn.', value: 'krypty' }],
-    forms_extended: [],
-  }
-
-  function strandedInPolish() {
+describe('rerecognize', () => {
+  it('replaces the transcript under review and restarts the window', async () => {
     const d = deps()
-    const id = createCapture(d.db, AUDIO, NOW)
-    return { d, id }
-  }
-
-  it('re-recognises the stored audio in the requested language', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
+    const id = await recognized(d, 'sklep')
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-
-    await retranscribe(d, id, 'ru', NOW)
-
+    const later = new Date(NOW.getTime() + 7_000)
+    expect(await rerecognize(d, id, 'ru', later)).toEqual({ queued: false, error: null })
+    expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'склеп', transcribedAt: later.getTime() })
     const call = (d.transcriber.transcribe as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(call.lang).toBe('ru')
     // getMedia hands back a sqlite Buffer, so compare contents not classes.
     expect(Array.from(call.bytes as Uint8Array)).toEqual(Array.from(AUDIO.bytes))
-    expect(d.db.select().from(captures).where(eq(captures.id, id)).get()!.transcript).toBe('склеп')
   })
 
-  it('rewrites the capture existing card in place instead of making a second one', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    const before = d.db.select().from(cards).get()!
+  it('clears a stale już masz when the new transcript is not in the deck', async () => {
+    const d = deps()
+    createCard(d.db, input({ answerPl: 'sklep' }), NOW)
+    const id = await recognized(d, 'sklep')
+    expect(row(d, id).duplicateOf).not.toBeNull()
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-
-    await retranscribe(d, id, 'ru', NOW)
-
-    const all = d.db.select().from(cards).all()
-    expect(all).toHaveLength(1)
-    expect(all[0].id).toBe(before.id)
-    expect(all[0].promptText).toBe('склеп')
-    expect(all[0].answerPl).toBe('krypta')
-    expect(all[0].answerKey).toBe('krypta')
-    expect(all[0].grammarNote).toBe('rzeczownik rodzaju żeńskiego')
+    await rerecognize(d, id, 'ru', NOW)
+    expect(row(d, id).duplicateOf).toBeNull()
   })
 
-  it('creates a card when the capture never got one', async () => {
+  // The card comes from the queue once the recording leaves review.
+  it('puts a recording whose recognition failed back under review, with no Gemini call', async () => {
     const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('nope')) } })
     const id = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, id, NOW) // transcription failed: no card
-    expect(d.db.select().from(cards).all()).toHaveLength(0)
-
+    await recognizeCapture(d, id, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-    await retranscribe(d, id, 'ru', NOW)
-
-    const card = d.db.select().from(cards).get()!
-    expect(card.answerPl).toBe('krypta')
-    expect(d.db.select().from(captures).where(eq(captures.id, id)).get()!.cardId).toBe(card.id)
+    const later = new Date(NOW.getTime() + 60_000)
+    expect(await rerecognize(d, id, 'ru', later)).toEqual({ queued: false, error: null })
+    expect(row(d, id)).toMatchObject({ status: 'transcribed', transcript: 'склеп', transcribedAt: later.getTime(), error: null })
+    expect(d.generator.fromDictation).not.toHaveBeenCalled()
+    expect(d.db.select().from(cards).all()).toHaveLength(0)
   })
 
-  // The re-recognised answer re-keys the card, so it can land on a word that
-  // is already in the deck. Ruling 12: a partial write here would build a card
-  // out of two words (prompt «склеп» on answer "złośliwy"), so on a clash the
-  // card is left exactly as it was and the clash is reported.
-  it('leaves the card untouched and reports the clash when the new answer already exists', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    // A second, unrelated card already owns "krypta".
-    const other = createCapture(d.db, { bytes: new Uint8Array([7]), mime: 'audio/webm' }, NOW)
-    d.generator.fromDictation = vi.fn().mockResolvedValue({ ...RU_GENERATED, prompt_ru: 'могила' })
-    d.transcriber.transcribe = vi.fn().mockResolvedValue('могила')
-    await processCapture(d, other, NOW)
-    expect(d.db.select().from(cards).all()).toHaveLength(2)
-    const cardId = d.db.select().from(captures).where(eq(captures.id, id)).get()!.cardId!
-    const before = d.db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const owner = d.db.select().from(captures).where(eq(captures.id, other)).get()!.cardId
-
+  it('queues a rerecognized job for a recording that already has a card', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-    const result = await retranscribe(d, id, 'ru', new Date(NOW.getTime() + 60_000))
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    const jobs = d.db.select().from(generationJobs).all()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]).toMatchObject({ kind: 'rerecognized', captureId: id, cardId: row(d, id).cardId })
+    expect(d.generator.fromDictation).toHaveBeenCalledTimes(1) // only generateNewCard's call
+    expect(row(d, id)).toMatchObject({ transcript: 'склеп', status: 'generated' })
+  })
 
-    expect(result.duplicateOf).toBe(owner)
-    expect(result.cardId).toBe(cardId)
+  // Ruling 1: a pending `regenerate` works from answer_pl, so it would never
+  // see the new transcript; it must not swallow the re-recognition.
+  it('queues a rerecognized job even when the card already has a regenerate job waiting', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    const cardId = row(d, id).cardId!
+    enqueueJob(d.db, { kind: 'regenerate', cardId }, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: true, error: null })
+    const kinds = d.db.select().from(generationJobs).all().map((j) => j.kind).sort()
+    expect(kinds).toEqual(['regenerate', 'rerecognized'])
+  })
+
+  // The waiting job reads the transcript when it runs, so one is enough.
+  it('adds no second rerecognized job while the first is still waiting', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    await rerecognize(d, id, 'ru', NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('sklep')
+    expect(await rerecognize(d, id, 'pl', NOW)).toEqual({ queued: true, error: null })
+    expect(d.db.select().from(generationJobs).all()).toHaveLength(1)
+    expect(row(d, id).transcript).toBe('sklep')
+  })
+
+  it('returns a Speech-to-Text failure and leaves the transcript', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: false, error: 'unintelligible' })
+    expect(row(d, id).transcript).toBe('sklep')
+  })
+
+  it('records a Speech-to-Text failure on a recording with a card and leaves the card alone', async () => {
+    const d = deps()
+    const id = await recognized(d, 'zloslivy')
+    await generateNewCard(d, id, NOW)
+    const before = d.db.select().from(cards).get()!
+    d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
+    expect(await rerecognize(d, id, 'ru', NOW)).toEqual({ queued: false, error: 'unintelligible' })
+    expect(row(d, id)).toMatchObject({ error: 'unintelligible', transcript: 'zloslivy' })
+    expect(d.db.select().from(cards).get()).toEqual(before)
+    expect(d.db.select().from(generationJobs).all()).toHaveLength(0)
+  })
+
+  it('refuses a recording that has no audio to re-recognise', async () => {
+    const d = deps()
+    insertCapture(d, { id: 'no-audio' })
+    expect(await rerecognize(d, 'no-audio', 'ru', NOW)).toEqual({ queued: false, error: 'audio missing' })
+    expect(row(d, 'no-audio').error).toMatch(/audio/)
+    expect(d.transcriber.transcribe).not.toHaveBeenCalled()
+  })
+})
+
+describe('listOnScreen', () => {
+  it('shows a recording under review with its remaining time, then drops it when approved', async () => {
+    const d = deps()
+    const id = await recognized(d, 'kot')
+    const at4s = new Date(NOW.getTime() + 4_000)
+    expect(listOnScreen(d.db, 0, at4s)).toEqual([
+      expect.objectContaining({ id, inReview: true, reviewRemainingMs: 6_000 }),
+    ])
+    expect(listOnScreen(d.db, 0, new Date(NOW.getTime() + 10_000))).toEqual([])
+  })
+
+  it('keeps a failed recognition on screen until acted on', async () => {
+    const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValue(new Error('x')) } })
+    const id = createCapture(d.db, AUDIO, NOW)
+    await recognizeCapture(d, id, NOW)
+    expect(listOnScreen(d.db, 0, new Date(NOW.getTime() + 60_000))).toEqual([
+      expect.objectContaining({ id, status: 'failed', inReview: false, reviewRemainingMs: null }),
+    ])
+  })
+
+  it('shows at most the 5 newest recordings under review', async () => {
+    const d = deps()
+    for (let i = 0; i < 6; i++) await recognized(d, `w${i}`, new Date(NOW.getTime() + i))
+    const shown = listOnScreen(d.db, 0, new Date(NOW.getTime() + 10))
+    expect(shown.map((c) => c.transcript)).toEqual(['w5', 'w4', 'w3', 'w2', 'w1'])
+  })
+
+  it('returns uploaded recordings newer than the cursor, newest first', () => {
+    const d = deps()
+    const older = createCapture(d.db, AUDIO, new Date(NOW.getTime() - 10_000))
+    const newer = createCapture(d.db, AUDIO, NOW)
+    expect(listOnScreen(d.db, 0, NOW).map((c) => c.id)).toEqual([newer, older])
+    expect(listOnScreen(d.db, NOW.getTime() - 5_000, NOW).map((c) => c.id)).toEqual([newer])
+    expect(listOnScreen(d.db, 0, NOW)[0]).toMatchObject({ status: 'uploaded', inReview: false, reviewRemainingMs: null })
+  })
+
+  // A recording with a card is never on the recording screen, so a card
+  // soft-deleted from a chip cannot leave the chip standing.
+  it('never shows a recording that has become a card', async () => {
+    const d = deps()
+    const id = await recognized(d, 'kot')
+    await generateNewCard(d, id, NOW)
+    expect(listOnScreen(d.db, 0, NOW)).toEqual([])
+  })
+
+  it('takes już masz from the recording, not from the generation', async () => {
+    const d = deps()
+    const { cardId } = createCard(d.db, input({ answerPl: 'kot' }), NOW)
+    const id = await recognized(d, 'kot')
+    expect(listOnScreen(d.db, 0, NOW)).toEqual([expect.objectContaining({ id, duplicateOf: cardId })])
+  })
+})
+
+describe('generateNewCard', () => {
+  it('creates a ready card from the transcript and records it on the recording', async () => {
+    const d = deps()
+    const id = await recognized(d, 'złośliwy')
+    await generateNewCard(d, id, NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card).toMatchObject({ status: 'ready', answerPl: GENERATED.answer_pl, wordKind: GENERATED.kind })
+    expect(row(d, id)).toMatchObject({ status: 'generated', cardId: card.id, error: null })
+  })
+
+  it('builds the card from the generated fields, keyed by the generated answer', async () => {
+    const d = deps()
+    const id = await recognized(d, 'zloslivy')
+    await generateNewCard(d, id, NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card).toMatchObject({
+      type: 'ru_to_pl', status: 'ready', answerPl: 'złośliwy', promptText: 'злобный',
+      answerKey: 'złośliwy', grammarNote: null, state: 0,
+    })
+    expect(row(d, id).transcript).toBe('zloslivy')
+  })
+
+  it('stores the kind and forms the generation returned', async () => {
+    const d = deps()
+    await generateNewCard(d, await recognized(d, 'zloslivy'), NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card.wordKind).toBe(GENERATED.kind)
+    expect(JSON.parse(card.formsJson!)).toEqual({ basic: GENERATED.forms_basic, extended: GENERATED.forms_extended })
+  })
+
+  it('dedups a second recording of the same word onto the first card', async () => {
+    const d = deps()
+    const a = await recognized(d, 'zloslivy')
+    await generateNewCard(d, a, NOW)
+    const b = await recognized(d, 'zloslivy', new Date(NOW.getTime() + 1))
+    await generateNewCard(d, b, NOW)
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(1)
+    expect(row(d, b)).toMatchObject({ status: 'generated', cardId: all[0].id })
+    expect(JSON.parse(row(d, b).generationJson!).duplicateOf).toBe(all[0].id)
+  })
+
+  // The first recording's job gave up, so its card is keyed by the raw
+  // transcript ('zloslivy'); the second generates 'złośliwy' — a different
+  // key — and only the fallback finds it.
+  it('dedups onto a needs_input card via the transcript-key fallback', async () => {
+    const d = deps()
+    const a = await recognized(d, 'zloslivy')
+    giveUpNewCard(d.db, a, 'llm down', NOW)
+    const first = d.db.select().from(cards).get()!
+    expect(first).toMatchObject({ status: 'needs_input', answerKey: 'zloslivy' })
+    const b = await recognized(d, 'zloslivy', new Date(NOW.getTime() + 1))
+    await generateNewCard(d, b, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(1)
+    expect(row(d, b).cardId).toBe(first.id)
+    expect(JSON.parse(row(d, b).generationJson!).duplicateOf).toBe(first.id)
+  })
+
+  it('throws a generation failure for the queue to handle, creating nothing', async () => {
+    const d = deps({ generator: { fromDictation: vi.fn().mockRejectedValue(new GenerationError('429', { retryable: true })) } })
+    const id = await recognized(d, 'złośliwy')
+    await expect(generateNewCard(d, id, NOW)).rejects.toThrow('429')
+    expect(d.db.select().from(cards).all()).toHaveLength(0)
+  })
+
+  it('creates nothing for a recording deleted while Gemini ran', async () => {
+    const d = deps()
+    const id = await recognized(d, 'złośliwy')
+    d.generator.fromDictation = vi.fn(async () => {
+      d.db.delete(captures).where(eq(captures.id, id)).run()
+      return GENERATED
+    })
+    await generateNewCard(d, id, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(0)
+  })
+
+  it('is idempotent — a recording that already has a card makes no second one', async () => {
+    const d = deps()
+    const id = await recognized(d, 'złośliwy')
+    await generateNewCard(d, id, NOW)
+    await generateNewCard(d, id, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(1)
+    expect(d.generator.fromDictation).toHaveBeenCalledTimes(1)
+  })
+
+  // Ruling 3: a crash after the card was created but before the job was
+  // marked done re-runs the job with the recording still 'generating'; it
+  // must not stay pending forever.
+  it('marks a recording that already has a card generated without calling Gemini', async () => {
+    const d = deps()
+    const { cardId } = createCard(d.db, input(), NOW)
+    insertCapture(d, { id: 'c1', transcript: 'zloslivy', status: 'generating', cardId, transcribedAt: NOW.getTime() })
+    await generateNewCard(d, 'c1', NOW)
+    expect(row(d, 'c1')).toMatchObject({ status: 'generated', cardId })
+    expect(d.generator.fromDictation).not.toHaveBeenCalled()
+  })
+})
+
+describe('giveUpNewCard', () => {
+  it('keeps the word as a needs_input card with the last error', async () => {
+    const d = deps()
+    const id = await recognized(d, 'Zdrów jak ryba.')
+    giveUpNewCard(d.db, id, 'unusable payload', NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card).toMatchObject({ status: 'needs_input', answerPl: 'Zdrów jak ryba.', promptText: null, wordKind: null })
+    expect(card.formsJson).toBeNull()
+    expect(row(d, id)).toMatchObject({ status: 'generated', cardId: card.id, error: 'unusable payload' })
+  })
+})
+
+describe('applyRerecognized', () => {
+  // The creator rule from the previous branch's critical fix, now on the queue.
+  it('rewrites the card in place when this recording created it', async () => {
+    const d = deps()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    const before = d.db.select().from(cards).get()!
+    d.db.update(captures).set({ transcript: 'склеп' }).where(eq(captures.id, id)).run()
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await applyRerecognized(d, id, NOW)
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(1)
+    expect(all[0]).toMatchObject({ id: before.id, answerPl: RU_GENERATED.answer_pl, promptText: RU_GENERATED.prompt_ru })
+    expect(all[0]).toMatchObject({ answerKey: 'krypta', grammarNote: 'rzeczownik rodzaju żeńskiego', wordKind: RU_GENERATED.kind })
+    expect(JSON.parse(all[0].formsJson!).basic).toEqual(RU_GENERATED.forms_basic)
+    expect(d.generator.fromDictation).toHaveBeenCalledWith('склеп')
+  })
+
+  // Ruling 10 regression: B deduped onto A's card, so re-recognising B must
+  // give B its own card and leave A's exactly as it was.
+  it('never rewrites a card another recording created', async () => {
+    const d = deps()
+    const a = await recognized(d, 'sklep')
+    await generateNewCard(d, a, NOW)
+    const shop = d.db.select().from(cards).get()!
+    const b = await recognized(d, 'sklep', new Date(NOW.getTime() + 1))
+    await generateNewCard(d, b, NOW)                       // dedups onto A's card
+    expect(row(d, b).cardId).toBe(shop.id)
+    d.db.update(captures).set({ transcript: 'склеп' }).where(eq(captures.id, b)).run()
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+
+    await applyRerecognized(d, b, NOW)
+
+    expect(d.db.select().from(cards).where(eq(cards.id, shop.id)).get()).toEqual(shop)
+    expect(row(d, b).cardId).not.toBe(shop.id)
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(2)
+    const grave = all.find((c) => c.id !== shop.id)!
+    expect(grave).toMatchObject({ answerPl: 'krypta', promptText: 'склеп' })
+    expect(row(d, b)).toMatchObject({ cardId: grave.id, status: 'generated' })
+    expect(JSON.parse(row(d, b).generationJson!).duplicateOf).toBeNull()
+    expect(row(d, a).cardId).toBe(shop.id)
+  })
+
+  it('points a re-recognised duplicate recording at an existing card for the new word', async () => {
+    const d = deps()
+    const a = await recognized(d, 'zloslivy')
+    await generateNewCard(d, a, NOW)                       // złośliwy
+    const first = d.db.select().from(cards).get()!
+    const b = await recognized(d, 'zloslivy', new Date(NOW.getTime() + 1))
+    await generateNewCard(d, b, NOW)                       // dedups onto złośliwy
+    const k = await recognized(d, 'krypta', new Date(NOW.getTime() + 2))
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await generateNewCard(d, k, NOW)
+    const krypta = d.db.select().from(cards).all().find((c) => c.answerPl === 'krypta')!
+
+    d.db.update(captures).set({ transcript: 'склеп' }).where(eq(captures.id, b)).run()
+    await applyRerecognized(d, b, NOW)
+
+    expect(row(d, b).cardId).toBe(krypta.id)
+    expect(JSON.parse(row(d, b).generationJson!).duplicateOf).toBe(krypta.id)
+    expect(d.db.select().from(cards).where(eq(cards.id, first.id)).get()).toEqual(first)
+    expect(d.db.select().from(cards).where(eq(cards.id, krypta.id)).get()).toEqual(krypta)
+    expect(d.db.select().from(cards).all()).toHaveLength(2)
+  })
+
+  // Ruling 12: a partial write would build a card out of two words, so on a
+  // clash the card is left as it was.
+  it('leaves the card untouched and records the clash when the new answer already exists', async () => {
+    const d = deps()
+    const id = await recognized(d, 'zloslivy')
+    await generateNewCard(d, id, NOW)
+    const other = await recognized(d, 'могила', new Date(NOW.getTime() + 1))
+    d.generator.fromDictation = vi.fn().mockResolvedValue({ ...RU_GENERATED, prompt_ru: 'могила' })
+    await generateNewCard(d, other, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(2)
+    const cardId = row(d, id).cardId!
+    const before = d.db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const owner = row(d, other).cardId
+
+    d.db.update(captures).set({ transcript: 'склеп' }).where(eq(captures.id, id)).run()
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await applyRerecognized(d, id, new Date(NOW.getTime() + 60_000))
+
+    expect(row(d, id).cardId).toBe(cardId)
+    expect(JSON.parse(row(d, id).generationJson!).duplicateOf).toBe(owner)
     expect(d.db.select().from(cards).where(eq(cards.id, cardId)).get()).toEqual(before)
     expect(d.db.select().from(cards).all()).toHaveLength(2)
   })
 
-  // Ruling 10 regression. Dedup points a duplicate capture at the card an
-  // EARLIER capture created. Re-recognising the duplicate must not rewrite that
-  // card: it is a different word with its own schedule and review history.
-  it('does not rewrite the card an earlier capture created when re-recognising a duplicate', async () => {
-    const SKLEP: GeneratedCard = {
-      answer_pl: 'sklep',
-      prompt_ru: 'магазин',
-      prompt_hint: '',
-      example_pl: 'Idę do sklepu.',
-      example_ru: 'Я иду в магазин.',
-      grammar_note: '',
-      kind: 'rzeczownik',
-      forms_basic: [{ label: 'D. l.poj.', value: 'sklepu' }],
-      forms_extended: [],
-    }
-    const GROBOWIEC: GeneratedCard = {
-      answer_pl: 'grobowiec',
-      prompt_ru: 'склеп',
-      prompt_hint: '',
-      example_pl: 'Grobowiec rodzinny.',
-      example_ru: 'Семейный склеп.',
-      grammar_note: '',
-      kind: 'rzeczownik',
-      forms_basic: [{ label: 'D. l.poj.', value: 'grobowca' }],
-      forms_extended: [],
-    }
-    const d = deps({
-      transcriber: { transcribe: vi.fn().mockResolvedValue('sklep') },
-      generator: { fromDictation: vi.fn().mockResolvedValue(SKLEP) },
-    })
-    // A: a real Polish "sklep".
-    const a = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, a, NOW)
-    const shop = d.db.select().from(cards).get()!
-    // B, a minute later: Russian «склеп», which Polish recognition heard as
-    // "sklep" — so it deduped onto A's card.
-    const b = createCapture(d.db, { bytes: new Uint8Array([4, 2]), mime: 'audio/webm' }, new Date(NOW.getTime() + 60_000))
-    await processCapture(d, b, NOW)
-    expect(d.db.select().from(captures).where(eq(captures.id, b)).get()!.cardId).toBe(shop.id)
-
-    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(GROBOWIEC)
-    const { cardId, duplicateOf } = await retranscribe(d, b, 'ru', NOW)
-
-    // The shop card is exactly as it was.
-    expect(d.db.select().from(cards).where(eq(cards.id, shop.id)).get()).toEqual(shop)
-    // B now has its own grobowiec card.
-    const all = d.db.select().from(cards).all()
-    expect(all).toHaveLength(2)
-    const grave = all.find((c) => c.id !== shop.id)!
-    expect(grave.answerPl).toBe('grobowiec')
-    expect(grave.promptText).toBe('склеп')
-    expect(cardId).toBe(grave.id)
-    expect(duplicateOf).toBeNull()
-    expect(d.db.select().from(captures).where(eq(captures.id, b)).get()!.cardId).toBe(grave.id)
-    // A still points at the shop card.
-    expect(d.db.select().from(captures).where(eq(captures.id, a)).get()!.cardId).toBe(shop.id)
-  })
-
-  // Same duplicate capture, but the re-recognised word is already in the deck:
-  // createCard's dedup points the capture at that card and reports it.
-  it('points a re-recognised duplicate capture at an existing card for the new word', async () => {
+  it('throws a generation failure and leaves the card as it was', async () => {
     const d = deps()
-    const a = createCapture(d.db, AUDIO, NOW)
-    await processCapture(d, a, NOW) // złośliwy
-    const first = d.db.select().from(cards).get()!
-    const b = createCapture(d.db, { bytes: new Uint8Array([4, 2]), mime: 'audio/webm' }, new Date(NOW.getTime() + 60_000))
-    await processCapture(d, b, NOW) // dedups onto złośliwy
-    // Someone already has "krypta" in the deck.
-    const k = createCapture(d.db, { bytes: new Uint8Array([5]), mime: 'audio/webm' }, NOW)
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-    await processCapture(d, k, NOW)
-    const krypta = d.db.select().from(cards).all().find((c) => c.answerPl === 'krypta')!
-    const kryptaBefore = { ...krypta }
-
-    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    const { cardId, duplicateOf } = await retranscribe(d, b, 'ru', NOW)
-
-    expect(cardId).toBe(krypta.id)
-    expect(duplicateOf).toBe(krypta.id)
-    expect(d.db.select().from(captures).where(eq(captures.id, b)).get()!.cardId).toBe(krypta.id)
-    expect(d.db.select().from(cards).where(eq(cards.id, first.id)).get()).toEqual(first)
-    expect(d.db.select().from(cards).where(eq(cards.id, krypta.id)).get()).toEqual(kryptaBefore)
-    expect(d.db.select().from(cards).all()).toHaveLength(2)
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    const before = d.db.select().from(cards).get()!
+    d.generator.fromDictation = vi.fn().mockRejectedValue(new GenerationError('429', { retryable: true }))
+    await expect(applyRerecognized(d, id, NOW)).rejects.toThrow('429')
+    expect(d.db.select().from(cards).get()).toEqual(before)
   })
+})
 
-  it('records the failure and leaves the card alone when re-recognition fails', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
-
-    await retranscribe(d, id, 'ru', NOW)
-
-    const capture = d.db.select().from(captures).where(eq(captures.id, id)).get()!
-    expect(capture.error).toMatch(/unintelligible/)
-    // The old transcript and card survive, so the button can be pressed again.
-    expect(capture.transcript).toBe('zloslivy')
-    expect(d.db.select().from(cards).get()!.answerPl).toBe('złośliwy')
-  })
-
-  // A media row cannot be deleted out from under a capture — captures
-  // .audio_media_id is a foreign key, and deleting the media first fails with
-  // FOREIGN KEY constraint failed. So the reachable "no audio" case is a
-  // capture that never had any, which is what this covers.
-  // The caller needs the failure in the response, not only recorded on the
-  // capture row: the card detail screen never polls captures, so without this
-  // a failed re-recognition there would look exactly like a success.
-  it('returns the failure so the caller can show it without polling', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    d.transcriber.transcribe = vi.fn().mockRejectedValue(new Error('unintelligible'))
-
-    const { error } = await retranscribe(d, id, 'ru', NOW)
-
-    expect(error).toMatch(/unintelligible/)
-  })
-
-  it('returns no error when it worked', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-
-    expect((await retranscribe(d, id, 'ru', NOW)).error).toBeNull()
-  })
-
-  // Found by running this end to end against the real providers: recognition
-  // succeeded, Gemini answered 429, and the card was left answer_pl="склеп",
-  // prompt_text=null, status="ready" — a card with no question at all, queued
-  // for review. processCapture's create path has always fallen back to
-  // needs_input; the update path here has to as well. That also hands the card
-  // to `wygeneruj ponownie`, which only accepts needs_input and regenerates
-  // from answer_pl — now the Cyrillic transcript, which fromDictation reads
-  // correctly.
-  it('replaces the kind and forms when it rebuilds the card', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-    await retranscribe(d, id, 'ru', NOW)
-    const card = d.db.select().from(cards).get()!
-    expect(card.wordKind).toBe(RU_GENERATED.kind)
-    expect(JSON.parse(card.formsJson!).basic).toEqual(RU_GENERATED.forms_basic)
-  })
-
-  it('marks the card needs_input when re-recognition works but generation fails', async () => {
-    const { d, id } = strandedInPolish()
-    await processCapture(d, id, NOW)
-    expect(d.db.select().from(cards).get()!.status).toBe('ready')
-
-    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
-    d.generator.fromDictation = vi.fn().mockRejectedValue(new Error('429 RESOURCE_EXHAUSTED'))
-    const { error } = await retranscribe(d, id, 'ru', NOW)
-
-    const card = d.db.select().from(cards).get()!
-    expect(error).toMatch(/429/)
-    expect(card.answerPl).toBe('склеп')
-    expect(card.promptText).toBeNull()
-    expect(card.status).toBe('needs_input')
-  })
-
-  it('refuses a capture that has no audio to re-recognise', async () => {
+// A failed generation writes nothing, so the card keeps its old, consistent
+// content and needs no downgrade to needs_input.
+describe('giveUpRerecognized', () => {
+  it('records the last error on the recording and leaves the card as it was', async () => {
     const d = deps()
-    d.db
-      .insert(captures)
-      .values({
-        id: 'no-audio',
-        audioMediaId: null,
-        transcript: null,
-        status: 'uploaded',
-        error: null,
-        generationJson: null,
-        cardId: null,
-        createdAt: NOW.getTime(),
-      })
-      .run()
+    const id = await recognized(d, 'sklep')
+    await generateNewCard(d, id, NOW)
+    const before = d.db.select().from(cards).get()!
+    giveUpRerecognized(d.db, id, 'unusable payload')
+    expect(row(d, id)).toMatchObject({ error: 'unusable payload', cardId: before.id, status: 'generated' })
+    expect(d.db.select().from(cards).get()).toEqual(before)
+  })
+})
 
-    await retranscribe(d, 'no-audio', 'ru', NOW)
+describe('jobHandlers', () => {
+  it('wires each job kind to its body', async () => {
+    const d = deps()
+    const h = jobHandlers(d)
+    const id = await recognized(d, 'zloslivy')
+    const job = (kind: 'new' | 'rerecognized' | 'regenerate', over: { captureId?: string; cardId?: string } = {}) => {
+      const jobId = enqueueJob(d.db, { kind, ...over }, NOW)
+      return d.db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).get()!
+    }
 
-    expect(d.db.select().from(captures).where(eq(captures.id, 'no-audio')).get()!.error).toMatch(/audio/)
-    expect(d.transcriber.transcribe).not.toHaveBeenCalled()
+    await h.new.run(job('new', { captureId: id }), NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(row(d, id).cardId).toBe(card.id)
+
+    d.db.update(captures).set({ transcript: 'склеп' }).where(eq(captures.id, id)).run()
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await h.rerecognized.run(job('rerecognized', { captureId: id, cardId: card.id }), NOW)
+    expect(d.db.select().from(cards).get()!.answerPl).toBe('krypta')
+    h.rerecognized.giveUp(job('rerecognized', { captureId: id, cardId: card.id }), 'boom', NOW)
+    expect(row(d, id).error).toBe('boom')
+
+    const stranded = createCard(d.db, input({ answerPl: 'zdrow', status: 'needs_input', promptText: null }), NOW)
+    d.generator.fromDictation = vi.fn().mockResolvedValue(GENERATED)
+    await h.regenerate.run(job('regenerate', { cardId: stranded.cardId }), NOW)
+    expect(d.generator.fromDictation).toHaveBeenCalledWith('zdrow')
+
+    const b = await recognized(d, 'pies', new Date(NOW.getTime() + 1))
+    h.new.giveUp(job('new', { captureId: b }), 'dead', NOW)
+    expect(row(d, b)).toMatchObject({ status: 'generated', error: 'dead' })
+  })
+})
+
+describe('pendingCaptures', () => {
+  it('lists recordings waiting for or in generation, newest first', () => {
+    const d = deps()
+    for (const [id, status, t] of [['q', 'queued', 1], ['g', 'generating', 2], ['x', 'generated', 3]] as const) {
+      d.db.insert(captures).values({
+        id, audioMediaId: null, transcript: id, status, error: null, generationJson: null,
+        cardId: null, createdAt: t, transcribedAt: t, duplicateOf: null,
+      }).run()
+    }
+    expect(pendingCaptures(d.db)).toEqual([
+      { id: 'g', transcript: 'g', status: 'generating' },
+      { id: 'q', transcript: 'q', status: 'queued' },
+    ])
+  })
+})
+
+describe('creatorCaptureId', () => {
+  it('names the earliest recording with audio that points at the card', async () => {
+    const d = deps()
+    const a = await recognized(d, 'zloslivy')
+    await generateNewCard(d, a, NOW)
+    const b = await recognized(d, 'zloslivy', new Date(NOW.getTime() + 1))
+    await generateNewCard(d, b, NOW)
+    expect(creatorCaptureId(d.db, row(d, a).cardId!)).toBe(a)
   })
 })

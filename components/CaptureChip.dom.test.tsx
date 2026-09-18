@@ -19,6 +19,8 @@ function captureItem(over: Partial<CaptureView> = {}): ChipItem {
       createdAt: 1,
       cardType: null,
       wordKind: null,
+      inReview: false,
+      reviewRemainingMs: null,
       ...over,
     },
   }

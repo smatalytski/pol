@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
 import { getTranscriber } from '@/lib/transcribe'
-import { getGenerator } from '@/lib/generate'
-import { retranscribe } from '@/lib/capture/pipeline'
+import { rerecognize } from '@/lib/capture/pipeline'
 
 const Body = z.object({ lang: z.enum(['pl', 'ru']) })
 
@@ -20,15 +19,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const body = Body.safeParse(await req.json())
   if (!body.success) return NextResponse.json({ error: 'lang must be pl or ru' }, { status: 400 })
 
-  // Both providers' failures are already caught inside retranscribe and come
-  // back in `error` — the capture keeps its old transcript and card, so this
-  // is a 200 carrying bad news, not a failed request.
-  return NextResponse.json(
-    await retranscribe(
-      { db, transcriber: getTranscriber(), generator: getGenerator() },
-      id,
-      body.data.lang,
-      new Date(),
-    ),
-  )
+  // Speech-to-Text failures come back in `error` as a 200 — the recording
+  // keeps its transcript. With a card, `queued` says the Gemini half is now
+  // waiting in the generation queue.
+  return NextResponse.json(await rerecognize({ db, transcriber: getTranscriber() }, id, body.data.lang, new Date()))
 }
