@@ -51,10 +51,38 @@ export function responseSchemaFor(schema: z.ZodObject<Record<string, SupportedFi
 }
 
 export class GenerationError extends Error {
-  constructor(message: string) {
+  /**
+   * Whether trying again later can succeed (spec 2026-09-18-generation-queue
+   * §6). True only when the request itself failed transiently; a response
+   * that arrived but was unusable will be just as unusable next time.
+   */
+  readonly retryable: boolean
+
+  constructor(message: string, opts: { retryable?: boolean } = {}) {
     super(message)
     this.name = 'GenerationError'
+    this.retryable = opts.retryable ?? false
   }
+}
+
+const RETRYABLE_STATUS = new Set([429, 500, 503])
+
+/**
+ * Classifies a failed generation *request*. Vertex's 429 does not always carry
+ * a status property — in production it arrived as JSON inside the message
+ * (`{"error":{"code":429,…,"status":"RESOURCE_EXHAUSTED"}}`) — so the message
+ * is read too. An error with no HTTP status at all is a network failure: the
+ * request never got an answer, which is transient by definition.
+ */
+export function isRetryableRequestError(err: unknown): boolean {
+  const e = err as { status?: unknown; code?: unknown; message?: unknown } | null
+  if (typeof e?.status === 'number') return RETRYABLE_STATUS.has(e.status)
+  if (typeof e?.code === 'number') return RETRYABLE_STATUS.has(e.code)
+  const message = typeof e?.message === 'string' ? e.message : ''
+  const code = /"code"\s*:\s*(\d{3})/.exec(message)
+  if (code) return RETRYABLE_STATUS.has(Number(code[1]))
+  if (/RESOURCE_EXHAUSTED|UNAVAILABLE/.test(message)) return true
+  return err instanceof TypeError || /ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up/i.test(message)
 }
 
 const SYSTEM = `Ты помогаешь взрослому человеку, который уже свободно читает и говорит по-польски, закреплять слова и конструкции, которые он встретил и хочет запомнить.
@@ -170,7 +198,9 @@ export function geminiGenerator(
         },
       }))
     } catch (err) {
-      throw new GenerationError(`generation request failed: ${(err as Error).message}`)
+      throw new GenerationError(`generation request failed: ${(err as Error).message}`, {
+        retryable: isRetryableRequestError(err),
+      })
     }
 
     if (!text) throw new GenerationError('generation returned no content')
