@@ -25,6 +25,8 @@ export async function POST(req: Request) {
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
+      wordKind: null,
+      formsJson: null,
       status: 'ready',
     },
     new Date(),

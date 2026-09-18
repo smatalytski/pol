@@ -4,7 +4,7 @@ import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
 import { createCard, type CreateCardInput } from './service'
 import type { Generator, GeneratedCard } from '../generate'
-import { deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
+import { applyGeneratedFields, deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -16,6 +16,8 @@ const input = (over: Partial<CreateCardInput> = {}): CreateCardInput => ({
   examplePl: null,
   exampleRu: null,
   grammarNote: null,
+  wordKind: null,
+  formsJson: null,
   status: 'ready',
   ...over,
 })
@@ -293,6 +295,43 @@ describe('findDuplicate and soft delete', () => {
     expect(
       findDuplicate(db, { type: 'ru_to_pl', answerPl: 'złośliwy', fallbackAnswerKey: 'zloslivy' }),
     ).toBeNull()
+  })
+})
+
+describe('applyGeneratedFields and the card type', () => {
+  const nounFields = {
+    promptText: 'кот', promptHint: null, answerPl: 'kot', examplePl: null, exampleRu: null, grammarNote: null,
+    wordKind: 'rzeczownik' as const,
+    formsJson: JSON.stringify({ basic: [{ label: 'M. l.mn.', value: 'koty' }], extended: [] }),
+  }
+
+  // Spec §5: a pl_to_pl card's whole answer is its forms. If a regeneration
+  // reclassifies the word as having none, leaving it pl_to_pl would leave a
+  // card with no answer at all.
+  it('reverts a pl_to_pl card to ru_to_pl when the new generation has no forms', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after } = applyGeneratedFields(db, card, { ...nounFields, wordKind: 'fraza', formsJson: null }, NOW)
+    expect(after.type).toBe('ru_to_pl')
+  })
+
+  it('keeps a pl_to_pl card pl_to_pl when forms remain', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW)
+    expect(after.type).toBe('pl_to_pl')
+    expect(after.formsJson).toBe(nounFields.formsJson)
+  })
+
+  it('writes kind and forms onto a ru_to_pl card', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ answerPl: 'kot', wordKind: null, formsJson: null }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW)
+    expect(after.wordKind).toBe('rzeczownik')
+    expect(after.formsJson).toBe(nounFields.formsJson)
   })
 })
 

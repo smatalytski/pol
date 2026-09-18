@@ -5,6 +5,7 @@ import { cards } from '../db/schema'
 import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
+import { hasForms, type WordKind } from './forms'
 
 export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
@@ -16,6 +17,8 @@ export type CreateCardInput = {
   examplePl: string | null
   exampleRu: string | null
   grammarNote: string | null
+  wordKind: WordKind | null
+  formsJson: string | null
   status: 'ready' | 'needs_input'
   /**
    * A caller-supplied secondary answer-key, consulted only when the primary
@@ -100,6 +103,8 @@ export function createCard(
       examplePl: input.examplePl,
       exampleRu: input.exampleRu,
       grammarNote: input.grammarNote,
+      wordKind: input.wordKind,
+      formsJson: input.formsJson,
       status: input.status,
       suspendedAt: null,
       createdAt: now.getTime(),
@@ -115,7 +120,17 @@ export type CardRow = typeof cards.$inferSelect
 export type UpdateCardPatch = Partial<
   Pick<
     CardRow,
-    'promptText' | 'promptHint' | 'answerPl' | 'examplePl' | 'exampleRu' | 'grammarNote' | 'status' | 'suspendedAt'
+    | 'type'
+    | 'promptText'
+    | 'promptHint'
+    | 'answerPl'
+    | 'examplePl'
+    | 'exampleRu'
+    | 'grammarNote'
+    | 'wordKind'
+    | 'formsJson'
+    | 'status'
+    | 'suspendedAt'
   >
 >
 
@@ -165,6 +180,7 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
 
   db.update(cards)
     .set({
+      type: merged.type,
       promptText: merged.promptText,
       promptHint: merged.promptHint,
       answerPl: merged.answerPl,
@@ -172,6 +188,8 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
       examplePl: merged.examplePl,
       exampleRu: merged.exampleRu,
       grammarNote: merged.grammarNote,
+      wordKind: merged.wordKind,
+      formsJson: merged.formsJson,
       status,
       suspendedAt: merged.suspendedAt,
       updatedAt: now.getTime(),
@@ -239,12 +257,7 @@ export async function regenerateCard(
   return applyGeneratedFields(db, card, fields, now)
 }
 
-/**
- * The subset of `toCardFields`'s result that `applyGeneratedFields` writes
- * today. `toCardFields` also returns `wordKind` and `formsJson`, which this
- * type deliberately omits — nothing persists them yet (that is a later
- * task's job, with its own tests).
- */
+/** The eight fields a generation produces, as `toCardFields` returns them. */
 export type GeneratedFields = {
   promptText: string | null
   promptHint: string | null
@@ -252,6 +265,8 @@ export type GeneratedFields = {
   examplePl: string | null
   exampleRu: string | null
   grammarNote: string | null
+  wordKind: WordKind | null
+  formsJson: string | null
 }
 
 /**
@@ -274,10 +289,15 @@ export function applyGeneratedFields(
   fields: GeneratedFields,
   now: Date,
 ): { card: CardRow; duplicateOf: string | null } {
-  const owner = findDuplicate(db, { type: card.type, answerPl: fields.answerPl })
+  // Spec §5: a pl_to_pl card's whole answer is its forms. If this generation
+  // reclassified the word as having none, keeping it pl_to_pl would leave a
+  // card with no answer at all, so it reverts. The target type also scopes the
+  // clash check below. If reverting collides with a ru_to_pl card for the same
+  // word, it still reverts and reports the clash: two ru_to_pl cards for one
+  // word are a nuisance, a forms card with no forms is broken.
+  const type: CardType = card.type === 'pl_to_pl' && !hasForms(fields.wordKind) ? 'ru_to_pl' : card.type
+  const owner = findDuplicate(db, { type, answerPl: fields.answerPl })
   const duplicateOf = owner !== null && owner !== card.id ? owner : null
-  return {
-    card: updateCard(db, card.id, duplicateOf ? { ...fields, answerPl: card.answerPl } : fields, now),
-    duplicateOf,
-  }
+  const patch: UpdateCardPatch = { ...fields, type, ...(duplicateOf ? { answerPl: card.answerPl } : {}) }
+  return { card: updateCard(db, card.id, patch, now), duplicateOf }
 }

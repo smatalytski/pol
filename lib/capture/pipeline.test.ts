@@ -161,6 +161,24 @@ describe('processCapture', () => {
     expect(d.transcriber.transcribe).toHaveBeenCalledTimes(1)
   })
 
+  it('stores the kind and forms the generation returned', async () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, id, NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card.wordKind).toBe(GENERATED.kind)
+    expect(JSON.parse(card.formsJson!)).toEqual({ basic: GENERATED.forms_basic, extended: GENERATED.forms_extended })
+  })
+
+  it('stores no kind and no forms when generation fails', async () => {
+    const d = deps({ generator: { fromDictation: vi.fn().mockRejectedValue(new Error('429')) } })
+    const id = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, id, NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card.wordKind).toBeNull()
+    expect(card.formsJson).toBeNull()
+  })
+
   // Critical race from review: DELETE /api/captures/:id (swipe-to-delete on a
   // chip with no card yet) can land while this exact function is mid-flight —
   // transcription has already landed (status: 'transcribed', set BEFORE this
@@ -364,6 +382,17 @@ describe('retranscribe', () => {
   // to `wygeneruj ponownie`, which only accepts needs_input and regenerates
   // from answer_pl — now the Cyrillic transcript, which fromDictation reads
   // correctly.
+  it('replaces the kind and forms when it rebuilds the card', async () => {
+    const { d, id } = strandedInPolish()
+    await processCapture(d, id, NOW)
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await retranscribe(d, id, 'ru', NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card.wordKind).toBe(RU_GENERATED.kind)
+    expect(JSON.parse(card.formsJson!).basic).toEqual(RU_GENERATED.forms_basic)
+  })
+
   it('marks the card needs_input when re-recognition works but generation fails', async () => {
     const { d, id } = strandedInPolish()
     await processCapture(d, id, NOW)

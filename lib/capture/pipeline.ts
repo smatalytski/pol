@@ -39,6 +39,20 @@ export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }
   return id
 }
 
+/** The fields a failed generation leaves behind: keep the word, lose the rest. */
+function strandedFields(transcript: string): GeneratedFields {
+  return {
+    promptText: null,
+    promptHint: null,
+    answerPl: transcript,
+    examplePl: null,
+    exampleRu: null,
+    grammarNote: null,
+    wordKind: null,
+    formsJson: null,
+  }
+}
+
 /**
  * Transcription and generation are caught separately and on purpose: a dead
  * transcription leaves the capture retryable with its audio intact, while dead
@@ -84,8 +98,8 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
 
   const fields = generated
     ? toCardFields(generated)
-    : // Generation is down. Keep the word; the prompt is filled in later by hand.
-      { promptText: null, promptHint: null, answerPl: transcript, examplePl: null, exampleRu: null, grammarNote: null }
+    : // Generation is down. Keep the word; `wygeneruj ponownie` fills in the rest.
+      strandedFields(transcript)
 
   // Authorized addition (Task 17 review, critical finding): re-read the
   // capture row immediately before creating a card. `DELETE
@@ -122,6 +136,8 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
       examplePl: fields.examplePl,
       exampleRu: fields.exampleRu,
       grammarNote: fields.grammarNote,
+      wordKind: fields.wordKind,
+      formsJson: fields.formsJson,
       status: generated ? 'ready' : 'needs_input',
       fallbackAnswerKey: generated ? answerKey(transcript) : undefined,
     },
@@ -130,13 +146,13 @@ export async function processCapture(deps: CaptureDeps, captureId: string, now: 
 
   // The card-insert (inside createCard, above) and this capture update used to
   // be one db.transaction — extracting createCard into a Db-scoped helper
-  // (shared with the non-transactional image route) dropped that atomicity
-  // guarantee, with no `tx` handle threaded through. That's safe, not just
-  // convenient: if the process dies between the two statements, this capture
-  // is left with cardId still null, so a retry re-enters processCapture from
-  // the top, calls generator.fromDictation again, and createCard's own primary
-  // lookup finds the card just inserted rather than duplicating it — the same
-  // path 'retrying a failed capture creates exactly one card' already covers.
+  // dropped that atomicity guarantee, with no `tx` handle threaded through.
+  // That's safe, not just convenient: if the process dies between the two
+  // statements, this capture is left with cardId still null, so a retry
+  // re-enters processCapture from the top, calls generator.fromDictation
+  // again, and createCard's own primary lookup finds the card just inserted
+  // rather than duplicating it — the same path 'retrying a failed capture
+  // creates exactly one card' already covers.
   db.update(captures)
     .set({
       status: 'generated',
@@ -186,18 +202,6 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
       audioMediaId: c.audioMediaId,
       createdAt: c.createdAt,
     }))
-}
-
-/** The fields a failed generation leaves behind: keep the word, lose the rest. */
-function strandedFields(transcript: string): GeneratedFields {
-  return {
-    promptText: null,
-    promptHint: null,
-    answerPl: transcript,
-    examplePl: null,
-    exampleRu: null,
-    grammarNote: null,
-  }
 }
 
 /**
@@ -297,6 +301,8 @@ export async function retranscribe(
           examplePl: fields.examplePl,
           exampleRu: fields.exampleRu,
           grammarNote: fields.grammarNote,
+          wordKind: fields.wordKind,
+          formsJson: fields.formsJson,
           status: generated ? 'ready' : 'needs_input',
           fallbackAnswerKey: generated ? answerKey(transcript) : undefined,
         },
