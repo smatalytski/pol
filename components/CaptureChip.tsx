@@ -1,7 +1,6 @@
 'use client'
 import { useRef } from 'react'
 import type { CaptureView } from '@/lib/capture/pipeline'
-import type { DictationLang } from '@/lib/transcribe'
 import { REVIEW_MS } from '@/lib/queue/review'
 import { t } from '@/i18n/pl'
 
@@ -26,11 +25,13 @@ import { t } from '@/i18n/pl'
  * correlating the two unrelated id spaces.
  *
  * The chip itself is status-only (Task 8): no audio player, no type switch,
- * no tap-to-edit form. A recording under review offers po polsku / po
- * rosyjsku and usuń, with a bar draining toward approval; a failed
- * recognition offers ponów instead. There is nothing here for a card the
- * recording turned into — an on-screen recording is by definition still
- * uploaded, failed, or under review (see `listOnScreen`).
+ * no tap-to-edit form. A recording under review offers only usuń, with a bar
+ * draining toward approval — a wrong language is not fixed here (Task 4
+ * removed re-recognition); it is deleted and recorded again with the
+ * matching PL/RU button on /dodaj. A failed recognition offers ponów
+ * instead. There is nothing here for a card the recording turned into — an
+ * on-screen recording is by definition still uploaded, failed, or under
+ * review (see `listOnScreen`).
  */
 export type ChipItem =
   | { kind: 'outbox'; id: string; createdAt: number }
@@ -55,14 +56,12 @@ export function CaptureChip({
   item,
   onRetry,
   onDelete,
-  onRelanguage,
   pending = false,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
   onDelete: (item: ChipItem) => void
-  onRelanguage: (id: string, lang: DictationLang) => void
-  /** A recognition for this recording (ponów or a re-recognition) is in flight; its language controls are disabled until it lands. */
+  /** A ponów recognition for this recording is in flight; its retry control is disabled until it lands. */
   pending?: boolean
 }) {
   // A ref, not state: bookkeeping between one pointerdown and the pointerup
@@ -110,36 +109,11 @@ export function CaptureChip({
           {capture.error && <p className="text-sm text-red-600">{capture.error}</p>}
         </div>
         {capture.status === 'failed' && (
-          <button onClick={() => onRetry(capture.id)} {...own} className="text-sm underline">
+          <button onClick={() => onRetry(capture.id)} {...own} disabled={pending} className="text-sm underline disabled:text-neutral-400">
             {t.retry}
           </button>
         )}
       </div>
-
-      {/* Recognition is Polish by default; a two-language recognizer
-          demonstrably swallows Russian (spoken "склеп" came back "sklep"), so a
-          Russian recording is re-recognised here, from its stored audio, while
-          it is still under review — which restarts the 10 s. */}
-      {capture.inReview && (
-        <div className="flex items-center gap-3 pl-2 text-sm">
-          <span className="text-neutral-500">{t.recognizeAs}</span>
-          {([
-            ['pl', t.asPolish],
-            ['ru', t.asRussian],
-          ] as const).map(([lang, label]) => (
-            <button
-              key={lang}
-              onClick={() => onRelanguage(capture.id, lang)}
-              {...own}
-              disabled={pending}
-              className="underline disabled:text-neutral-400"
-            >
-              {label}
-            </button>
-          ))}
-          {pending && <span className="text-neutral-500">{t.transcribing}</span>}
-        </div>
-      )}
 
       <button onClick={() => onDelete(item)} {...own} className="self-end text-sm text-red-600 underline">
         {t.deleteItem}

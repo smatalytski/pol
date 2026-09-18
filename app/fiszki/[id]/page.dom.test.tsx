@@ -44,8 +44,8 @@ function cardRow(over: Partial<CardRow> = {}): CardRow {
   }
 }
 
-/** GET returns the card, its capture id and whether a job is in flight; every other verb succeeds. */
-function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1', generating = false) {
+/** GET returns the card and whether a job is in flight; every other verb succeeds. */
+function stubFetch(card: () => CardRow, generating = false) {
   const calls: Array<{ url: string; method: string; body?: unknown }> = []
   vi.stubGlobal(
     'fetch',
@@ -55,7 +55,7 @@ function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1', gene
       if (method === 'GET') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: card(), captureId, generating }),
+          json: () => Promise.resolve({ card: card(), generating }),
         }) as unknown as Promise<Response>
       }
       return Promise.resolve({
@@ -75,7 +75,7 @@ function stubFailingWrites(card: () => CardRow, status = 502) {
       if ((init?.method ?? 'GET') === 'GET') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: card(), captureId: 'cap-1' }),
+          json: () => Promise.resolve({ card: card() }),
         }) as unknown as Promise<Response>
       }
       return Promise.resolve({
@@ -133,7 +133,7 @@ describe('CardDetailPage', () => {
         if (method === 'POST') type = 'pl_to_pl'
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: { ...noun(), type }, captureId: null, duplicateOf: null }),
+          json: () => Promise.resolve({ card: { ...noun(), type }, duplicateOf: null }),
         }) as unknown as Promise<Response>
       }),
     )
@@ -159,7 +159,7 @@ describe('CardDetailPage', () => {
           json: () =>
             Promise.resolve(
               (init?.method ?? 'GET') === 'GET'
-                ? { card: noun(), captureId: null }
+                ? { card: noun() }
                 : { card: noun(), duplicateOf: 'other' },
             ),
         }) as unknown as Promise<Response>,
@@ -289,7 +289,7 @@ describe('CardDetailPage', () => {
         }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card, captureId: null, generating }),
+          json: () => Promise.resolve({ card, generating }),
         }) as unknown as Promise<Response>
       }),
     )
@@ -306,11 +306,11 @@ describe('CardDetailPage', () => {
     expect(screen.queryByText(t.generating)).toBeNull()
   })
 
-  it('disables the generating controls while a job is in flight', async () => {
-    stubFetch(() => cardRow({ status: 'needs_input', promptText: null }), 'cap-1', true)
+  it('disables the regenerate control while a job is in flight', async () => {
+    stubFetch(() => cardRow({ status: 'needs_input', promptText: null }), true)
     render(<CardPage />)
     expect(await screen.findByText(t.generating)).toBeTruthy()
-    expect((screen.getByText(t.asRussian) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByText(t.regenerate) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('sends a numeric suspendedAt when suspending a live card', async () => {
@@ -374,142 +374,27 @@ describe('CardDetailPage', () => {
     expect(await screen.findByText(t.cardNotFound)).toBeTruthy()
   })
 
-  // Dictation is recognised as Polish; a Russian recording is repaired from
-  // the stored audio, which is the only thing that still knows what was said.
-  it('offers both languages when the card came from a recording', async () => {
+  // Task 4: re-recognition is gone — a wrong-language recording is deleted
+  // and recorded again with the matching button on /dodaj, not repaired here.
+  it('offers no language controls on the card detail page', async () => {
     stubFetch(() => cardRow())
     render(<CardPage />)
-    expect(await screen.findByText(t.asRussian)).toBeTruthy()
-    expect(screen.getByText(t.asPolish)).toBeTruthy()
-  })
-
-  it('offers no language controls for a card with no recording behind it', async () => {
-    stubFetch(() => cardRow(), null)
-    render(<CardPage />)
     await screen.findByDisplayValue('z\u0142o\u015bliwy')
+    expect(screen.queryByText(t.asPolish)).toBeNull()
     expect(screen.queryByText(t.asRussian)).toBeNull()
   })
 
-  it('re-recognises this card recording in Russian and reloads it', async () => {
-    const calls = stubFetch(() => cardRow())
-    render(<CardPage />)
-    const button = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    const post = calls.find((c) => c.method === 'POST')
-    expect(post?.url).toBe('/api/captures/cap-1/jezyk')
-    expect(post?.body).toEqual({ lang: 'ru' })
-    expect(calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(1)
-  })
-
-  // Ruling 14: re-recognition waits on Speech-to-Text in the request.
-  // Without a visible pending state the user taps again and starts a second
-  // one on the same capture.
-  it('disables the language controls and shows progress while re-recognition runs', async () => {
-    let finish!: (v: unknown) => void
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'GET') {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ card: cardRow(), captureId: 'cap-1' }),
-          }) as unknown as Promise<Response>
-        }
-        return new Promise<unknown>((resolve) => {
-          finish = resolve
-        }) as Promise<Response>
-      }),
-    )
-    render(<CardPage />)
-    const ru = (await screen.findByText(t.asRussian)) as HTMLButtonElement
-    const pl = screen.getByText(t.asPolish) as HTMLButtonElement
-    await act(async () => {
-      fireEvent.click(ru)
-    })
-    expect(ru.disabled).toBe(true)
-    expect(pl.disabled).toBe(true)
-    expect(screen.getByText(t.transcribing)).toBeTruthy()
-
-    // queued: true means the rebuild is now waiting in the generation queue,
-    // not finished — so the buttons stay disabled and generowanie… replaces
-    // rozpoznawanie… rather than the controls going back to normal.
-    await act(async () => {
-      finish({ ok: true, json: () => Promise.resolve({ queued: true, error: null }) })
-    })
-    await vi.waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
-    expect(screen.getByText(t.generating)).toBeTruthy()
-    expect((screen.getByText(t.asRussian) as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  // Re-recognition calls Speech-to-Text, and the route answers 200 with the
-  // bad news in `error` rather than failing the request — so a page that only
-  // checks res.ok would show nothing at all.
-  it('shows an error when re-recognition reports one in a 200 response', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'GET') {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ card: cardRow(), captureId: 'cap-1' }),
-          }) as unknown as Promise<Response>
-        }
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ queued: false, error: 'transcription failed: unintelligible' }),
-        }) as unknown as Promise<Response>
-      }),
-    )
-    render(<CardPage />)
-    const button = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
-  })
-
-  // Re-recognition is Speech-to-Text plus a queued Gemini rebuild (Task 5);
-  // when the route answers queued: true there is no rebuilt card yet, so the
-  // page shows generowanie… instead of reloading straight away.
   it('links to the card’s topic', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() =>
         Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: cardRow(), captureId: null, generating: false, topic: { id: 't1', name: 'U lekarza' } }),
+          json: () => Promise.resolve({ card: cardRow(), generating: false, topic: { id: 't1', name: 'U lekarza' } }),
         }) as unknown as Promise<Response>,
       ),
     )
     render(<CardPage />)
     expect((await screen.findByText('U lekarza')).closest('a')?.getAttribute('href')).toBe('/tematy/t1')
-  })
-
-  it('shows generowanie… after a re-recognition queues the rebuild', async () => {
-    let generating = false
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'POST') {
-          generating = true
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ queued: true, error: null }),
-          }) as unknown as Promise<Response>
-        }
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ card: cardRow(), captureId: 'cap-1', generating }),
-        }) as unknown as Promise<Response>
-      }),
-    )
-    render(<CardPage />)
-    const button = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    expect(await screen.findByText(t.generating)).toBeTruthy()
   })
 })

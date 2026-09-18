@@ -122,7 +122,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
   it('turns the button into the recording state on pointerdown and back on pointerup', async () => {
     stubMic()
     render(<AddPage />)
-    const button = screen.getByRole('button', { name: t.holdToRecord })
+    const button = screen.getByRole('button', { name: t.recordPolish })
     expect(button.className).toContain('bg-black')
 
     // Let getUserMedia (and the rest of the factory's setup) resolve before
@@ -143,7 +143,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
   it('cleans up the same way when the gesture is cancelled instead of released', async () => {
     stubMic()
     render(<AddPage />)
-    const button = screen.getByRole('button', { name: t.holdToRecord })
+    const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
       fireEvent.pointerDown(button)
@@ -186,14 +186,14 @@ describe('AddPage mic-denied screen', () => {
     Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
 
     render(<AddPage />)
-    const button = screen.getByRole('button', { name: t.holdToRecord })
+    const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
       fireEvent.pointerDown(button)
     })
 
     expect(await screen.findByText(t.micDenied)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: t.holdToRecord })).toBeNull()
+    expect(screen.queryByRole('button', { name: t.recordPolish })).toBeNull()
   })
 })
 
@@ -204,7 +204,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
   })
 
   it('shows a recording with no server row yet as an uploading chip, with no replay or retry controls', async () => {
-    await enqueue({ id: 'local-1', bytes: new Uint8Array([1]).buffer, mime: 'audio/webm', createdAt: Date.now() })
+    await enqueue({ id: 'local-1', bytes: new Uint8Array([1]).buffer, mime: 'audio/webm', createdAt: Date.now(), lang: 'pl' })
 
     vi.stubGlobal(
       'fetch',
@@ -263,7 +263,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
     )
 
     const { unmount } = render(<AddPage />)
-    const button = screen.getByRole('button', { name: t.holdToRecord })
+    const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
       fireEvent.pointerDown(button)
@@ -333,7 +333,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
     )
 
     const { unmount } = render(<AddPage />)
-    const button = screen.getByRole('button', { name: t.holdToRecord })
+    const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
       fireEvent.pointerDown(button)
@@ -453,7 +453,7 @@ describe('AddPage layout', () => {
       ),
     )
     render(<AddPage />)
-    const button = await screen.findByText(t.holdToRecord)
+    const button = await screen.findByRole('button', { name: t.recordPolish })
     const list = screen.getByRole('list')
     expect(list.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
@@ -481,7 +481,7 @@ describe('AddPage layout', () => {
       ),
     )
     render(<AddPage />)
-    const bar = (await screen.findByText(t.holdToRecord)).closest('div')!
+    const bar = (await screen.findByRole('button', { name: t.recordPolish })).closest('div')!
     expect(bar.className).toContain('fixed')
     expect(bar.className).toContain('bottom-0')
     expect(bar.className).not.toContain('sticky')
@@ -500,44 +500,45 @@ describe('AddPage layout', () => {
       ),
     )
     render(<AddPage />)
-    await screen.findByText(t.holdToRecord)
+    await screen.findByRole('button', { name: t.recordPolish })
     expect(screen.getByRole('list').className).toMatch(/\bpb-/)
   })
 })
 
-describe('AddPage re-recognition', () => {
+describe('AddPage recording language (Task 4: PL/RU buttons, no on-screen language controls)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
-  it('asks the server to re-recognise a capture in Russian, then refreshes', async () => {
+  it.each([
+    ['recordPolish', 'pl'],
+    ['recordRussian', 'ru'],
+  ] as const)('uploads a recording held on %s with lang=%s', async (key, lang) => {
     stubMic()
-    const calls: Array<{ url: string; method: string; body?: unknown }> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
-        const method = init?.method ?? 'GET'
-        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              captures: [{ ...captureRow('cap-1', 'transcribed'), transcript: 'sklep' }],
-            }),
-        }) as unknown as Promise<Response>
-      }),
-    )
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    const posts: FormData[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') posts.push(init.body as FormData)
+      return Promise.resolve({ ok: true, status: 202, json: () => Promise.resolve({ captures: [], captureId: 'c' }) }) as unknown as Promise<Response>
+    }))
     render(<AddPage />)
-    const button = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    const post = calls.find((c) => c.method === 'POST')
-    expect(post?.url).toBe('/api/captures/cap-1/jezyk')
-    expect(post?.body).toEqual({ lang: 'ru' })
-    // The refreshed transcript has to arrive without the user reloading.
-    expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/captures?since=')).length).toBeGreaterThan(1)
+    const button = screen.getByRole('button', { name: t[key] })
+    fireEvent.pointerDown(button)
+    await act(async () => { await new Promise((r) => setTimeout(r, 350)) })
+    fireEvent.pointerUp(button)
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0].get('lang')).toBe(lang)
+  })
+
+  it('offers no language controls on a recording under review', async () => {
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }] }) }) as unknown as Promise<Response>,
+    ))
+    render(<AddPage />)
+    await screen.findByText('kot')
+    expect(screen.queryByText(t.asPolish)).toBeNull()
+    expect(screen.queryByText(t.asRussian)).toBeNull()
   })
 })
 
@@ -588,16 +589,14 @@ describe('AddPage review fade', () => {
     let list: CaptureView[] = [captureRow('cap-1', 'transcribed')]
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: list }) }) as unknown as Promise<Response>))
     render(<AddPage />)
-    expect(await screen.findByText(t.asRussian)).toBeTruthy()
+    expect(await screen.findByRole('listitem')).toBeTruthy()
     list = []
-    await waitFor(() => expect(screen.queryByText(t.asRussian)).toBeNull(), { timeout: 3_000 })
+    await waitFor(() => expect(screen.queryByRole('listitem')).toBeNull(), { timeout: 3_000 })
   })
 })
 
-// Ruling 14: a re-recognition used to be Speech-to-Text plus a Gemini call, and
-// ~30 s was normal. With nothing on screen the user taps again and starts a
-// second re-recognition (rerecognize) on the same capture — and a failure used
-// to show nothing at all.
+// A failed or refused chip action would otherwise look exactly like a dead
+// button — with nothing on screen the user taps again.
 describe('AddPage slow and failing chip controls', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -607,16 +606,6 @@ describe('AddPage slow and failing chip controls', () => {
   const chip = {
     ...captureRow('cap-1', 'transcribed'),
     transcript: 'kot',
-  }
-
-  function deferred<T>() {
-    let resolve!: (v: T) => void
-    let reject!: (e: unknown) => void
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res
-      reject = rej
-    })
-    return { promise, resolve, reject }
   }
 
   /** Lists `chip`; every other request is answered by `write`. */
@@ -631,52 +620,6 @@ describe('AddPage slow and failing chip controls', () => {
       }),
     )
   }
-
-  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
-
-  it('disables the chip controls and says so while a re-recognition is in flight', async () => {
-    stubMic()
-    const post = deferred<unknown>()
-    stubWrites(() => post.promise)
-    render(<AddPage />)
-    const control = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(control)
-    })
-
-    expect(screen.getByText(t.transcribing)).toBeTruthy()
-    expect(button(t.asRussian).disabled).toBe(true)
-    expect(button(t.asPolish).disabled).toBe(true)
-
-    await act(async () => {
-      post.resolve({ ok: true, json: () => Promise.resolve({ queued: false, error: null }) })
-    })
-    await waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
-    expect(button(t.asRussian).disabled).toBe(false)
-  })
-
-  it('shows a notice when re-recognition is refused', async () => {
-    stubMic()
-    stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
-    render(<AddPage />)
-    const control = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(control)
-    })
-    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
-    expect(button(t.asRussian).disabled).toBe(false)
-  })
-
-  it('shows a notice when re-recognition never reaches the server', async () => {
-    stubMic()
-    stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
-    render(<AddPage />)
-    const control = await screen.findByText(t.asRussian)
-    await act(async () => {
-      fireEvent.click(control)
-    })
-    expect(await screen.findByText(t.languageFailed)).toBeTruthy()
-  })
 
   it('shows a notice when a delete is refused', async () => {
     stubMic()

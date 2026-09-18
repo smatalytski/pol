@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearOutbox, enqueue, flush, listOutbox } from './outbox'
 
-const item = (id: string) => ({ id, bytes: new Uint8Array([1, 2, 3]).buffer, mime: 'audio/webm', createdAt: 1 })
+const item = (id: string) => ({ id, bytes: new Uint8Array([1, 2, 3]).buffer, mime: 'audio/webm', createdAt: 1, lang: 'pl' as const })
 
 beforeEach(async () => {
   await clearOutbox()
@@ -97,8 +97,13 @@ describe('outbox', () => {
 
   it('round-trips boundary byte values unchanged through IndexedDB', async () => {
     const bytes = new Uint8Array([0, 1, 2, 253, 254, 255]).buffer
-    await enqueue({ id: 'a', bytes, mime: 'audio/webm', createdAt: 1 })
+    await enqueue({ id: 'a', bytes, mime: 'audio/webm', createdAt: 1, lang: 'pl' })
     const all = await listOutbox()
     expect([...new Uint8Array(all[0].bytes)]).toEqual([0, 1, 2, 253, 254, 255])
+  })
+
+  it('keeps the language of a recording through the outbox', async () => {
+    await enqueue({ id: 'a', bytes: new ArrayBuffer(1), mime: 'audio/webm', createdAt: 1, lang: 'ru' })
+    expect((await listOutbox())[0].lang).toBe('ru')
   })
 })
