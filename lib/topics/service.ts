@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, max, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { Db } from '../db/client'
-import { cards, generationJobs, suggestions, topics } from '../db/schema'
+import { captures, cards, generationJobs, suggestions, topics } from '../db/schema'
 import { answerKey } from '../cards/answer-key'
 import type { Suggester } from '../generate'
 import { enqueueJob, type JobRow } from '../queue/jobs'
@@ -121,5 +121,62 @@ export async function runSuggest(deps: { db: Db; suggester: Suggester }, job: Jo
         })
         .run()
     }
+  })
+}
+
+/**
+ * Accepts a round in one transaction (§6.3): every `proposed` item of it is
+ * rejected if listed, otherwise accepted — becoming an audio-less capture
+ * with an ordinary `new` job, so card generation, dedup and the pending list
+ * are the dictation ones. Only `proposed` items change, so a repeated request
+ * is harmless. `next` also queues the following round, unless one is already
+ * in flight.
+ */
+export function acceptRound(
+  db: Db,
+  topicId: string,
+  round: number,
+  rejected: readonly string[],
+  next: RoundParams | null,
+  now: Date,
+): { accepted: number; nextJobId: string | null } | null {
+  return db.transaction((tx) => {
+    const t = tx as unknown as Db
+    if (!t.select({ id: topics.id }).from(topics).where(eq(topics.id, topicId)).get()) return null
+    const reject = new Set(rejected)
+    const proposed = t
+      .select()
+      .from(suggestions)
+      .where(and(eq(suggestions.topicId, topicId), eq(suggestions.round, round), eq(suggestions.status, 'proposed')))
+      .orderBy(suggestions.createdAt, sql`rowid`)
+      .all()
+    let accepted = 0
+    for (const s of proposed) {
+      if (reject.has(s.id)) {
+        t.update(suggestions).set({ status: 'rejected' }).where(eq(suggestions.id, s.id)).run()
+        continue
+      }
+      const captureId = randomUUID()
+      t.insert(captures)
+        .values({
+          id: captureId,
+          audioMediaId: null,
+          transcript: s.answerPl,
+          status: 'queued',
+          error: null,
+          generationJson: null,
+          cardId: null,
+          createdAt: now.getTime(),
+          transcribedAt: null,
+          duplicateOf: null,
+          topicId,
+          glossRu: s.glossRu,
+        })
+        .run()
+      enqueueJob(t, { kind: 'new', captureId }, now)
+      t.update(suggestions).set({ status: 'accepted', captureId }).where(eq(suggestions.id, s.id)).run()
+      accepted++
+    }
+    return { accepted, nextJobId: next ? enqueueSuggest(t, topicId, next, now) : null }
   })
 }

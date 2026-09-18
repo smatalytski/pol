@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
-import { cards, generationJobs, suggestions, topics } from '../db/schema'
+import { captures, cards, generationJobs, suggestions, topics } from '../db/schema'
 import { createCard, deleteCard } from '../cards/service'
 import type { Suggestion, Suggester } from '../generate'
 import { enqueueJob } from '../queue/jobs'
-import { activeSuggestJob, enqueueSuggest, latestRound, parseRoundJob, runSuggest } from './service'
+import { acceptRound, activeSuggestJob, enqueueSuggest, latestRound, parseRoundJob, runSuggest } from './service'
 
 type Db = ReturnType<typeof createTestDb>['db']
 const NOW = new Date('2026-09-18T10:00:00')
@@ -153,5 +153,63 @@ describe('runSuggest', () => {
     const s = suggester([it_('a')])
     await runSuggest({ db, suggester: s }, jobRow(db, jobId), NOW)
     expect(s.suggest).not.toHaveBeenCalled()
+  })
+})
+
+describe('acceptRound', () => {
+  function round1(db: Db) {
+    topic(db)
+    return ['gorączka', 'katar', 'osłuchać'].map((w) => suggestion(db, w))
+  }
+
+  it('turns every item not struck out into a queued, audio-less capture with a new job', () => {
+    const { db } = createTestDb()
+    const [a, b, c] = round1(db)
+    expect(acceptRound(db, 't1', 1, [b], null, NOW)).toEqual({ accepted: 2, nextJobId: null })
+
+    const caps = db.select().from(captures).all()
+    expect(caps.map((x) => [x.transcript, x.status, x.audioMediaId, x.topicId, x.glossRu]).sort()).toEqual([
+      ['gorączka', 'queued', null, 't1', 'перевод'],
+      ['osłuchać', 'queued', null, 't1', 'перевод'],
+    ])
+    const jobs = db.select().from(generationJobs).all()
+    expect(jobs.map((j) => j.kind)).toEqual(['new', 'new'])
+    expect(new Set(jobs.map((j) => j.captureId))).toEqual(new Set(caps.map((x) => x.id)))
+
+    const byId = new Map(db.select().from(suggestions).all().map((s) => [s.id, s]))
+    expect(byId.get(a)!.status).toBe('accepted')
+    expect(byId.get(a)!.captureId).not.toBeNull()
+    expect(byId.get(b)!).toMatchObject({ status: 'rejected', captureId: null })
+    expect(byId.get(c)!.status).toBe('accepted')
+  })
+
+  it('changes nothing when repeated', () => {
+    const { db } = createTestDb()
+    round1(db)
+    acceptRound(db, 't1', 1, [], null, NOW)
+    expect(acceptRound(db, 't1', 1, [], null, NOW)).toEqual({ accepted: 0, nextJobId: null })
+    expect(db.select().from(captures).all()).toHaveLength(3)
+  })
+
+  it('touches only the given round', () => {
+    const { db } = createTestDb()
+    round1(db)
+    suggestion(db, 'L4', { round: 2 })
+    acceptRound(db, 't1', 2, [], null, NOW)
+    expect(db.select().from(suggestions).where(eq(suggestions.round, 1)).all().every((s) => s.status === 'proposed')).toBe(true)
+  })
+
+  it('queues exactly one next round when asked', () => {
+    const { db } = createTestDb()
+    round1(db)
+    const { nextJobId } = acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy' }, NOW)!
+    expect(parseRoundJob(jobRow(db, nextJobId!).paramsJson)).toEqual({ round: 2, count: 5, mix: 'frazy' })
+    expect(acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy' }, NOW)!.nextJobId).toBeNull()
+    expect(db.select().from(generationJobs).where(eq(generationJobs.kind, 'suggest')).all()).toHaveLength(1)
+  })
+
+  it('answers null for an unknown topic', () => {
+    const { db } = createTestDb()
+    expect(acceptRound(db, 'nope', 1, [], null, NOW)).toBeNull()
   })
 })

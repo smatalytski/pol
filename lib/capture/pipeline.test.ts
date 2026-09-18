@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
-import { cards, captures, generationJobs, media } from '../db/schema'
+import { cards, captures, generationJobs, media, suggestions, topics } from '../db/schema'
 import { createCard, deleteCard, type CreateCardInput } from '../cards/service'
 import { GenerationError, type Generator, type GeneratedCard } from '../generate'
 import type { Transcriber } from '../transcribe'
 import { enqueueJob } from '../queue/jobs'
+import { acceptRound } from '../topics/service'
 import {
   createCapture, recognizeCapture, recognizeStranded, rerecognize, listOnScreen, pendingCaptures, knownCardFor,
   generateNewCard, giveUpNewCard, applyRerecognized, giveUpRerecognized, jobHandlers, creatorCaptureId,
@@ -847,5 +848,49 @@ describe('creatorCaptureId', () => {
     const b = await recognized(d, 'zloslivy', new Date(NOW.getTime() + 1))
     await generateNewCard(d, b, NOW)
     expect(creatorCaptureId(d.db, row(d, a).cardId!)).toBe(a)
+  })
+})
+
+describe('a topic item becoming a card', () => {
+  function accepted(d: ReturnType<typeof deps>) {
+    d.db.insert(topics).values({ id: 't1', name: null, context: 'u lekarza z dzieckiem', suspendedAt: null, createdAt: NOW.getTime() }).run()
+    d.db.insert(suggestions).values({
+      id: 's1', topicId: 't1', round: 1, answerPl: 'złośliwy', glossRu: 'злобный', kind: 'slowo',
+      status: 'proposed', captureId: null, createdAt: NOW.getTime(),
+    }).run()
+    acceptRound(d.db, 't1', 1, [], null, NOW)
+    return d.db.select().from(captures).get()!.id
+  }
+
+  it('sends the gloss and the situation, and files the card under the topic', async () => {
+    const d = deps()
+    const id = accepted(d)
+    await generateNewCard(d, id, NOW)
+    expect(d.generator.fromDictation).toHaveBeenCalledWith('złośliwy', { glossRu: 'злобный', context: 'u lekarza z dzieckiem' })
+    expect(d.db.select().from(cards).get()!.topicId).toBe('t1')
+    expect(row(d, id).status).toBe('generated')
+  })
+
+  it('keeps the word under the topic when generation gives up', () => {
+    const d = deps()
+    const id = accepted(d)
+    giveUpNewCard(d.db, id, 'unusable', NOW)
+    expect(d.db.select().from(cards).get()).toMatchObject({ status: 'needs_input', topicId: 't1' })
+  })
+
+  it('leaves an existing card’s topic alone when the item is a duplicate', async () => {
+    const d = deps()
+    const existing = createCard(d.db, input(), NOW).cardId
+    const id = accepted(d)
+    await generateNewCard(d, id, NOW)
+    expect(d.db.select().from(cards).all()).toHaveLength(1)
+    expect(d.db.select().from(cards).get()!).toMatchObject({ id: existing, topicId: null })
+  })
+
+  it('calls a plain dictation with the transcript alone, as before', async () => {
+    const d = deps()
+    const id = await recognized(d, 'zloslivy')
+    await generateNewCard(d, id, NOW)
+    expect(d.generator.fromDictation).toHaveBeenCalledWith('zloslivy')
   })
 })

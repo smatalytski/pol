@@ -34,6 +34,8 @@ export type CreateCardInput = {
    * only ever consulted when the primary lookup found nothing.
    */
   fallbackAnswerKey?: string
+  /** The topic a generated item belongs to (spec 2026-09-18-topic-generation §3.4). A duplicate keeps its own. */
+  topicId?: string | null
 }
 
 export type DuplicateLookup = {
@@ -106,6 +108,7 @@ export function createCard(
       wordKind: input.wordKind,
       formsJson: input.formsJson,
       status: input.status,
+      topicId: input.topicId ?? null,
       suspendedAt: null,
       createdAt: now.getTime(),
       updatedAt: now.getTime(),
