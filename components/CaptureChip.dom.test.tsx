@@ -111,6 +111,15 @@ describe('CaptureChip', () => {
     expect(screen.queryByText(t.transcribing)).toBeNull()
   })
 
+  it('disables ponów while a retry is pending, and enables it otherwise', () => {
+    const failed = captureItem({ status: 'failed', transcript: null, error: 'unintelligible', inReview: false, reviewRemainingMs: null })
+    const { rerender } = render(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} pending />)
+    expect((screen.getByText(t.retry) as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} pending={false} />)
+    expect((screen.getByText(t.retry) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('says już masz for a word already in the deck', () => {
     render(<CaptureChip item={captureItem({ duplicateOf: 'card-9' })} onRetry={vi.fn()} onDelete={vi.fn()} />)
     expect(screen.getByText(t.alreadyHave)).toBeTruthy()
