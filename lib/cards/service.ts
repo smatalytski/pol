@@ -258,8 +258,9 @@ export async function regenerateCard(
   }
 
   const fields = toCardFields(await generator.fromDictation(card.answerPl))
-  // keepAnswer, approved by the user: a clash still writes what was missing.
-  return applyGeneratedFields(db, card, fields, now, { onClash: 'keepAnswer' })
+  // On a clash the card keeps its answer and still gets what was missing —
+  // see applyGeneratedFields's doc comment.
+  return applyGeneratedFields(db, card, fields, now)
 }
 
 /** The eight fields a generation produces, as `toCardFields` returns them. */
@@ -325,38 +326,24 @@ export function setCardType(
 }
 
 /**
- * What `applyGeneratedFields` does when the generated answer clashes with
- * another live card of the target type:
- * - `keepAnswer` — `regenerateCard`, repairing a needs_input card. The card
- *   keeps its answer identity (type, answer, kind, forms: on a pl_to_pl card
- *   the forms ARE the answer) and still gets the generated prompt, hint,
- *   examples and grammar note, which are what it was missing.
- * - `untouched` — `applyRerecognized`, rebuilding a card a recording created. The
- *   new prompt belongs to the new word, so writing it onto the old answer
- *   would build a card out of two words; the card is left exactly as it was.
- */
-export type ClashPolicy = 'keepAnswer' | 'untouched'
-
-/**
- * Writes a fresh generation over an existing card, with one collision check
- * shared by everything that re-generates: `regenerateCard` here, and
- * `applyRerecognized` in the capture pipeline. Each caller names its policy for a
- * clash (see `ClashPolicy`).
+ * Writes a fresh generation over an existing card, with one collision check:
+ * `regenerateCard` is the only caller, repairing a needs_input card. On a
+ * clash the card keeps its answer identity (type, answer, kind, forms: on a
+ * pl_to_pl card the forms ARE the answer) and still gets the generated
+ * prompt, hint, examples and grammar note, which are what it was missing.
  *
  * Writing the generated answer is the point of re-generating at all — it is
- * what restores diacritics a mangled transcript lost, and what replaces a
- * Polish look-alike after a recording turns out to have been Russian. But it
- * also re-keys the card, so when a live card of the same type already owns
- * that key, the new answer is not written and the clash is reported instead:
- * forking the deck into two cards sharing one answer_key is worse than an
- * answer that stays wrong and says so.
+ * what restores diacritics a mangled transcript lost. But it also re-keys the
+ * card, so when a live card of the same type already owns that key, the new
+ * answer is not written and the clash is reported instead: forking the deck
+ * into two cards sharing one answer_key is worse than an answer that stays
+ * wrong and says so.
  */
 export function applyGeneratedFields(
   db: Db,
   card: CardRow,
   fields: GeneratedFields,
   now: Date,
-  opts: { onClash: ClashPolicy },
 ): { card: CardRow; duplicateOf: string | null } {
   // Spec §5: a pl_to_pl card's whole answer is its forms. If this generation
   // left the word with none to drill — a kind without forms, or a kind with
@@ -371,7 +358,6 @@ export function applyGeneratedFields(
   const owner = findDuplicate(db, { type, answerPl: fields.answerPl })
   const duplicateOf = owner !== null && owner !== card.id ? owner : null
   if (!duplicateOf) return { card: updateCard(db, card.id, { ...fields, type }, now), duplicateOf: null }
-  if (opts.onClash === 'untouched') return { card, duplicateOf }
   const patch: UpdateCardPatch = {
     promptText: fields.promptText,
     promptHint: fields.promptHint,
