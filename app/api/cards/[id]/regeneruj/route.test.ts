@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
+import type { GeneratedCard } from '@/lib/generate'
 
 const tmpDir = mkdtempSync(path.join(tmpdir(), 'fiszki-regen-route-'))
 process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
@@ -15,7 +16,10 @@ const fromDictationMock = vi.fn().mockResolvedValue({
   example_pl: 'Czuję się zdrów jak ryba.',
   example_ru: 'Чувствую себя здоровым.',
   grammar_note: 'краткая форма',
-})
+  kind: 'fraza',
+  forms_basic: [],
+  forms_extended: [],
+} satisfies GeneratedCard)
 
 // Mocks only the generation seam, so the route's own db lookups run unmocked.
 vi.mock('@/lib/generate', async (importOriginal) => {

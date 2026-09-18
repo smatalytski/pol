@@ -3,20 +3,23 @@ import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { cards, captures, media } from '../db/schema'
 import { deleteCard } from '../cards/service'
-import type { Generator } from '../generate'
+import type { Generator, GeneratedCard } from '../generate'
 import type { Transcriber } from '../transcribe'
 import { createCapture, listCaptures, processCapture, retranscribe } from './pipeline'
 
 const NOW = new Date('2026-09-12T10:00:00')
 const AUDIO = { bytes: new Uint8Array([9, 9, 9]), mime: 'audio/webm' }
 
-const GENERATED = {
+const GENERATED: GeneratedCard = {
   answer_pl: 'złośliwy',
   prompt_ru: 'злобный',
   prompt_hint: 'прилагательное',
   example_pl: 'Zrobił to ze złośliwości.',
   example_ru: 'Он сделал это из злобы.',
   grammar_note: '',
+  kind: 'przymiotnik',
+  forms_basic: [{ label: 'przysłówek', value: 'złośliwie' }],
+  forms_extended: [],
 }
 
 function deps(over: { transcriber?: Partial<Transcriber>; generator?: Partial<Generator> } = {}) {
@@ -223,13 +226,16 @@ describe('listCaptures', () => {
 // and a Russian recording is fixed afterwards — which only works from the
 // stored audio, since the wrong transcript carries no trace of what was said.
 describe('retranscribe', () => {
-  const RU_GENERATED = {
+  const RU_GENERATED: GeneratedCard = {
     answer_pl: 'krypta',
     prompt_ru: 'склеп',
     prompt_hint: '',
     example_pl: 'Krypta pod kościołem.',
     example_ru: 'Склеп под церковью.',
     grammar_note: 'rzeczownik rodzaju żeńskiego',
+    kind: 'rzeczownik',
+    forms_basic: [{ label: 'M. l.mn.', value: 'krypty' }],
+    forms_extended: [],
   }
 
   function strandedInPolish() {

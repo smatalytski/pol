@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import type { GeneratedCard } from '@/lib/generate'
 
 const tmpDir = mkdtempSync(path.join(tmpdir(), 'fiszki-jezyk-route-'))
 process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
@@ -15,7 +16,10 @@ const fromDictationMock = vi.fn().mockResolvedValue({
   example_pl: 'Krypta pod kościołem.',
   example_ru: 'Склеп под церковью.',
   grammar_note: 'rzeczownik',
-})
+  kind: 'rzeczownik',
+  forms_basic: [{ label: 'M. l.mn.', value: 'krypty' }],
+  forms_extended: [],
+} satisfies GeneratedCard)
 
 vi.mock('@/lib/transcribe', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/transcribe')>()
