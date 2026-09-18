@@ -3,9 +3,13 @@ import { z } from 'zod'
 import {
   GeneratedCardSchema,
   GenerationError,
+  SuggestionSchema,
+  dictationMessage,
   geminiGenerator,
+  geminiSuggester,
   isRetryableRequestError,
   responseSchemaFor,
+  suggestMessage,
   toCardFields,
 } from './index'
 
@@ -254,5 +258,103 @@ describe('geminiGenerator model resolution', () => {
     vi.stubEnv('FISZKI_MODEL', undefined)
     expect(() => geminiGenerator({ generate: ok(FULL) as never })).toThrow(GenerationError)
     expect(() => geminiGenerator({ generate: ok(FULL) as never })).toThrow(/FISZKI_MODEL/)
+  })
+})
+
+describe('responseSchemaFor with an enum inside array rows', () => {
+  // Type-level change: before it, this schema does not typecheck
+  // (RowSchema allowed strings only). tsc is the failing gate here.
+  it('emits the enum for a row field', () => {
+    // Same double-cast as the other nested-`items` assertions in this file
+    // (see the forms_basic/forms_extended test above): responseSchemaFor's
+    // return type carries an index signature, not this literal shape, so a
+    // direct `as` does not sufficiently overlap.
+    const out = responseSchemaFor(SuggestionSchema) as unknown as {
+      properties: { items: { items: { properties: Record<string, unknown> } } }
+    }
+    expect(out.properties.items.items.properties.kind).toEqual({
+      type: 'STRING', enum: ['slowo', 'fraza'], description: expect.any(String),
+    })
+  })
+})
+
+describe('dictationMessage', () => {
+  it('is unchanged for a plain dictation', () => {
+    expect(dictationMessage('kot')).toBe('Продиктовано: «kot»\n\nСделай карточку.')
+  })
+
+  it('names the intended meaning and the situation for a topic item', () => {
+    const m = dictationMessage('gorączka', { glossRu: 'температура, жар', context: 'u lekarza z dzieckiem' })
+    expect(m).toContain('«температура, жар»')
+    expect(m).toContain('«u lekarza z dzieckiem»')
+    expect(m.endsWith('Сделай карточку.')).toBe(true)
+  })
+})
+
+describe('geminiGenerator with a meaning', () => {
+  it('sends the meaning in the user message, not the system prompt', async () => {
+    const generate = ok(FULL)
+    // glossRu deliberately avoids "злобный": SYSTEM already uses that exact
+    // word as a worked example for prompt_hint, unrelated to meanings — using
+    // it here would make this assertion pass or fail by coincidence rather
+    // than by testing what it says it tests.
+    await make(generate).fromDictation('złośliwy', { glossRu: 'подлый', context: 'w pracy' })
+    const req = generate.mock.calls[0][0]
+    expect(req.contents[0].parts[0].text).toContain('«подлый»')
+    expect(req.config.systemInstruction).not.toContain('подлый')
+  })
+})
+
+const SUGGESTION = {
+  topic_name: 'U lekarza z dzieckiem',
+  items: [{ answer_pl: 'gorączka', gloss_ru: 'температура, жар', kind: 'slowo' }],
+}
+
+describe('suggestMessage', () => {
+  it('states the situation, the split and the exclusions', () => {
+    const m = suggestMessage({ context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: ['katar', 'kaszel'] })
+    expect(m).toContain('«u lekarza»')
+    expect(m).toContain('15')
+    expect(m).toContain('8')
+    expect(m).toContain('7')
+    expect(m).toContain('katar; kaszel')
+  })
+
+  it('says so when there is nothing to exclude', () => {
+    expect(suggestMessage({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [] })).toContain('ничего')
+  })
+})
+
+describe('geminiSuggester', () => {
+  const suggester = (generate: ReturnType<typeof ok>) =>
+    geminiSuggester({ generate: generate as never, model: 'gemini-pro-test' })
+
+  it('returns the parsed suggestion', async () => {
+    const generate = ok(SUGGESTION)
+    const got = await suggester(generate).suggest({ context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: [] })
+    expect(got).toEqual(SUGGESTION)
+    expect(generate.mock.calls[0][0].config.responseSchema.properties.items.type).toBe('ARRAY')
+  })
+
+  it('refuses an empty context without calling the model', async () => {
+    const generate = ok(SUGGESTION)
+    await expect(
+      suggester(generate).suggest({ context: '  ', count: 15, words: 8, phrases: 7, exclude: [] }),
+    ).rejects.toMatchObject({ name: 'GenerationError', retryable: false })
+    expect(generate).not.toHaveBeenCalled()
+  })
+
+  it('classifies a 429 as retryable, like card generation', async () => {
+    const generate = vi.fn().mockRejectedValue(Object.assign(new Error('quota'), { status: 429 }))
+    await expect(
+      suggester(generate as never).suggest({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [] }),
+    ).rejects.toMatchObject({ retryable: true })
+  })
+
+  it('rejects a payload with an unknown kind', async () => {
+    const generate = ok({ ...SUGGESTION, items: [{ answer_pl: 'a', gloss_ru: 'b', kind: 'rzeczownik' }] })
+    await expect(
+      suggester(generate).suggest({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [] }),
+    ).rejects.toMatchObject({ retryable: false })
   })
 })
