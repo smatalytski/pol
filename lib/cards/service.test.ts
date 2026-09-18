@@ -4,7 +4,16 @@ import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
 import { createCard, type CreateCardInput } from './service'
 import type { Generator, GeneratedCard } from '../generate'
-import { applyGeneratedFields, deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
+import {
+  applyGeneratedFields,
+  CardTypeError,
+  deleteCard,
+  findDuplicate,
+  regenerateCard,
+  searchCards,
+  setCardType,
+  updateCard,
+} from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -407,5 +416,69 @@ describe('regenerateCard', () => {
     const { cardId } = createCard(db, stranded(), NOW)
     deleteCard(db, cardId, NOW)
     await expect(regenerateCard(db, gen(), cardId, NOW)).rejects.toThrow(/no such card/)
+  })
+})
+
+describe('setCardType', () => {
+  const FORMS = JSON.stringify({ basic: [{ label: 'M. l.mn.', value: 'koty' }], extended: [] })
+  const noun = () => input({ answerPl: 'kot', promptText: 'кот', wordKind: 'rzeczownik', formsJson: FORMS })
+  const LATER = new Date('2026-09-20T10:00:00')
+
+  it('switches a word with forms to pl_to_pl', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    const { card, duplicateOf } = setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(card.type).toBe('pl_to_pl')
+    expect(duplicateOf).toBeNull()
+  })
+
+  // Spec §6: recalling a word from Russian and recalling its forms are
+  // different tasks, so the schedule earned by one says nothing about the
+  // other. Review rows are not touched.
+  it('resets the schedule when the type changes', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    db.update(cards).set({ reps: 5, state: 2, due: NOW.getTime() + 1e9 }).where(eq(cards.id, cardId)).run()
+    const { card } = setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(card.reps).toBe(0)
+    expect(card.state).toBe(0)
+    expect(card.due).toBe(LATER.getTime())
+  })
+
+  it('is a no-op that keeps the schedule when the type is unchanged', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    db.update(cards).set({ reps: 5 }).where(eq(cards.id, cardId)).run()
+    expect(setCardType(db, cardId, 'ru_to_pl', LATER).card.reps).toBe(5)
+  })
+
+  it('keeps the Russian prompt, so switching back restores the ru_to_pl card', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, noun(), NOW)
+    setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(setCardType(db, cardId, 'ru_to_pl', LATER).card.promptText).toBe('кот')
+  })
+
+  it('refuses pl_to_pl for a phrase', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ answerPl: 'zdrów jak ryba', wordKind: 'fraza', formsJson: null }), NOW)
+    expect(() => setCardType(db, cardId, 'pl_to_pl', LATER)).toThrow(CardTypeError)
+  })
+
+  // A noun whose generation returned no rows would become a forms card with
+  // nothing on its answer side.
+  it('refuses pl_to_pl for a word of a kind with forms that has none stored', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ answerPl: 'kot', wordKind: 'rzeczownik', formsJson: null }), NOW)
+    expect(() => setCardType(db, cardId, 'pl_to_pl', LATER)).toThrow(CardTypeError)
+  })
+
+  it('reports the clash and changes nothing when that card already exists', () => {
+    const { db } = createTestDb()
+    const existing = createCard(db, { ...noun(), type: 'pl_to_pl' }, NOW)
+    const { cardId } = createCard(db, noun(), NOW)
+    const { card, duplicateOf } = setCardType(db, cardId, 'pl_to_pl', LATER)
+    expect(duplicateOf).toBe(existing.cardId)
+    expect(card.type).toBe('ru_to_pl')
   })
 })

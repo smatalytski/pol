@@ -5,7 +5,7 @@ import { cards } from '../db/schema'
 import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
-import { hasForms, type WordKind } from './forms'
+import { hasForms, parseForms, type WordKind } from './forms'
 
 export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
@@ -267,6 +267,56 @@ export type GeneratedFields = {
   grammarNote: string | null
   wordKind: WordKind | null
   formsJson: string | null
+}
+
+/** A type switch the card cannot take — answered as a 400, not a crash. */
+export class CardTypeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CardTypeError'
+  }
+}
+
+/**
+ * Switches a card between ru_to_pl and pl_to_pl (spec 2026-09-18 §6). Costs no
+ * model call: one generation already stored everything both types need, and
+ * `prompt_text` keeps the Russian either way, so switching back restores the
+ * ru_to_pl card exactly.
+ *
+ * Resets the schedule, because the recall task changed — the schedule earned
+ * by recalling a word from Russian says nothing about recalling its forms.
+ * Review rows are kept. In practice the switch happens right after dictation,
+ * before any review.
+ */
+export function setCardType(
+  db: Db,
+  id: string,
+  type: CardType,
+  now: Date,
+): { card: CardRow; duplicateOf: string | null } {
+  const card = db
+    .select()
+    .from(cards)
+    .where(and(eq(cards.id, id), isNull(cards.deletedAt)))
+    .get()
+  if (!card) throw new Error(`no such card: ${id}`)
+  if (card.type === type) return { card, duplicateOf: null }
+
+  // A pl_to_pl card's whole answer is its forms. Checked on the stored forms
+  // too, not only the kind: a noun whose generation returned no rows would
+  // become a forms card with nothing on its answer side.
+  if (type === 'pl_to_pl' && (!hasForms(card.wordKind) || parseForms(card.formsJson) === null)) {
+    throw new CardTypeError(`this word has no forms to drill: ${id}`)
+  }
+
+  const owner = findDuplicate(db, { type, answerPl: card.answerPl })
+  if (owner !== null && owner !== id) return { card, duplicateOf: owner }
+
+  db.update(cards)
+    .set({ type, ...newState(now), updatedAt: now.getTime() })
+    .where(eq(cards.id, id))
+    .run()
+  return { card: db.select().from(cards).where(eq(cards.id, id)).get()!, duplicateOf: null }
 }
 
 /**
