@@ -5,10 +5,11 @@ import { captures, cards } from '../db/schema'
 import { applyGeneratedFields, createCard, regenerateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
-import { toCardFields, type Generator } from '../generate'
+import { toCardFields, type Generator, type Suggester } from '../generate'
 import type { DictationLang, Transcriber } from '../transcribe'
 import { enqueueJob, hasQueuedJobFor, underReview, type JobHandlers } from '../queue/jobs'
 import { approvedIds, reviewRemainingMs } from '../queue/review'
+import { runSuggest } from '../topics/service'
 
 export type CaptureDeps = { db: Db; transcriber: Transcriber; generator: Generator }
 
@@ -388,8 +389,8 @@ export function giveUpRerecognized(db: Db, captureId: string, lastError: string)
   db.update(captures).set({ error: lastError }).where(eq(captures.id, captureId)).run()
 }
 
-/** The three job kinds (§5), wired to their bodies. */
-export function jobHandlers(deps: CaptureDeps): JobHandlers {
+/** The four job kinds, wired to their bodies. */
+export function jobHandlers(deps: CaptureDeps & { suggester: Suggester }): JobHandlers {
   return {
     new: {
       run: (job, now) => generateNewCard(deps, job.captureId!, now),
@@ -408,6 +409,12 @@ export function jobHandlers(deps: CaptureDeps): JobHandlers {
         if (card?.status !== 'needs_input') return
         await regenerateCard(deps.db, deps.generator, job.cardId!, now)
       },
+      giveUp: () => {},
+    },
+    // No give-up action: the job's `failed` status and last_error are the
+    // record, and the topic page offers `spróbuj ponownie` (§6.1).
+    suggest: {
+      run: (job, now) => runSuggest({ db: deps.db, suggester: deps.suggester }, job, now),
       giveUp: () => {},
     },
   }

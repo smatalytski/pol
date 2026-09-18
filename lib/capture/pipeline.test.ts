@@ -746,7 +746,7 @@ describe('giveUpRerecognized', () => {
 describe('jobHandlers', () => {
   it('wires each job kind to its body', async () => {
     const d = deps()
-    const h = jobHandlers(d)
+    const h = jobHandlers({ ...d, suggester: { suggest: vi.fn() } })
     const id = await recognized(d, 'zloslivy')
     const job = (kind: 'new' | 'rerecognized' | 'regenerate', over: { captureId?: string; cardId?: string } = {}) => {
       const jobId = enqueueJob(d.db, { kind, ...over }, NOW)
@@ -781,7 +781,7 @@ describe('jobHandlers regenerate', () => {
   // and show generowanie… for a card nothing is rewriting.
   it('does nothing for a card deleted or no longer needs_input', async () => {
     const d = deps()
-    const h = jobHandlers(d)
+    const h = jobHandlers({ ...d, suggester: { suggest: vi.fn() } })
     const gone = createCard(d.db, input({ answerPl: 'zdrow', status: 'needs_input', promptText: null }), NOW)
     deleteCard(d.db, gone.cardId, NOW)
     const repaired = createCard(d.db, input({ answerPl: 'kot' }), NOW)

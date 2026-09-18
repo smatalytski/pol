@@ -13,7 +13,7 @@ import { approvedIds, type ReviewRow } from './review'
  * cards or Gemini, and every rule here is testable with fakes.
  */
 
-export type JobKind = 'new' | 'regenerate' | 'rerecognized'
+export type JobKind = 'new' | 'regenerate' | 'rerecognized' | 'suggest'
 export type JobRow = typeof generationJobs.$inferSelect
 
 /**
@@ -25,7 +25,13 @@ export const MAX_ATTEMPTS_NON_RETRYABLE = 3
 
 export function enqueueJob(
   db: Db,
-  input: { kind: JobKind; captureId?: string | null; cardId?: string | null },
+  input: {
+    kind: JobKind
+    captureId?: string | null
+    cardId?: string | null
+    topicId?: string | null
+    paramsJson?: string | null
+  },
   now: Date,
 ): string {
   const id = randomUUID()
@@ -42,6 +48,8 @@ export function enqueueJob(
       lastError: null,
       createdAt: now.getTime(),
       finishedAt: null,
+      topicId: input.topicId ?? null,
+      paramsJson: input.paramsJson ?? null,
     })
     .run()
   return id
@@ -179,14 +187,14 @@ function setNewCaptureStatus(db: Db, job: JobRow, status: 'queued' | 'generating
 }
 
 /**
- * Runs at most one job: the oldest queued one that is due. A retryable failure
- * re-queues it with backoff AND pauses the whole queue for the same delay,
- * because the quota is per project — and never counts against the give-up
- * limit, however many of them occur. A non-retryable one gets
- * MAX_ATTEMPTS_NON_RETRYABLE such failures without pausing, then its
- * handler's giveUp runs once. `attempts` counts every failed attempt of
- * either kind and drives backoffMs; `failures` counts only non-retryable ones
- * and drives the give-up decision.
+ * Runs at most one job: a due `suggest` job if there is one, else the oldest
+ * due job. A retryable failure re-queues it with backoff AND pauses the whole
+ * queue for the same delay, because the quota is per project — and never
+ * counts against the give-up limit, however many of them occur. A
+ * non-retryable one gets MAX_ATTEMPTS_NON_RETRYABLE such failures without
+ * pausing, then its handler's giveUp runs once. `attempts` counts every
+ * failed attempt of either kind and drives backoffMs; `failures` counts only
+ * non-retryable ones and drives the give-up decision.
  */
 export async function runNextJob(
   db: Db,
@@ -201,9 +209,11 @@ export async function runNextJob(
     .select()
     .from(generationJobs)
     .where(and(eq(generationJobs.status, 'queued'), lte(generationJobs.nextAttemptAt, t)))
+    // A `suggest` job first: it is a round someone is watching the screen
+    // for (spec 2026-09-18-topic-generation §6.1). Then oldest first;
     // createdAt can tie when promoteApproved inserts several jobs in one
-    // tick; rowid (insertion order) breaks the tie deterministically.
-    .orderBy(asc(generationJobs.createdAt), sql`rowid`)
+    // tick, and rowid (insertion order) breaks the tie deterministically.
+    .orderBy(sql`CASE WHEN ${generationJobs.kind} = 'suggest' THEN 0 ELSE 1 END`, asc(generationJobs.createdAt), sql`rowid`)
     .get()
   if (!job) return 'idle'
 

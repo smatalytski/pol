@@ -1,12 +1,12 @@
 import type { Db } from '../db/client'
-import type { Generator } from '../generate'
+import type { Generator, Suggester } from '../generate'
 import type { Transcriber } from '../transcribe'
 import { jobHandlers, recognizeStranded } from '../capture/pipeline'
 import { promoteApproved, recoverRunning, runNextJob, type RunnerState, type RunOutcome } from './jobs'
 
 export const TICK_MS = 1_000
 
-export type Providers = { transcriber: Transcriber; generator: Generator }
+export type Providers = { transcriber: Transcriber; generator: Generator; suggester: Suggester }
 
 /**
  * One pass of the worker (spec 2026-09-18-generation-queue §5): promote
@@ -64,7 +64,7 @@ export async function startWorker(): Promise<void> {
   globalThis.__fiszkiGenerationWorker = true
   const { db } = await import('../db/client')
   const { getTranscriber } = await import('../transcribe')
-  const { getGenerator } = await import('../generate')
+  const { getGenerator, getSuggester } = await import('../generate')
   console.log(`generation worker started (recovered ${recoverRunning(db)} interrupted job(s))`)
   // Not awaited: Speech-to-Text for a backlog must not hold up the first tick.
   void (async () => {
@@ -77,7 +77,7 @@ export async function startWorker(): Promise<void> {
   let providers: Providers | null = null
   const tick = createTicker({
     db,
-    providers: () => (providers ??= { transcriber: getTranscriber(), generator: getGenerator() }),
+    providers: () => (providers ??= { transcriber: getTranscriber(), generator: getGenerator(), suggester: getSuggester() }),
     state: { pausedUntil: 0 },
     random: Math.random,
     onError: (err) => {
