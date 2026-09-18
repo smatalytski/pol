@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { CardListItem } from '@/components/CardListItem'
 import { RoundSettings } from '@/components/RoundSettings'
 import { DEFAULT_COUNT, type RoundParams } from '@/lib/topics/rounds'
 import type { TopicView } from '@/lib/topics/service'
@@ -213,9 +214,7 @@ export default function TopicPage() {
           </li>
         ))}
         {view.cards.map((c) => (
-          <li key={c.id} className="border-b">
-            <Link href={`/fiszki/${c.id}`} className="block py-3 text-lg">{c.answerPl}</Link>
-          </li>
+          <CardListItem key={c.id} card={c} />
         ))}
       </ul>
     </div>

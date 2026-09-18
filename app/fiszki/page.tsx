@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
+import { CardListItem } from '@/components/CardListItem'
 import type { CardRow } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
@@ -71,24 +71,12 @@ export default function CardsPage() {
           </li>
         ))}
         {rows.map((c) => (
-          <li key={c.id} className="border-b">
-            <Link href={`/fiszki/${c.id}`} className="flex items-baseline justify-between gap-3 py-3">
-              <span className="text-lg">{c.answerPl}</span>
-              <span className="flex shrink-0 gap-2 text-xs">
-                {c.topicId && topicNames[c.topicId] && (
-                  <span className="text-neutral-400">{topicNames[c.topicId]}</span>
-                )}
-                {c.type === 'pl_to_pl' && <span className="text-sky-700">{t.formsBadge}</span>}
-                {c.status === 'needs_input' && <span className="text-amber-600">{t.needsInput}</span>}
-                {/* A suspended card is otherwise indistinguishable from an
-                    active one, leaving no way to see why it never comes up in
-                    review. Compared against null rather than truthiness so a
-                    0 timestamp could not render as a bare "0". */}
-                {c.suspendedAt !== null && <span className="text-neutral-500">{t.suspended}</span>}
-                {generatingIds.has(c.id) && <span className="text-sky-700">{t.generating}</span>}
-              </span>
-            </Link>
-          </li>
+          <CardListItem
+            key={c.id}
+            card={c}
+            topicName={c.topicId ? topicNames[c.topicId] : null}
+            generating={generatingIds.has(c.id)}
+          />
         ))}
       </ul>
     </div>

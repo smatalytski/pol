@@ -111,12 +111,31 @@ describe('TopicPage', () => {
     stubFetch(() =>
       view({
         pending: [{ id: 'c1', transcript: 'osłuchać', status: 'queued' }],
-        cards: [{ id: 'k1', answerPl: 'katar' }],
+        cards: [{ id: 'k1', answerPl: 'katar', status: 'ready', suspendedAt: null, type: 'ru_to_pl' }],
       }),
     )
     render(<TopicPage />)
     expect(await screen.findByText('osłuchać')).toBeTruthy()
     expect(screen.getByText('katar').closest('a')?.getAttribute('href')).toBe('/fiszki/k1')
+  })
+
+  // spec §4.4: the topic's cards render "in the same rows as /fiszki" — a
+  // suspended or needs-input card must carry the same badge here as there,
+  // not look like a normal, ready card.
+  it('badges a suspended card and one that needs input, like /fiszki', async () => {
+    stubFetch(() =>
+      view({
+        cards: [
+          { id: 'k1', answerPl: 'katar', status: 'ready', suspendedAt: 123, type: 'ru_to_pl' },
+          { id: 'k2', answerPl: 'kaszel', status: 'needs_input', suspendedAt: null, type: 'ru_to_pl' },
+        ],
+      }),
+    )
+    render(<TopicPage />)
+    expect(await screen.findByText(t.suspended)).toBeTruthy()
+    expect(screen.getByText(t.suspended).closest('li')).toBe(screen.getByText('katar').closest('li'))
+    expect(screen.getByText(t.needsInput)).toBeTruthy()
+    expect(screen.getByText(t.needsInput).closest('li')).toBe(screen.getByText('kaszel').closest('li'))
   })
 
   it('switches the topic off', async () => {
