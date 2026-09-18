@@ -65,6 +65,7 @@ export const captures = sqliteTable('captures', {
   duplicateOf: text('duplicate_of'),
   topicId: text('topic_id'),
   glossRu: text('gloss_ru'),
+  lang: text('lang', { enum: ['pl', 'ru'] }),
 })
 
 export const generationJobs = sqliteTable('generation_jobs', {
