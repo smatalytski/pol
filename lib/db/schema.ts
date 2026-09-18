@@ -70,7 +70,7 @@ export const captures = sqliteTable('captures', {
 
 export const generationJobs = sqliteTable('generation_jobs', {
   id: text('id').primaryKey(),
-  kind: text('kind', { enum: ['new', 'regenerate', 'rerecognized', 'suggest'] }).notNull(),
+  kind: text('kind', { enum: ['new', 'regenerate', 'suggest'] }).notNull(),
   captureId: text('capture_id'),
   cardId: text('card_id'),
   status: text('status', { enum: ['queued', 'running', 'done', 'failed'] }).notNull(),

@@ -76,28 +76,9 @@ describe('GET /api/cards/:id', () => {
     expect(body.card.answerPl).toBe('złośliwy')
   })
 
-  // The detail screen offers "re-recognise this recording in Russian" only
-  // when there is a recording to re-recognise, so it needs to know. Dedup
-  // means several captures can point at one card (a duplicate dictation
-  // resolves to the card it matched), so this is the capture that CREATED the
-  // card — the earliest — not whichever one most recently pointed at it.
-  // Re-recognising a later duplicate's audio would rewrite a card that
-  // recording never made.
-  it('returns the id of the capture that created the card', async () => {
-    seedCard({ id: 'with-audio' })
-    const mediaId = 'm1'
-    db.insert(media).values({ id: mediaId, kind: 'audio', mime: 'audio/webm', bytes: Buffer.from([1]), byteSize: 1, createdAt: 1 }).run()
-    db.insert(captures).values({ id: 'first', audioMediaId: mediaId, transcript: 'x', status: 'generated', error: null, generationJson: null, cardId: 'with-audio', createdAt: 100 }).run()
-    db.insert(captures).values({ id: 'later-duplicate', audioMediaId: mediaId, transcript: 'x', status: 'generated', error: null, generationJson: null, cardId: 'with-audio', createdAt: 200 }).run()
-
-    const body = await (await GET(new Request('http://test'), { params: Promise.resolve({ id: 'with-audio' }) })).json()
-    expect(body.captureId).toBe('first')
-  })
-
-  it('returns no capture id for a card that was never dictated', async () => {
-    seedCard({ id: 'typed' })
-    const body = await (await GET(new Request('http://test'), { params: Promise.resolve({ id: 'typed' }) })).json()
-    expect(body.captureId).toBeNull()
+  it('no longer offers a recording to re-recognise', async () => {
+    seedCard({ id: 'k1' })
+    expect(await (await get('k1')).json()).not.toHaveProperty('captureId')
   })
 
   it('404s on an unknown id', async () => {
