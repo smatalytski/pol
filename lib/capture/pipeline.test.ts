@@ -851,6 +851,51 @@ describe('creatorCaptureId', () => {
   })
 })
 
+describe('recognition language (spec 2026-09-18-recording-language §2)', () => {
+  it('stores the language the recording was made in', () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW, 'ru')
+    expect(row(d, id).lang).toBe('ru')
+  })
+
+  it('stores pl when no language is given', () => {
+    const d = deps()
+    expect(row(d, createCapture(d.db, AUDIO, NOW)).lang).toBe('pl')
+  })
+
+  it('recognises in the stored language', async () => {
+    const d = deps()
+    const ru = createCapture(d.db, AUDIO, NOW, 'ru')
+    await recognizeCapture(d, ru)
+    expect(d.transcriber.transcribe).toHaveBeenLastCalledWith(expect.objectContaining({ lang: 'ru' }))
+    const pl = createCapture(d.db, AUDIO, NOW, 'pl')
+    await recognizeCapture(d, pl)
+    expect(d.transcriber.transcribe).toHaveBeenLastCalledWith(expect.objectContaining({ lang: 'pl' }))
+  })
+
+  it('recognises an older recording, with no stored language, as Polish', async () => {
+    const d = deps()
+    const id = createCapture(d.db, AUDIO, NOW, 'ru')
+    d.db.update(captures).set({ lang: null }).where(eq(captures.id, id)).run()
+    await recognizeCapture(d, id)
+    expect(d.transcriber.transcribe).toHaveBeenLastCalledWith(expect.objectContaining({ lang: 'pl' }))
+  })
+
+  it('keeps the language when a failed recognition is retried, and after a restart', async () => {
+    const d = deps({ transcriber: { transcribe: vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue('склеп') } })
+    const id = createCapture(d.db, AUDIO, NOW, 'ru')
+    await recognizeCapture(d, id)
+    expect(row(d, id).status).toBe('failed')
+    await recognizeCapture(d, id) // ponów
+    expect(d.transcriber.transcribe).toHaveBeenLastCalledWith(expect.objectContaining({ lang: 'ru' }))
+
+    const stranded = createCapture(d.db, AUDIO, NOW, 'ru')
+    await recognizeStranded(d)
+    expect(row(d, stranded).status).toBe('transcribed')
+    expect(d.transcriber.transcribe).toHaveBeenLastCalledWith(expect.objectContaining({ lang: 'ru' }))
+  })
+})
+
 describe('a topic item becoming a card', () => {
   function accepted(d: ReturnType<typeof deps>) {
     d.db.insert(topics).values({ id: 't1', name: null, context: 'u lekarza z dzieckiem', suspendedAt: null, createdAt: NOW.getTime() }).run()

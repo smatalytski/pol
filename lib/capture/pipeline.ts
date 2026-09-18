@@ -26,7 +26,12 @@ export type CaptureView = {
   reviewRemainingMs: number | null
 }
 
-export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }, now: Date): string {
+export function createCapture(
+  db: Db,
+  audio: { bytes: Uint8Array; mime: string },
+  now: Date,
+  lang: DictationLang = 'pl',
+): string {
   const audioMediaId = putMedia(db, { kind: 'audio', mime: audio.mime, bytes: audio.bytes, now })
   const id = randomUUID()
   db.insert(captures)
@@ -39,6 +44,7 @@ export function createCapture(db: Db, audio: { bytes: Uint8Array; mime: string }
       generationJson: null,
       cardId: null,
       createdAt: now.getTime(),
+      lang,
     })
     .run()
   return id
@@ -111,7 +117,10 @@ export async function recognizeCapture(deps: RecognizeDeps, captureId: string): 
   }
   let transcript: string
   try {
-    transcript = await transcriber.transcribe({ bytes: audio.bytes, mime: audio.mime })
+    // The language is the button the recording was made with (spec
+    // 2026-09-18-recording-language §2); a recording from before that has
+    // none and was always recognised as Polish.
+    transcript = await transcriber.transcribe({ bytes: audio.bytes, mime: audio.mime, lang: capture.lang ?? 'pl' })
   } catch (err) {
     // Audio is deliberately retained: the word is recoverable by retrying.
     db.update(captures)
