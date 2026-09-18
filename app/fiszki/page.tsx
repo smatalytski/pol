@@ -20,13 +20,20 @@ export default function CardsPage() {
   const [rows, setRows] = useState<CardRow[]>([])
   const [pending, setPending] = useState<PendingRow[]>([])
   const [generatingIds, setGeneratingIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [topicNames, setTopicNames] = useState<Record<string, string>>({})
 
   const load = useCallback(async (query: string) => {
     const res = await fetch(`/api/cards?q=${encodeURIComponent(query)}`)
-    const body = (await res.json()) as { cards: CardRow[]; pending: PendingRow[]; generatingCardIds: string[] }
+    const body = (await res.json()) as {
+      cards: CardRow[]
+      pending: PendingRow[]
+      generatingCardIds: string[]
+      topicNames: Record<string, string>
+    }
     setRows(body.cards)
     setPending(body.pending)
     setGeneratingIds(new Set(body.generatingCardIds))
+    setTopicNames(body.topicNames)
   }, [])
 
   useEffect(() => {
@@ -68,6 +75,9 @@ export default function CardsPage() {
             <Link href={`/fiszki/${c.id}`} className="flex items-baseline justify-between gap-3 py-3">
               <span className="text-lg">{c.answerPl}</span>
               <span className="flex shrink-0 gap-2 text-xs">
+                {c.topicId && topicNames[c.topicId] && (
+                  <span className="text-neutral-400">{topicNames[c.topicId]}</span>
+                )}
                 {c.type === 'pl_to_pl' && <span className="text-sky-700">{t.formsBadge}</span>}
                 {c.status === 'needs_input' && <span className="text-amber-600">{t.needsInput}</span>}
                 {/* A suspended card is otherwise indistinguishable from an

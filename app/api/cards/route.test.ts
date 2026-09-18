@@ -11,7 +11,7 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, POST } = await import('./route')
 const { db } = await import('@/lib/db/client')
-const { captures, cards, generationJobs } = await import('@/lib/db/schema')
+const { captures, cards, generationJobs, topics } = await import('@/lib/db/schema')
 const { deleteCard } = await import('@/lib/cards/service')
 
 const NOW = new Date('2026-09-18T10:00:00')
@@ -20,6 +20,7 @@ beforeEach(() => {
   db.delete(generationJobs).run()
   db.delete(captures).run()
   db.delete(cards).run()
+  db.delete(topics).run()
 })
 
 function get(q?: string) {
@@ -85,6 +86,12 @@ describe('GET /api/cards', () => {
     const body = await (await get('')).json()
     expect(body.pending).toEqual([expect.objectContaining({ id: 'cap1', status: 'queued' })])
     expect(body.generatingCardIds).toEqual([created.cardId])
+  })
+
+  it('names each card’s topic', async () => {
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1 }).run()
+    const body = await (await GET(new Request('http://test/api/cards'))).json()
+    expect(body.topicNames).toEqual({ t1: 'U lekarza' })
   })
 })
 

@@ -51,7 +51,7 @@ type PendingRow = { id: string; transcript: string | null; status: 'queued' | 'g
 
 function stubFetch(
   rows: () => CardRow[],
-  extra: { pending?: PendingRow[]; generatingCardIds?: string[] } = {},
+  extra: { pending?: PendingRow[]; generatingCardIds?: string[]; topicNames?: Record<string, string> } = {},
 ) {
   const calls: string[] = []
   vi.stubGlobal(
@@ -65,6 +65,7 @@ function stubFetch(
             cards: rows(),
             pending: extra.pending ?? [],
             generatingCardIds: extra.generatingCardIds ?? [],
+            topicNames: extra.topicNames ?? {},
           }),
       }) as unknown as Promise<Response>
     }),
@@ -178,5 +179,12 @@ describe('CardsPage (browse list)', () => {
     await screen.findByText('wścieklizna')
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'kot' } })
     await waitFor(() => expect(screen.queryByText('wścieklizna')).toBeNull())
+  })
+
+  it('shows a card’s topic name beside it', async () => {
+    stubFetch(() => [cardRow({ id: 'a', answerPl: 'gorączka', topicId: 't1' })], { topicNames: { t1: 'U lekarza' } })
+    render(<CardsPage />)
+    expect(await screen.findByText('U lekarza')).toBeTruthy()
+    expect(screen.getByText('U lekarza').closest('li')).toBe(screen.getByText('gorączka').closest('li'))
   })
 })

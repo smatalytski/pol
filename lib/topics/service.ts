@@ -223,6 +223,13 @@ export function listTopics(db: Db): TopicListRow[] {
     .map((t) => ({ ...t, cardCount: cardCounts.get(t.id) ?? 0, pendingCount: pendingCounts.get(t.id) ?? 0 }))
 }
 
+/** Names of named topics, for showing beside cards. */
+export function topicNames(db: Db): Record<string, string> {
+  return Object.fromEntries(
+    db.select({ id: topics.id, name: topics.name }).from(topics).where(isNotNull(topics.name)).all().map((t) => [t.id, t.name!]),
+  )
+}
+
 function latestSuggestJob(db: Db, topicId: string): JobRow | undefined {
   return db
     .select()

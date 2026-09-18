@@ -473,6 +473,20 @@ describe('CardDetailPage', () => {
   // Re-recognition is Speech-to-Text plus a queued Gemini rebuild (Task 5);
   // when the route answers queued: true there is no rebuilt card yet, so the
   // page shows generowanie… instead of reloading straight away.
+  it('links to the card’s topic', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ card: cardRow(), captureId: null, generating: false, topic: { id: 't1', name: 'U lekarza' } }),
+        }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<CardPage />)
+    expect((await screen.findByText('U lekarza')).closest('a')?.getAttribute('href')).toBe('/tematy/t1')
+  })
+
   it('shows generowanie… after a re-recognition queues the rebuild', async () => {
     let generating = false
     vi.stubGlobal(
