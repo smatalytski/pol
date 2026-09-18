@@ -63,20 +63,6 @@ describe('ReviewCard', () => {
     }
   })
 
-  it('renders an image prompt for a picture card', () => {
-    render(
-      <ReviewCard
-        card={{ ...card, type: 'image_to_pl', promptText: null, promptHint: null, promptMediaId: 'm1' }}
-        revealed={false}
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
-    expect(screen.getByRole('img').getAttribute('src')).toBe('/api/media/m1')
-  })
-
   it('offers undo only when there is something to undo', () => {
     const { rerender } = render(
       <ReviewCard card={card} revealed={false} canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
@@ -121,21 +107,8 @@ describe('ReviewCard', () => {
     expect(screen.getByText('pies').tagName).toBe('STRONG')
   })
 
-  it('offers a play control for the answer of ru_to_pl and image_to_pl cards', () => {
-    const { rerender } = render(
-      <ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
-    )
-    expect(screen.getByLabelText(t.play)).toBeTruthy()
-    rerender(
-      <ReviewCard
-        card={{ ...card, type: 'image_to_pl', promptText: null, promptMediaId: 'm1' }}
-        revealed
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
+  it('offers a play control for the answer of a ru_to_pl card', () => {
+    render(<ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
     expect(screen.getByLabelText(t.play)).toBeTruthy()
   })
 })

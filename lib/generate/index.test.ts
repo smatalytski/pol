@@ -151,21 +151,6 @@ describe('geminiGenerator.fromDictation', () => {
   })
 })
 
-describe('geminiGenerator.fromImage', () => {
-  it('sends the image as an inlineData part', async () => {
-    const generate = ok(FULL)
-    await make(generate).fromImage({ bytes: new Uint8Array([1, 2]), mime: 'image/webp' })
-    const contents = (generate.mock.calls[0][0] as {
-      contents: Array<{ parts: Array<Record<string, unknown>> }>
-    }).contents
-    const part = contents[0].parts.find((x) => 'inlineData' in x) as {
-      inlineData: { mimeType: string; data: string }
-    }
-    expect(part.inlineData.mimeType).toBe('image/webp')
-    expect(part.inlineData.data).toBe(Buffer.from([1, 2]).toString('base64'))
-  })
-})
-
 describe('geminiGenerator.forms', () => {
   it('returns a Polish prompt and a Polish answer table', async () => {
     const payload = { prompt_pl: 'przyzwyczaić się — wszystkie formy', answer_pl: '…' }

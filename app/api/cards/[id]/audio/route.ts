@@ -26,7 +26,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       ? card.type === 'ru_to_pl'
         ? 'ru'
         : null
-      : card.type === 'ru_to_pl' || card.type === 'image_to_pl'
+      : card.type === 'ru_to_pl'
         ? 'pl'
         : null
   if (!lang) return NextResponse.json({ error: 'nothing to speak' }, { status: 404 })

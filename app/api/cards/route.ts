@@ -14,7 +14,7 @@ export async function GET(req: Request) {
 // origin in parent_card_id"). The only path to a pl_forms card is
 // POST /api/cards/:id/formy.
 const Body = z.object({
-  type: z.enum(['ru_to_pl', 'image_to_pl']),
+  type: z.enum(['ru_to_pl']),
   promptText: z.string().nullable(),
   promptHint: z.string().nullable(),
   answerPl: z.string().min(1),

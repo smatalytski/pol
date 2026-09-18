@@ -26,7 +26,6 @@ function deps(over: { transcriber?: Partial<Transcriber>; generator?: Partial<Ge
     transcriber: { transcribe: vi.fn().mockResolvedValue('zloslivy'), ...over.transcriber } as Transcriber,
     generator: {
       fromDictation: vi.fn().mockResolvedValue(GENERATED),
-      fromImage: vi.fn(),
       forms: vi.fn(),
       ...over.generator,
     } as Generator,

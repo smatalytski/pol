@@ -3,7 +3,6 @@ export const t = {
 
   review: 'Powtórki',
   add: 'Dodaj',
-  images: 'Obrazki',
   cards: 'Fiszki',
   settings: 'Ustawienia',
 
@@ -33,8 +32,6 @@ export const t = {
   play: 'odtwórz',
   micDenied: 'Bez dostępu do mikrofonu nie da się nic dodać. Włącz mikrofon w ustawieniach przeglądarki i odśwież stronę.',
 
-  dropImages: 'przeciągnij obrazki tutaj',
-  imagePrompt: 'obrazek',
   addForms: 'dodaj formy',
   regenerate: 'wygeneruj ponownie',
   suspend: 'zawieś',

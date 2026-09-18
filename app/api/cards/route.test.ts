@@ -77,4 +77,16 @@ describe('POST /api/cards', () => {
     const second = await (await post(body)).json()
     expect(second).toEqual({ cardId: first.cardId, duplicateOf: first.cardId })
   })
+
+  // Picture cards are removed (spec §9): nothing may create one any more.
+  it('rejects an image_to_pl card', async () => {
+    const res = await POST(
+      new Request('http://test/api/cards', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'image_to_pl', promptText: null, promptHint: null, answerPl: 'kot' }),
+      }),
+    )
+    expect(res.status).toBe(400)
+  })
 })

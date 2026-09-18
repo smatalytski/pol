@@ -103,21 +103,6 @@ describe('GET /api/cards/:id/audio', () => {
     expect(res.headers.get('location')).toBe('/api/media/media-id-stub')
   })
 
-  it('image_to_pl answer is spoken in Polish', async () => {
-    seedCard({ id: 'c3', type: 'image_to_pl', promptText: null, answerPl: 'kot' })
-    const res = await call('c3', 'answer')
-    expect(res.status).toBe(307)
-    expect(getClipMock).toHaveBeenCalledTimes(1)
-    expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
-  })
-
-  it('image_to_pl prompt has nothing to speak (image only, no gloss)', async () => {
-    seedCard({ id: 'c4', type: 'image_to_pl', promptText: null })
-    const res = await call('c4', 'prompt')
-    expect(res.status).toBe(404)
-    expect(getClipMock).not.toHaveBeenCalled()
-  })
-
   it('pl_forms prompt has nothing to speak (it is a Polish form request, not a Russian gloss)', async () => {
     seedCard({ id: 'c5', type: 'pl_forms', promptText: 'zamek, forms: sg/pl, all cases' })
     const res = await call('c5', 'prompt')

@@ -237,7 +237,7 @@ two broken providers rather than one unreadable file.
 FISZKI_BACKUP_BUCKET=my-bucket ./scripts/backup.sh   # on the VM: uploads to GCS
 ```
 
-One file holds the cards, the review history, the images, the dictation audio
+One file holds the cards, the review history, the dictation audio
 and the TTS clips. It is taken with `VACUUM INTO`, a consistent snapshot of
 the live database, not a plain file copy — a copy of an open WAL database can
 capture a torn state. On the VM the timer runs this nightly and the snapshot

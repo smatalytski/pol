@@ -30,11 +30,7 @@ export function ReviewCard({
   return (
     <div className="flex min-h-[70vh] flex-col gap-6">
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-        {card.promptMediaId ? (
-          <img src={`/api/media/${card.promptMediaId}`} alt={t.imagePrompt} className="max-h-64 rounded" />
-        ) : (
-          <p className="text-3xl">{card.promptText}</p>
-        )}
+        <p className="text-3xl">{card.promptText}</p>
         {card.promptHint && <p className="text-sm text-neutral-500">{card.promptHint}</p>}
 
         {revealed && (

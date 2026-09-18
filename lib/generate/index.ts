@@ -77,7 +77,6 @@ export function toCardFields(g: GeneratedCard) {
 
 export interface Generator {
   fromDictation(transcript: string): Promise<GeneratedCard>
-  fromImage(image: { bytes: Uint8Array; mime: string }): Promise<GeneratedCard>
   forms(lemma: string): Promise<GeneratedForms>
 }
 
@@ -178,13 +177,6 @@ export function geminiGenerator(
       // check it against the audio.
       return run(GeneratedCardSchema, SYSTEM, [
         { text: `Продиктовано: «${text}»\n\nСделай карточку.` },
-      ])
-    },
-
-    async fromImage({ bytes, mime }) {
-      return run(GeneratedCardSchema, SYSTEM, [
-        { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString('base64') } },
-        { text: 'Назови по-польски то, что на картинке. prompt_ru — русское название, answer_pl — польское.' },
       ])
     },
 
