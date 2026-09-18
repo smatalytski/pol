@@ -88,6 +88,7 @@ export const t = {
   backToTopics: '‹ Tematy',
   transcribeFailed: 'nie udało się rozpoznać',
   topicSaveFailed: 'nie udało się zapisać',
+  topicsLoadFailed: 'nie udało się wczytać tematów',
   holdToDictate: 'przytrzymaj i opowiedz',
 } as const
 

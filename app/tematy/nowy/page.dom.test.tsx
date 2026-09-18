@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { t } from '@/i18n/pl'
 
@@ -32,5 +32,22 @@ describe('NewTopicPage', () => {
     vi.stubGlobal('fetch', vi.fn())
     render(<NewTopicPage />)
     expect((screen.getByRole('button', { name: t.propose }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows a mic-denied notice but keeps the text area usable', async () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const getUserMedia = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
+    Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
+
+    render(<NewTopicPage />)
+    const button = screen.getByRole('button', { name: t.holdToDictate })
+    await act(async () => {
+      fireEvent.pointerDown(button)
+    })
+
+    expect(await screen.findByText(t.micDenied)).toBeTruthy()
+    const textarea = screen.getByLabelText(t.topicContext) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'still usable' } })
+    expect(textarea.value).toBe('still usable')
   })
 })

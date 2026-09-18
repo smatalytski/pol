@@ -59,4 +59,38 @@ describe('TopicsPage', () => {
     render(<TopicsPage />)
     expect(await screen.findByText(t.unnamedTopic)).toBeTruthy()
   })
+
+  it('shows an error and stays rendered when the list fails to load', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: false, json: () => Promise.resolve({}) }) as unknown as Promise<Response>),
+    )
+    render(<TopicsPage />)
+    expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
+    expect(screen.getByText(t.newTopic)).toBeTruthy()
+  })
+
+  it('shows an error when a malformed response would otherwise crash the list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }) as unknown as Promise<Response>),
+    )
+    render(<TopicsPage />)
+    expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
+  })
+
+  it('shows an error when switching a topic fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PATCH') {
+          return Promise.resolve({ ok: false, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ topics: [row()] }) }) as unknown as Promise<Response>
+      }),
+    )
+    render(<TopicsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: t.topicOn }))
+    expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
+  })
 })

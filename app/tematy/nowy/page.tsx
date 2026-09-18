@@ -19,13 +19,24 @@ export default function NewTopicPage() {
   const [lang, setLang] = useState<DictationLang>('ru')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [micDenied, setMicDenied] = useState(false)
   const streamRef = useRef<MediaStream | null>(null)
 
-  const factory = useMemo(
-    () =>
-      mediaRecorderFactory(async () => (streamRef.current ??= await navigator.mediaDevices.getUserMedia({ audio: true }))),
-    [],
-  )
+  // Same pattern as app/dodaj/page.tsx's getStream: a refused or unavailable
+  // microphone is reported once, distinctly from a transcription failure —
+  // but unlike /dodaj this screen still works by typing, so it never replaces
+  // the form.
+  const getStream = useCallback(async () => {
+    try {
+      streamRef.current ??= await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      setMicDenied(true)
+      throw new Error('microphone unavailable')
+    }
+    return streamRef.current
+  }, [])
+
+  const factory = useMemo(() => mediaRecorderFactory(getStream), [getStream])
 
   const onRecorded = useCallback(
     async (bytes: ArrayBuffer, mime: string) => {
@@ -100,6 +111,7 @@ export default function NewTopicPage() {
           </button>
         ))}
       </div>
+      {micDenied && <p className="text-sm text-red-600">{t.micDenied}</p>}
       <RoundSettings value={params} onChange={setParams} />
       <button
         type="button"
