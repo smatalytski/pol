@@ -239,7 +239,12 @@ export async function regenerateCard(
   return applyGeneratedFields(db, card, fields, now)
 }
 
-/** The six fields a generation produces, as `toCardFields` returns them. */
+/**
+ * The subset of `toCardFields`'s result that `applyGeneratedFields` writes
+ * today. `toCardFields` also returns `wordKind` and `formsJson`, which this
+ * type deliberately omits — nothing persists them yet (that is a later
+ * task's job, with its own tests).
+ */
 export type GeneratedFields = {
   promptText: string | null
   promptHint: string | null
