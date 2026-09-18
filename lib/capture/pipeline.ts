@@ -379,6 +379,10 @@ export function jobHandlers(deps: CaptureDeps): JobHandlers {
     // keepAnswer, approved by the user; a card that stays needs_input on give-up is repairable again.
     regenerate: {
       run: async (job, now) => {
+        // Deleted or already repaired since it was queued: nothing to do.
+        // regenerateCard would throw, which the queue counts as a failure.
+        const card = liveCard(deps.db, job.cardId!)
+        if (card?.status !== 'needs_input') return
         await regenerateCard(deps.db, deps.generator, job.cardId!, now)
       },
       giveUp: () => {},

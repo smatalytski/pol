@@ -775,6 +775,25 @@ describe('jobHandlers', () => {
   })
 })
 
+describe('jobHandlers regenerate', () => {
+  // wygeneruj ponownie was queued for a card that has since been deleted or
+  // repaired: there is nothing to do, and throwing would burn three attempts
+  // and show generowanie… for a card nothing is rewriting.
+  it('does nothing for a card deleted or no longer needs_input', async () => {
+    const d = deps()
+    const h = jobHandlers(d)
+    const gone = createCard(d.db, input({ answerPl: 'zdrow', status: 'needs_input', promptText: null }), NOW)
+    deleteCard(d.db, gone.cardId, NOW)
+    const repaired = createCard(d.db, input({ answerPl: 'kot' }), NOW)
+    for (const cardId of [gone.cardId, repaired.cardId]) {
+      const jobId = enqueueJob(d.db, { kind: 'regenerate', cardId }, NOW)
+      const job = d.db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).get()!
+      await expect(h.regenerate.run(job, NOW)).resolves.toBeUndefined()
+    }
+    expect(d.generator.fromDictation).not.toHaveBeenCalled()
+  })
+})
+
 describe('pendingCaptures', () => {
   it('lists recordings waiting for or in generation, newest first', () => {
     const d = deps()
