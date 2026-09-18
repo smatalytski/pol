@@ -311,6 +311,17 @@ describe('listTopics', () => {
       ['t1', 1, 1],
     ])
   })
+
+  // /tematy polls while a topic is still searching for its first (or next)
+  // round, so a brand-new topic must not look permanently stuck at
+  // "nowy temat…" until the page happens to reload.
+  it('says a topic is searching while its suggest job is in flight, and not once it is decided', () => {
+    const { db } = createTestDb()
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    expect(listTopics(db).map((t) => [t.id, t.searching])).toEqual([[id, true]])
+    db.update(generationJobs).set({ status: 'done' }).run()
+    expect(listTopics(db).map((t) => [t.id, t.searching])).toEqual([[id, false]])
+  })
 })
 
 describe('updateTopic', () => {

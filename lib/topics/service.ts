@@ -199,7 +199,7 @@ export function createTopic(db: Db, input: { context: string } & RoundParams, no
 
 const PENDING = ['queued', 'generating'] as const
 
-export type TopicListRow = TopicRow & { cardCount: number; pendingCount: number }
+export type TopicListRow = TopicRow & { cardCount: number; pendingCount: number; searching: boolean }
 
 export function listTopics(db: Db): TopicListRow[] {
   const cardCounts = new Map(
@@ -220,12 +220,28 @@ export function listTopics(db: Db): TopicListRow[] {
       .all()
       .map((r) => [r.topicId!, r.n]),
   )
+  // A topic still searching for its first (or next) round: /tematy polls
+  // for it too, so a brand-new topic does not sit at "nowy temat…" until
+  // the page happens to reload.
+  const searchingIds = new Set(
+    db
+      .select({ topicId: generationJobs.topicId })
+      .from(generationJobs)
+      .where(and(eq(generationJobs.kind, 'suggest'), isNotNull(generationJobs.topicId), inArray(generationJobs.status, ['queued', 'running'])))
+      .all()
+      .map((r) => r.topicId!),
+  )
   return db
     .select()
     .from(topics)
     .orderBy(desc(topics.createdAt))
     .all()
-    .map((t) => ({ ...t, cardCount: cardCounts.get(t.id) ?? 0, pendingCount: pendingCounts.get(t.id) ?? 0 }))
+    .map((t) => ({
+      ...t,
+      cardCount: cardCounts.get(t.id) ?? 0,
+      pendingCount: pendingCounts.get(t.id) ?? 0,
+      searching: searchingIds.has(t.id),
+    }))
 }
 
 /** Names of named topics, for showing beside cards. */

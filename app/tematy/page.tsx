@@ -31,7 +31,10 @@ export default function TopicsPage() {
     void load()
   }, [load])
 
-  const pending = topics.some((x) => x.pendingCount > 0)
+  // A brand-new topic has no pending captures yet — it is still searching for
+  // its first round — so it must keep the page polling too, or it sits at
+  // "nowy temat…" until the page happens to reload.
+  const pending = topics.some((x) => x.pendingCount > 0 || x.searching)
   useEffect(() => {
     if (!pending) return
     const id = setInterval(() => void load(), 2_000)
