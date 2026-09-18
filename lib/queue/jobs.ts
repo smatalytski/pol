@@ -1,7 +1,7 @@
-import { and, asc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { captures, generationJobs } from '../db/schema'
+import { captures, cards, generationJobs } from '../db/schema'
 import { GenerationError } from '../generate'
 import { backoffMs } from './backoff'
 import { approvedIds, type ReviewRow } from './review'
@@ -100,7 +100,9 @@ export function underReview(db: Db): ReviewRow[] {
 /**
  * Every approved recording leaves review: a word already in the deck becomes
  * 'duplicate' and is never queued (§4); any other becomes 'queued' with a
- * `new` job. One transaction, so a recording is never queued without its job.
+ * `new` job. A word whose matched card was deleted during the window counts
+ * as new, and its stale duplicate_of is cleared. One transaction, so a
+ * recording is never queued without its job.
  * Processed oldest-transcribed-first (ties broken by createdAt) so that, when
  * several recordings are approved in the same tick, their jobs are inserted
  * in a fixed, sensible order rather than whatever order a Set yields.
@@ -121,11 +123,18 @@ export function promoteApproved(db: Db, now: Date): { queued: string[]; duplicat
         .where(and(eq(captures.id, id), eq(captures.status, 'transcribed')))
         .get()
       if (!row) continue
-      if (row.duplicateOf) {
+      const liveMatch =
+        row.duplicateOf &&
+        tx
+          .select({ id: cards.id })
+          .from(cards)
+          .where(and(eq(cards.id, row.duplicateOf), isNull(cards.deletedAt)))
+          .get()
+      if (liveMatch) {
         tx.update(captures).set({ status: 'duplicate' }).where(eq(captures.id, id)).run()
         duplicates.push(id)
       } else {
-        tx.update(captures).set({ status: 'queued' }).where(eq(captures.id, id)).run()
+        tx.update(captures).set({ status: 'queued', duplicateOf: null }).where(eq(captures.id, id)).run()
         enqueueJob(tx as unknown as Db, { kind: 'new', captureId: id }, now)
         queued.push(id)
       }
@@ -216,7 +225,13 @@ export async function runNextJob(
       setNewCaptureStatus(db, job, 'queued')
       return 'retry'
     }
-    handlers[job.kind].giveUp(job, message, now)
+    try {
+      handlers[job.kind].giveUp(job, message, now)
+    } catch (giveUpErr) {
+      // Logged, not rethrown: the job has still given up. Left 'running', it
+      // would show its card or recording as in flight until the next restart.
+      console.error(`generation job ${job.id} failed to give up`, giveUpErr)
+    }
     setJob(db, job.id, { status: 'failed', attempts, failures, lastError: message, finishedAt: t })
     return 'gave-up'
   }

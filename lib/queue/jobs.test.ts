@@ -131,6 +131,25 @@ describe('runNextJob', () => {
     expect(job(db, a)).toMatchObject({ status: 'queued', attempts: 3, failures: 1, lastError: 'unusable' })
   })
 
+  // A throwing giveUp must not strand the job 'running' until the next restart.
+  it('still fails the job, and logs, when giveUp itself throws', async () => {
+    const { db } = createTestDb()
+    const id = enqueueJob(db, { kind: 'regenerate' }, at(0))
+    db.update(generationJobs).set({ failures: 2, attempts: 2 }).where(eq(generationJobs.id, id)).run()
+    const { handlers, giveUp } = fakeHandlers(vi.fn().mockRejectedValue(new Error('unusable')))
+    giveUp.mockImplementation(() => {
+      throw new Error('giveUp broke')
+    })
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(await runNextJob(db, handlers, { pausedUntil: 0 }, at(0), zero)).toBe('gave-up')
+      expect(job(db, id)).toMatchObject({ status: 'failed', lastError: 'unusable', finishedAt: T })
+      expect(errors).toHaveBeenCalledWith(expect.stringContaining(id), expect.objectContaining({ message: 'giveUp broke' }))
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
   it('treats an error that is not a GenerationError as non-retryable', async () => {
     const { db } = createTestDb()
     enqueueJob(db, { kind: 'regenerate' }, at(0))
@@ -176,6 +195,17 @@ describe('promoteApproved', () => {
     expect(promoteApproved(db, at(10_000))).toEqual({ queued: [], duplicates: ['dup'] })
     expect(db.select().from(generationJobs).all()).toHaveLength(0)
     expect(db.select().from(captures).where(eq(captures.id, 'dup')).get()!.status).toBe('duplicate')
+  })
+
+  // The card it matched was deleted during the window: there is nothing to
+  // be a duplicate of any more, so the word is generated after all.
+  it('queues a już masz word as new when the card it matched was deleted', () => {
+    const { db, sqlite } = createTestDb()
+    sqlite.prepare(`INSERT INTO cards (id, type, answer_pl, answer_key, status, created_at, updated_at, due, deleted_at) VALUES ('k', 'ru_to_pl', 'kot', 'kot', 'ready', 1, 1, 1, 5)`).run()
+    capture(db, 'dup', { duplicateOf: 'k' })
+    expect(promoteApproved(db, at(10_000))).toEqual({ queued: ['dup'], duplicates: [] })
+    expect(db.select().from(captures).where(eq(captures.id, 'dup')).get()).toMatchObject({ status: 'queued', duplicateOf: null })
+    expect(db.select().from(generationJobs).all()).toEqual([expect.objectContaining({ kind: 'new', captureId: 'dup' })])
   })
 
   it('promotes a recording only once', () => {
