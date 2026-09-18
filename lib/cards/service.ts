@@ -28,7 +28,7 @@ export type CreateCardInput = {
    * string — so the primary lookup alone would miss the earlier card and
    * silently fork the word into a second one, orphaning the first. The
    * pipeline passes `answerKey(transcript)` here on its success path; a
-   * caller with no secondary key (e.g. the image route, which has no
+   * caller with no secondary key (e.g. POST /api/cards, which has no
    * transcript) simply omits it. The primary match always wins: this is
    * only ever consulted when the primary lookup found nothing.
    */
@@ -43,12 +43,11 @@ export type DuplicateLookup = {
 
 /**
  * Looks up an existing card for `answerPl`/`fallbackAnswerKey` without creating
- * anything. Split out of `createCard` so a caller whose duplicate check has a
- * side effect it wants to avoid paying on the duplicate path — e.g. the image
- * route, which must not store a media blob for a photo that turns out to
- * duplicate an existing card — can check first and only do that side effect
- * when it's actually about to create a card. `createCard` itself calls this
- * so there is exactly one implementation of the dedup logic, not two.
+ * anything. Split out of `createCard` so a caller can check for a duplicate
+ * before doing whatever creating or updating a card would otherwise trigger:
+ * `createCard` calls it before inserting a new row, and `applyGeneratedFields`
+ * calls it before re-keying a card, so there is exactly one implementation of
+ * the dedup logic, not two.
  */
 export function findDuplicate(db: Db, input: DuplicateLookup): string | null {
   const key = answerKey(input.answerPl)
@@ -56,14 +55,11 @@ export function findDuplicate(db: Db, input: DuplicateLookup): string | null {
   // function existed, the capture pipeline inlined this same lookup scoped only
   // by answer_key — that was never wrong, merely untested at the boundary,
   // because the pipeline is the only caller and only ever creates `ru_to_pl`
-  // cards, so a type filter was a no-op there. Now that this is shared with the
-  // image route (`image_to_pl`) and, eventually, a forms path (`pl_forms`), the
-  // type scope is a deliberate behavior change: a photo of a word and a
-  // dictation of the same word are different exercises with different
-  // retrieval cues (recognize an image vs. recall from a Russian prompt), and
-  // spec §3 treats the card types as distinct. Without this scope, dropping a
-  // photo of an already-dictated word would silently produce no new card, with
-  // no way for the user to tell why.
+  // cards, so a type filter was a no-op there. Now that this is also used for
+  // a forms path (`pl_forms`), the type scope matters: a `pl_forms` card and a
+  // `ru_to_pl` card are different exercises even when they start from the same
+  // word, and spec §3 treats the card types as distinct. Without this scope, a
+  // card of one type could be mistaken for a duplicate of a card of the other.
   //
   // Soft delete (decided 2026-09-16): a soft-deleted card must NOT be found
   // here. If it were, re-dictating a word you just deleted would silently
