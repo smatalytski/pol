@@ -45,7 +45,7 @@ export const t = {
   detailGrammar: 'Gramatyka',
   cardNotFound: 'Nie ma takiej fiszki',
   regenerateFailed: 'nie udało się wygenerować fiszki',
-  regenerateDuplicate: 'to słowo już jest w talii — zapisano tylko podpowiedź',
+  regenerateDuplicate: 'to słowo już jest w talii',
   showAllForms: 'pokaż wszystkie formy',
   hideAllForms: 'ukryj formy',
   typeLabel: 'karta',

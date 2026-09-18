@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, cards } from '../db/schema'
@@ -212,6 +212,24 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
 }
 
 /**
+ * The capture whose recording created a card: the earliest capture with audio
+ * that points at it. Dedup means several captures can point at one card — a
+ * duplicate dictation resolves to the card it matched — and only the earliest
+ * one's recording actually made it. One rule for everything that needs to
+ * know: `GET /api/cards/:id` offers re-recognition of this capture's audio,
+ * and `retranscribe` rewrites a card in place only for this capture.
+ */
+export function creatorCaptureId(db: Db, cardId: string): string | null {
+  const row = db
+    .select({ id: captures.id })
+    .from(captures)
+    .where(and(eq(captures.cardId, cardId), isNotNull(captures.audioMediaId)))
+    .orderBy(asc(captures.createdAt))
+    .get()
+  return row?.id ?? null
+}
+
+/**
  * Recognises a capture's stored audio again, in a language the user names, and
  * rebuilds its card from the result.
  *
@@ -227,6 +245,12 @@ export function listCaptures(db: Db, since: number): CaptureView[] {
  * stored answer — would faithfully reproduce the same mistake. The audio is
  * kept permanently anyway (spec §4/§9), which is what makes this possible at
  * all.
+ *
+ * It rewrites a card in place only when this capture created it (see
+ * `creatorCaptureId`). A capture that deduped onto an earlier card does not own
+ * it: that card is a different recording's word, with its own schedule and
+ * review history, so this capture goes through `createCard` like a new
+ * dictation and is repointed at whatever card that yields.
  */
 export async function retranscribe(
   deps: CaptureDeps,
@@ -276,16 +300,20 @@ export async function retranscribe(
     .get()
   if (!still) return { cardId: null, duplicateOf: null, error: generationError }
 
-  const existing = still.cardId
-    ? db
-        .select()
-        .from(cards)
-        .where(and(eq(cards.id, still.cardId), isNull(cards.deletedAt)))
-        .get()
-    : undefined
+  const existing =
+    still.cardId && creatorCaptureId(db, still.cardId) === captureId
+      ? db
+          .select()
+          .from(cards)
+          .where(and(eq(cards.id, still.cardId), isNull(cards.deletedAt)))
+          .get()
+      : undefined
 
   const { cardId, duplicateOf } = existing
     ? (({ card, duplicateOf }) => {
+        // On a clash the card was left untouched (the new word belongs to
+        // another card), so there is nothing here to mark.
+        if (duplicateOf) return { cardId: card.id, duplicateOf }
         // Same fallback processCapture's create path has always had, and the
         // reason it is needed here was found end to end against the real
         // providers: recognition succeeded, Gemini answered 429, and the card
@@ -296,8 +324,8 @@ export async function retranscribe(
         // only accepts needs_input and regenerates from answer_pl — by then
         // the Russian transcript, which fromDictation reads correctly.
         if (!generated) updateCard(db, card.id, { status: 'needs_input' }, now)
-        return { cardId: card.id, duplicateOf }
-      })(applyGeneratedFields(db, existing, fields, now))
+        return { cardId: card.id, duplicateOf: null }
+      })(applyGeneratedFields(db, existing, fields, now, { onClash: 'untouched' }))
     : createCard(
         db,
         {

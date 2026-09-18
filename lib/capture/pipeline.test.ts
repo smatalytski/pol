@@ -322,9 +322,10 @@ describe('retranscribe', () => {
   })
 
   // The re-recognised answer re-keys the card, so it can land on a word that
-  // is already in the deck. Forking the deck into two cards sharing one
-  // answer_key is worse than keeping this card's answer and saying so.
-  it('keeps the answer and reports the clash when the new answer already exists', async () => {
+  // is already in the deck. Ruling 12: a partial write here would build a card
+  // out of two words (prompt «склеп» on answer "złośliwy"), so on a clash the
+  // card is left exactly as it was and the clash is reported.
+  it('leaves the card untouched and reports the clash when the new answer already exists', async () => {
     const { d, id } = strandedInPolish()
     await processCapture(d, id, NOW)
     // A second, unrelated card already owns "krypta".
@@ -333,15 +334,103 @@ describe('retranscribe', () => {
     d.transcriber.transcribe = vi.fn().mockResolvedValue('могила')
     await processCapture(d, other, NOW)
     expect(d.db.select().from(cards).all()).toHaveLength(2)
+    const cardId = d.db.select().from(captures).where(eq(captures.id, id)).get()!.cardId!
+    const before = d.db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const owner = d.db.select().from(captures).where(eq(captures.id, other)).get()!.cardId
 
     d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
     d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
-    const { duplicateOf } = await retranscribe(d, id, 'ru', NOW)
+    const result = await retranscribe(d, id, 'ru', new Date(NOW.getTime() + 60_000))
 
-    const fixed = d.db.select().from(cards).where(eq(cards.id, d.db.select().from(captures).where(eq(captures.id, id)).get()!.cardId!)).get()!
-    expect(duplicateOf).not.toBeNull()
-    expect(fixed.answerPl).toBe('złośliwy') // untouched
-    expect(fixed.promptText).toBe('склеп') // prompt still written
+    expect(result.duplicateOf).toBe(owner)
+    expect(result.cardId).toBe(cardId)
+    expect(d.db.select().from(cards).where(eq(cards.id, cardId)).get()).toEqual(before)
+    expect(d.db.select().from(cards).all()).toHaveLength(2)
+  })
+
+  // Ruling 10 regression. Dedup points a duplicate capture at the card an
+  // EARLIER capture created. Re-recognising the duplicate must not rewrite that
+  // card: it is a different word with its own schedule and review history.
+  it('does not rewrite the card an earlier capture created when re-recognising a duplicate', async () => {
+    const SKLEP: GeneratedCard = {
+      answer_pl: 'sklep',
+      prompt_ru: 'магазин',
+      prompt_hint: '',
+      example_pl: 'Idę do sklepu.',
+      example_ru: 'Я иду в магазин.',
+      grammar_note: '',
+      kind: 'rzeczownik',
+      forms_basic: [{ label: 'D. l.poj.', value: 'sklepu' }],
+      forms_extended: [],
+    }
+    const GROBOWIEC: GeneratedCard = {
+      answer_pl: 'grobowiec',
+      prompt_ru: 'склеп',
+      prompt_hint: '',
+      example_pl: 'Grobowiec rodzinny.',
+      example_ru: 'Семейный склеп.',
+      grammar_note: '',
+      kind: 'rzeczownik',
+      forms_basic: [{ label: 'D. l.poj.', value: 'grobowca' }],
+      forms_extended: [],
+    }
+    const d = deps({
+      transcriber: { transcribe: vi.fn().mockResolvedValue('sklep') },
+      generator: { fromDictation: vi.fn().mockResolvedValue(SKLEP) },
+    })
+    // A: a real Polish "sklep".
+    const a = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, a, NOW)
+    const shop = d.db.select().from(cards).get()!
+    // B, a minute later: Russian «склеп», which Polish recognition heard as
+    // "sklep" — so it deduped onto A's card.
+    const b = createCapture(d.db, { bytes: new Uint8Array([4, 2]), mime: 'audio/webm' }, new Date(NOW.getTime() + 60_000))
+    await processCapture(d, b, NOW)
+    expect(d.db.select().from(captures).where(eq(captures.id, b)).get()!.cardId).toBe(shop.id)
+
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    d.generator.fromDictation = vi.fn().mockResolvedValue(GROBOWIEC)
+    const { cardId, duplicateOf } = await retranscribe(d, b, 'ru', NOW)
+
+    // The shop card is exactly as it was.
+    expect(d.db.select().from(cards).where(eq(cards.id, shop.id)).get()).toEqual(shop)
+    // B now has its own grobowiec card.
+    const all = d.db.select().from(cards).all()
+    expect(all).toHaveLength(2)
+    const grave = all.find((c) => c.id !== shop.id)!
+    expect(grave.answerPl).toBe('grobowiec')
+    expect(grave.promptText).toBe('склеп')
+    expect(cardId).toBe(grave.id)
+    expect(duplicateOf).toBeNull()
+    expect(d.db.select().from(captures).where(eq(captures.id, b)).get()!.cardId).toBe(grave.id)
+    // A still points at the shop card.
+    expect(d.db.select().from(captures).where(eq(captures.id, a)).get()!.cardId).toBe(shop.id)
+  })
+
+  // Same duplicate capture, but the re-recognised word is already in the deck:
+  // createCard's dedup points the capture at that card and reports it.
+  it('points a re-recognised duplicate capture at an existing card for the new word', async () => {
+    const d = deps()
+    const a = createCapture(d.db, AUDIO, NOW)
+    await processCapture(d, a, NOW) // złośliwy
+    const first = d.db.select().from(cards).get()!
+    const b = createCapture(d.db, { bytes: new Uint8Array([4, 2]), mime: 'audio/webm' }, new Date(NOW.getTime() + 60_000))
+    await processCapture(d, b, NOW) // dedups onto złośliwy
+    // Someone already has "krypta" in the deck.
+    const k = createCapture(d.db, { bytes: new Uint8Array([5]), mime: 'audio/webm' }, NOW)
+    d.generator.fromDictation = vi.fn().mockResolvedValue(RU_GENERATED)
+    await processCapture(d, k, NOW)
+    const krypta = d.db.select().from(cards).all().find((c) => c.answerPl === 'krypta')!
+    const kryptaBefore = { ...krypta }
+
+    d.transcriber.transcribe = vi.fn().mockResolvedValue('склеп')
+    const { cardId, duplicateOf } = await retranscribe(d, b, 'ru', NOW)
+
+    expect(cardId).toBe(krypta.id)
+    expect(duplicateOf).toBe(krypta.id)
+    expect(d.db.select().from(captures).where(eq(captures.id, b)).get()!.cardId).toBe(krypta.id)
+    expect(d.db.select().from(cards).where(eq(cards.id, first.id)).get()).toEqual(first)
+    expect(d.db.select().from(cards).where(eq(cards.id, krypta.id)).get()).toEqual(kryptaBefore)
     expect(d.db.select().from(cards).all()).toHaveLength(2)
   })
 

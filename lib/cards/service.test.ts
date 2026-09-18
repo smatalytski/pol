@@ -321,15 +321,73 @@ describe('applyGeneratedFields and the card type', () => {
     const { db } = createTestDb()
     const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const { card: after } = applyGeneratedFields(db, card, { ...nounFields, wordKind: 'fraza', formsJson: null }, NOW)
+    const fields = { ...nounFields, wordKind: 'fraza' as const, formsJson: null }
+    const { card: after } = applyGeneratedFields(db, card, fields, NOW, { onClash: 'keepAnswer' })
     expect(after.type).toBe('ru_to_pl')
+  })
+
+  // Ruling 11: the kind alone is not enough. A noun whose generation came back
+  // with no rows would leave a pl_to_pl card with nothing on its answer side —
+  // the state setCardType refuses to create.
+  it('reverts a pl_to_pl card to ru_to_pl when the new generation keeps the kind but has no forms', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const fields = { ...nounFields, formsJson: null }
+    const { card: after } = applyGeneratedFields(db, card, fields, NOW, { onClash: 'keepAnswer' })
+    expect(after.type).toBe('ru_to_pl')
+  })
+
+  // The revert re-scopes the clash check to ru_to_pl, and here that word is
+  // already a ru_to_pl card. Outcome: the card keeps its whole answer identity
+  // — type, answer, kind and forms — and the clash is reported. Reverting
+  // would fork the word into two ru_to_pl cards with one answer key, and
+  // staying pl_to_pl is safe because the forms it keeps are the ones it was
+  // already drilled on (a card only becomes or stays pl_to_pl with drillable
+  // forms). Under keepAnswer the prompt and examples are still written.
+  it('keeps a pl_to_pl card whole when reverting it would clash with a ru_to_pl card', () => {
+    const { db } = createTestDb()
+    const ruCard = createCard(db, input({ ...nounFields }), NOW)
+    const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const { card: after, duplicateOf } = applyGeneratedFields(
+      db,
+      card,
+      { ...nounFields, promptText: 'котик', wordKind: 'inne', formsJson: null },
+      NOW,
+      { onClash: 'keepAnswer' },
+    )
+    expect(duplicateOf).toBe(ruCard.cardId)
+    expect(after.type).toBe('pl_to_pl')
+    expect(after.answerPl).toBe('kot')
+    expect(after.wordKind).toBe('rzeczownik')
+    expect(after.formsJson).toBe(nounFields.formsJson)
+    expect(after.promptText).toBe('котик')
+  })
+
+  it('leaves the card exactly as it was on a clash under the untouched policy', () => {
+    const { db } = createTestDb()
+    const other = createCard(db, input({ answerPl: 'pies' }), NOW)
+    const { cardId } = createCard(db, input({ ...nounFields }), NOW)
+    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
+    const later = new Date(NOW.getTime() + 60_000)
+    const { card: after, duplicateOf } = applyGeneratedFields(
+      db,
+      card,
+      { ...nounFields, answerPl: 'pies', promptText: 'собака', wordKind: 'rzeczownik', formsJson: null },
+      later,
+      { onClash: 'untouched' },
+    )
+    expect(duplicateOf).toBe(other.cardId)
+    expect(after).toEqual(card)
+    expect(db.select().from(cards).where(eq(cards.id, cardId)).get()).toEqual(card)
   })
 
   it('keeps a pl_to_pl card pl_to_pl when forms remain', () => {
     const { db } = createTestDb()
     const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW)
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW, { onClash: 'keepAnswer' })
     expect(after.type).toBe('pl_to_pl')
     expect(after.formsJson).toBe(nounFields.formsJson)
   })
@@ -338,7 +396,7 @@ describe('applyGeneratedFields and the card type', () => {
     const { db } = createTestDb()
     const { cardId } = createCard(db, input({ answerPl: 'kot', wordKind: null, formsJson: null }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW)
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW, { onClash: 'keepAnswer' })
     expect(after.wordKind).toBe('rzeczownik')
     expect(after.formsJson).toBe(nounFields.formsJson)
   })
@@ -403,6 +461,38 @@ describe('regenerateCard', () => {
     expect(card.answerKey).toBe('zdrow jak ryba')
     expect(card.promptText).toBe(generated.prompt_ru)
     expect(card.status).toBe('ready')
+  })
+
+  // Ruling 12: the answer's identity includes its kind and forms — on a
+  // pl_to_pl card the forms ARE the answer — so a clash keeps them with the
+  // answer instead of hanging another word's forms on it.
+  it('keeps the card kind and forms with its answer on a clash', async () => {
+    const { db } = createTestDb()
+    const OWN = JSON.stringify({ basic: [{ label: 'M. l.mn.', value: 'ryby' }], extended: [] })
+    const nounGen = {
+      fromDictation: vi.fn().mockResolvedValue({
+        ...generated,
+        kind: 'przymiotnik',
+        forms_basic: [{ label: 'przysłówek', value: 'zdrowo' }],
+      }),
+    } as unknown as Generator
+    createCard(db, input({ answerPl: 'zdr\u00f3w jak ryba' }), NOW)
+    const { cardId } = createCard(
+      db,
+      stranded({ answerPl: 'Zdrow jak ryba.', wordKind: 'rzeczownik', formsJson: OWN }),
+      NOW,
+    )
+    const { card, duplicateOf } = await regenerateCard(db, nounGen, cardId, NOW)
+    expect(duplicateOf).not.toBeNull()
+    expect(card.answerPl).toBe('Zdrow jak ryba.')
+    expect(card.wordKind).toBe('rzeczownik')
+    expect(card.formsJson).toBe(OWN)
+    // Everything else from the generation is still written.
+    expect(card.promptText).toBe(generated.prompt_ru)
+    expect(card.promptHint).toBe(generated.prompt_hint)
+    expect(card.examplePl).toBe(generated.example_pl)
+    expect(card.exampleRu).toBe(generated.example_ru)
+    expect(card.grammarNote).toBe(generated.grammar_note)
   })
 
   it('refuses a card that is not needs_input', async () => {

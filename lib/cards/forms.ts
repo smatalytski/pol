@@ -50,3 +50,13 @@ export function parseForms(json: string | null): CardForms | null {
   const forms = { basic: rows((v as CardForms).basic), extended: rows((v as CardForms).extended) }
   return forms.basic.length === 0 && forms.extended.length === 0 ? null : forms
 }
+
+/**
+ * Whether a card can be a pl_to_pl card: its whole answer is its forms, so it
+ * needs a kind that has forms AND stored forms that read back as non-empty. One
+ * rule for both `setCardType` (switching to pl_to_pl) and `applyGeneratedFields`
+ * (reverting a pl_to_pl card a regeneration left without forms).
+ */
+export function canDrillForms(kind: WordKind | null, formsJson: string | null): boolean {
+  return hasForms(kind) && parseForms(formsJson) !== null
+}

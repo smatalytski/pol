@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasForms, parseForms, serializeForms, type CardForms } from './forms'
+import { canDrillForms, hasForms, parseForms, serializeForms, type CardForms } from './forms'
 
 const NOUN: CardForms = {
   basic: [{ label: 'M. l.mn.', value: 'koty' }],
@@ -15,6 +15,25 @@ describe('hasForms', () => {
     expect(hasForms('fraza')).toBe(false)
     expect(hasForms('inne')).toBe(false)
     expect(hasForms(null)).toBe(false)
+  })
+})
+
+describe('canDrillForms', () => {
+  const json = JSON.stringify(NOUN)
+
+  it('is true for a kind with forms that has forms stored', () => {
+    expect(canDrillForms('rzeczownik', json)).toBe(true)
+  })
+
+  it('is false for a kind with forms that has none stored, or none readable', () => {
+    expect(canDrillForms('rzeczownik', null)).toBe(false)
+    expect(canDrillForms('rzeczownik', '{"basic":[],"extended":[]}')).toBe(false)
+    expect(canDrillForms('rzeczownik', 'not json')).toBe(false)
+  })
+
+  it('is false for a kind without forms, whatever is stored', () => {
+    expect(canDrillForms('fraza', json)).toBe(false)
+    expect(canDrillForms(null, json)).toBe(false)
   })
 })
 
