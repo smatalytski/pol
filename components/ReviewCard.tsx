@@ -42,11 +42,10 @@ export function ReviewCard({
             {/* Keyed on the card, so the extended toggle closes again for the
                 next card instead of staying open for every one after it. */}
             <FormsView key={card.id} forms={card.forms} />
+            {/* For a ru_to_pl card, the Russian prompt above is the retrieval
+                cue, so no Russian gloss of the example is shown here on the
+                answer side (exampleRu stays stored but unrendered). */}
             {!isForms && card.examplePl && <p className="text-lg">{card.examplePl}</p>}
-            {/* No Russian on the answer side. The Russian prompt above is the
-                retrieval cue; once the card is turned over, a Russian gloss of
-                the Polish example gives the eye an easier place to land than
-                the Polish it is supposed to be reading. */}
             {card.grammarNote && <p className="text-sm text-neutral-500">{card.grammarNote}</p>}
           </div>
         )}
