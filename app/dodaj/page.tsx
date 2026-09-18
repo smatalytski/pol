@@ -22,11 +22,12 @@ export default function AddPage() {
   // One notice line for the chip controls' outcomes. A failed or refused
   // request would otherwise look exactly like a dead button.
   const [notice, setNotice] = useState<Notice | null>(null)
-  // Captures whose re-recognition is in flight. Every recording on this
-  // screen has no card yet (§7.1: uploaded, failed, or still under review),
-  // so re-recognition here is Speech-to-Text only — it just restarts the
-  // review window — but it is still a network round trip, so without this
-  // the user taps again and starts a second one on the same recording.
+  // Captures whose recognition (ponów or a re-recognition) is in flight.
+  // Every recording on this screen has no card yet (§7.1: uploaded, failed,
+  // or still under review), so either is Speech-to-Text only — a
+  // re-recognition just restarts the review window — but it is still a
+  // network round trip, so without this the user taps again and starts a
+  // second one on the same recording.
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
@@ -143,10 +144,6 @@ export default function AddPage() {
     }
   }, [hasPending, drain, fetchCaptures])
 
-  const retry = useCallback((id: string) => {
-    void fetch(`/api/captures/${id}/retry`, { method: 'POST' })
-  }, [])
-
   // A failed refresh after a chip action is not reported: the action's own
   // outcome already was, and the chip is only as stale as it was before.
   const refresh = useCallback(() => fetchCaptures().catch(() => {}), [fetchCaptures])
@@ -167,6 +164,20 @@ export default function AddPage() {
       }
     },
     [refresh],
+  )
+
+  // ponów re-runs recognition of a failed recording. A failed recording does
+  // not keep the polling alive, so without the refresh whilePending does
+  // afterwards the new transcript would never reach the screen and the
+  // recording would be approved unseen. A request that fails or is refused
+  // leaves the recording failed, which the refreshed chip still shows.
+  const retry = useCallback(
+    (id: string) => {
+      void whilePending(id, async () => {
+        await fetch(`/api/captures/${id}/retry`, { method: 'POST' }).catch(() => {})
+      })
+    },
+    [whilePending],
   )
 
   // Recognition is Polish by default, because that is what nearly all

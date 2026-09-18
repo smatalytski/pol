@@ -62,7 +62,7 @@ export function CaptureChip({
   onRetry: (id: string) => void
   onDelete: (item: ChipItem) => void
   onRelanguage: (id: string, lang: DictationLang) => void
-  /** A re-recognition for this recording is in flight; its controls are disabled until it lands. */
+  /** A recognition for this recording (ponów or a re-recognition) is in flight; its language controls are disabled until it lands. */
   pending?: boolean
 }) {
   // A ref, not state: bookkeeping between one pointerdown and the pointerup

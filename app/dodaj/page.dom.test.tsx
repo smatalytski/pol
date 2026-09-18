@@ -541,6 +541,40 @@ describe('AddPage re-recognition', () => {
   })
 })
 
+// A failed recognition stops the polling (nothing on screen is in flight), so
+// ponów has to fetch its own result: otherwise the recording re-enters review
+// and is approved without ever being shown.
+describe('AddPage ponów', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the transcript that the retried recognition produced', async () => {
+    stubMic()
+    let list: CaptureView[] = [{ ...captureRow('cap-1', 'failed'), error: 'unintelligible' }]
+    const posts: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          posts.push(url)
+          list = [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }]
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: list }) })
+      }),
+    )
+    render(<AddPage />)
+    const control = await screen.findByText(t.retry)
+    await act(async () => {
+      fireEvent.click(control)
+    })
+    expect(posts).toEqual(['/api/captures/cap-1/retry'])
+    expect(await screen.findByText('kot')).toBeTruthy()
+  })
+})
+
 // The fade is data-driven: a recording leaves the screen when the server
 // stops returning it (it was approved), not on a client timer.
 describe('AddPage review fade', () => {
