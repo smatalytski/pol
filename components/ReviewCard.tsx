@@ -2,6 +2,7 @@
 import type { QueueItem } from '@/lib/review/queue'
 import type { RatingValue } from '@/lib/scheduler'
 import { t } from '@/i18n/pl'
+import { FormsView } from './FormsView'
 
 const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
   { value: 1, label: t.again },
@@ -25,17 +26,23 @@ export function ReviewCard({
   onRate: (rating: RatingValue) => void
   onUndo: () => void
 }) {
+  const isForms = card.type === 'pl_to_pl'
   return (
     <div className="flex min-h-[70vh] flex-col gap-6">
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-        <p className="text-3xl">{card.promptText}</p>
-        {card.promptHint && <p className="text-sm text-neutral-500">{card.promptHint}</p>}
+        {/* A pl_to_pl card asks with the Polish word itself, and carries no
+            Russian anywhere (spec 2026-09-18 §2). */}
+        <p className="text-3xl">{isForms ? card.answerPl : card.promptText}</p>
+        {!isForms && card.promptHint && <p className="text-sm text-neutral-500">{card.promptHint}</p>}
 
         {revealed && (
           <div className="mt-6 flex flex-col items-center gap-2">
-            <p className="text-3xl font-semibold">{card.answerPl}</p>
+            {!isForms && <p className="text-3xl font-semibold">{card.answerPl}</p>}
             <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
-            {card.examplePl && <p className="text-lg">{card.examplePl}</p>}
+            {/* Keyed on the card, so the extended toggle closes again for the
+                next card instead of staying open for every one after it. */}
+            <FormsView key={card.id} forms={card.forms} />
+            {!isForms && card.examplePl && <p className="text-lg">{card.examplePl}</p>}
             {/* No Russian on the answer side. The Russian prompt above is the
                 retrieval cue; once the card is turned over, a Russian gloss of
                 the Polish example gives the eye an easier place to land than

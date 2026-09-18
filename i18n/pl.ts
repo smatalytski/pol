@@ -46,6 +46,8 @@ export const t = {
   cardNotFound: 'Nie ma takiej fiszki',
   regenerateFailed: 'nie udało się wygenerować fiszki',
   regenerateDuplicate: 'to słowo już jest w talii — zapisano tylko podpowiedź',
+  showAllForms: 'pokaż wszystkie formy',
+  hideAllForms: 'ukryj formy',
   saveFailed: 'nie udało się zapisać zmian',
   chipSaveFailed: 'nie udało się zapisać zmian',
 

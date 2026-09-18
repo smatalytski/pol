@@ -14,8 +14,8 @@ const card: QueueItem = {
   answerPl: 'złośliwy',
   examplePl: 'Zrobił to ze złośliwości.',
   grammarNote: null,
-  wordKind: null,
-  forms: null,
+  wordKind: 'przymiotnik',
+  forms: { basic: [{ label: 'przysłówek', value: 'złośliwie' }], extended: [{ label: 'x', value: 'rozszerzone' }] },
   isNew: true,
 }
 
@@ -75,5 +75,58 @@ describe('ReviewCard', () => {
   it('offers a play control for the answer of a ru_to_pl card', () => {
     render(<ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
     expect(screen.getByLabelText(t.play)).toBeTruthy()
+  })
+
+  it('shows the basic forms with the answer, and the extended ones only on request', async () => {
+    render(<ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
+    expect(screen.getByText('złośliwie')).toBeTruthy()
+    expect(screen.queryByText('rozszerzone')).toBeNull()
+    await userEvent.click(screen.getByText(t.showAllForms))
+    expect(screen.getByText('rozszerzone')).toBeTruthy()
+  })
+
+  it('does not show forms before the answer is revealed', () => {
+    render(<ReviewCard card={card} revealed={false} canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
+    expect(screen.queryByText('złośliwie')).toBeNull()
+  })
+
+  // Spec §7.2: the toggle is per card. Without a reset, opening it once would
+  // leave every following card's extended forms open.
+  it('closes the extended forms again for the next card', async () => {
+    const { rerender } = render(
+      <ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    await userEvent.click(screen.getByText(t.showAllForms))
+    rerender(
+      <ReviewCard card={{ ...card, id: 'b' }} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.queryByText('rozszerzone')).toBeNull()
+  })
+
+  it('shows no forms section for a phrase', () => {
+    render(
+      <ReviewCard card={{ ...card, wordKind: 'fraza', forms: null }} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.queryByText(t.showAllForms)).toBeNull()
+  })
+
+  // Spec §2: pl_to_pl is the Polish word as the question and its forms as the
+  // answer. No Russian anywhere — not the prompt, not the hint.
+  it('asks a pl_to_pl card with the Polish word and no Russian', () => {
+    render(
+      <ReviewCard card={{ ...card, type: 'pl_to_pl' }} revealed={false} canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.getByText('złośliwy')).toBeTruthy()
+    expect(screen.queryByText('злобный')).toBeNull()
+    expect(screen.queryByText('прилагательное')).toBeNull()
+  })
+
+  it('answers a pl_to_pl card with its forms, not a second copy of the word or an example', () => {
+    render(
+      <ReviewCard card={{ ...card, type: 'pl_to_pl' }} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />,
+    )
+    expect(screen.getAllByText('złośliwy')).toHaveLength(1)
+    expect(screen.getByText('złośliwie')).toBeTruthy()
+    expect(screen.queryByText('Zrobił to ze złośliwości.')).toBeNull()
   })
 })
