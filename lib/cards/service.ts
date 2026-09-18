@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { cards } from '../db/schema'
@@ -51,15 +51,9 @@ export type DuplicateLookup = {
  */
 export function findDuplicate(db: Db, input: DuplicateLookup): string | null {
   const key = answerKey(input.answerPl)
-  // Dedup is scoped by (answer_key, type), not by answer_key alone. Before this
-  // function existed, the capture pipeline inlined this same lookup scoped only
-  // by answer_key — that was never wrong, merely untested at the boundary,
-  // because the pipeline is the only caller and only ever creates `ru_to_pl`
-  // cards, so a type filter was a no-op there. Now that this is also used for
-  // a forms path (`pl_forms`), the type scope matters: a `pl_forms` card and a
-  // `ru_to_pl` card are different exercises even when they start from the same
-  // word, and spec §3 treats the card types as distinct. Without this scope, a
-  // card of one type could be mistaken for a duplicate of a card of the other.
+  // Dedup is scoped by (answer_key, type): each card type is a distinct
+  // exercise, so a word's card of one type must not be mistaken for a
+  // duplicate of its card of another.
   //
   // Soft delete (decided 2026-09-16): a soft-deleted card must NOT be found
   // here. If it were, re-dictating a word you just deleted would silently
@@ -209,65 +203,9 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
  *
  * A no-op on an unknown id, like the DELETE route it backs: deleting
  * something already gone should not be an error.
- *
- * Cascades to the card's `pl_forms` child, if it has one (important review
- * finding): `createFormsCard` already treats `parent_card_id` as
- * authoritative in the other direction (its idempotent lookup is scoped by
- * parent), so deleting the parent while leaving the child `ready` would keep
- * drilling a word the user just told the app to forget — indistinguishable,
- * from the user's side, from the delete not having worked at all.
  */
 export function deleteCard(db: Db, id: string, now: Date): void {
-  db.update(cards)
-    .set({ deletedAt: now.getTime() })
-    .where(or(eq(cards.id, id), eq(cards.parentCardId, id)))
-    .run()
-}
-
-export async function createFormsCard(
-  db: Db,
-  generator: Generator,
-  parentId: string,
-  now: Date,
-): Promise<{ cardId: string; duplicateOf: string | null }> {
-  const parent = db
-    .select()
-    .from(cards)
-    .where(and(eq(cards.id, parentId), isNull(cards.deletedAt)))
-    .get()
-  if (!parent) throw new Error(`no such card: ${parentId}`)
-  // Important review finding: a pl_forms card's answer is a Markdown table,
-  // never a lemma, and forms-of-forms has no meaning under spec §3's card
-  // model. Rejected here (not just hidden behind a button in app/fiszki) so
-  // this can't be triggered by a direct request to the route either.
-  if (parent.type === 'pl_forms') {
-    throw new Error(`cannot generate forms for a pl_forms card: ${parentId}`)
-  }
-
-  const existing = db
-    .select({ id: cards.id })
-    .from(cards)
-    .where(and(eq(cards.parentCardId, parentId), eq(cards.type, 'pl_forms'), isNull(cards.deletedAt)))
-    .get()
-  if (existing) return { cardId: existing.id, duplicateOf: existing.id }
-
-  const forms = await generator.forms(parent.answerPl)
-  return createCard(
-    db,
-    {
-      type: 'pl_forms',
-      promptText: forms.prompt_pl,
-      promptHint: null,
-      promptMediaId: null,
-      answerPl: forms.answer_pl,
-      examplePl: null,
-      exampleRu: null,
-      grammarNote: null,
-      status: 'ready',
-      parentCardId: parentId,
-    },
-    now,
-  )
+  db.update(cards).set({ deletedAt: now.getTime() }).where(eq(cards.id, id)).run()
 }
 
 /**

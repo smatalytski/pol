@@ -14,21 +14,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const card = db.select().from(cards).where(eq(cards.id, id)).get()
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-  // Card type decides both eligibility and language — promptText is a
-  // Russian gloss for ru_to_pl but a Polish form request for pl_forms
-  // (spec §8), and pl_forms' answer is a Markdown declension table that
-  // spec §6 says must never be read aloud. Deriving this from `part` alone
-  // would send Polish text to the Russian voice, or read a table aloud, and
-  // because the clip cache is content-addressed, a wrong clip made that way
-  // could never be displaced by a later fix.
+  // Only a ru_to_pl card has a Russian prompt to speak; its answer is always
+  // Polish. Deriving the voice from `part` alone would send Polish text to the
+  // Russian voice, and because the clip cache is content-addressed, a wrong
+  // clip made that way could never be displaced by a later fix.
   const lang: 'pl' | 'ru' | null =
-    part === 'prompt'
-      ? card.type === 'ru_to_pl'
-        ? 'ru'
-        : null
-      : card.type === 'ru_to_pl'
-        ? 'pl'
-        : null
+    part === 'prompt' ? (card.type === 'ru_to_pl' ? 'ru' : null) : 'pl'
   if (!lang) return NextResponse.json({ error: 'nothing to speak' }, { status: 404 })
 
   const text = part === 'answer' ? card.answerPl : card.promptText

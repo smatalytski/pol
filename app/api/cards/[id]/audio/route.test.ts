@@ -103,20 +103,6 @@ describe('GET /api/cards/:id/audio', () => {
     expect(res.headers.get('location')).toBe('/api/media/media-id-stub')
   })
 
-  it('pl_forms prompt has nothing to speak (it is a Polish form request, not a Russian gloss)', async () => {
-    seedCard({ id: 'c5', type: 'pl_forms', promptText: 'zamek, forms: sg/pl, all cases' })
-    const res = await call('c5', 'prompt')
-    expect(res.status).toBe(404)
-    expect(getClipMock).not.toHaveBeenCalled()
-  })
-
-  it('pl_forms answer has nothing to speak (a declension table read aloud is noise)', async () => {
-    seedCard({ id: 'c6', type: 'pl_forms', answerPl: '| case | sg | pl |\n|---|---|---|' })
-    const res = await call('c6', 'answer')
-    expect(res.status).toBe(404)
-    expect(getClipMock).not.toHaveBeenCalled()
-  })
-
   it('rejects an invalid part before touching the card', async () => {
     seedCard({ id: 'c7' })
     const res = await call('c7', 'bogus')

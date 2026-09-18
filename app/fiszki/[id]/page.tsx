@@ -2,8 +2,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { FormsTable } from '@/components/FormsTable'
-import { hasAnswerAudio } from '@/lib/cards/display'
 import type { CardRow } from '@/lib/cards/service'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
@@ -20,10 +18,6 @@ export default function CardDetailPage() {
   const [card, setCard] = useState<CardRow | null>(null)
   const [missing, setMissing] = useState(false)
   const [saveError, setSaveError] = useState(false)
-  // Three outcomes, not two: on the old list screen a successful "dodaj formy"
-  // reloaded the list and the new card appeared in it, but nothing on this
-  // screen changes, so success needs saying out loud too.
-  const [formsState, setFormsState] = useState<'idle' | 'done' | 'failed'>('idle')
   const [regenError, setRegenError] = useState(false)
   const [regenDuplicate, setRegenDuplicate] = useState(false)
   // The recording this card came from, when there is one. Supplied by the GET
@@ -62,11 +56,6 @@ export default function CardDetailPage() {
     }
     setSaveError(false)
     setCard(((await res.json()) as { card: CardRow }).card)
-  }
-
-  async function addForms() {
-    const res = await fetch(`/api/cards/${id}/formy`, { method: 'POST' })
-    setFormsState(res.ok ? 'done' : 'failed')
   }
 
   async function regenerate() {
@@ -129,30 +118,20 @@ export default function CardDetailPage() {
         {t.backToCards}
       </Link>
 
-      {card.type === 'pl_forms' ? (
-        // An <input>'s value sanitization strips CR/LF, so a declension
-        // table's newlines never survive a round trip through an editable
-        // field — the next blur would PATCH the flattened string over the only
-        // copy of the table. Read-only, through the same renderer review uses.
-        <FormsTable markdown={card.answerPl} />
-      ) : (
-        // Keyed on the value the server holds, so a card rebuilt underneath
-        // this screen — by re-recognition or regeneration — remounts the input
-        // with the new text. `defaultValue` is only read on mount, so without
-        // this the field would keep displaying the old answer and the next
-        // blur would PATCH that stale value straight back over the repair.
-        // Typing does not change card state, so this never remounts mid-edit.
-        <input
-          key={`answer:${card.answerPl}`}
-          defaultValue={card.answerPl}
-          onBlur={(e) => e.target.value !== card.answerPl && void patch({ answerPl: e.target.value })}
-          className="w-full text-2xl font-semibold"
-        />
-      )}
+      {/* Keyed on the value the server holds, so a card rebuilt underneath
+          this screen — by re-recognition or regeneration — remounts the input
+          with the new text. `defaultValue` is only read on mount, so without
+          this the field would keep displaying the old answer and the next
+          blur would PATCH that stale value straight back over the repair.
+          Typing does not change card state, so this never remounts mid-edit. */}
+      <input
+        key={`answer:${card.answerPl}`}
+        defaultValue={card.answerPl}
+        onBlur={(e) => e.target.value !== card.answerPl && void patch({ answerPl: e.target.value })}
+        className="w-full text-2xl font-semibold"
+      />
 
-      {hasAnswerAudio(card.type) && (
-        <audio controls preload="none" src={`/api/cards/${id}/audio?part=answer`} aria-label={t.play} />
-      )}
+      <audio controls preload="none" src={`/api/cards/${id}/audio?part=answer`} aria-label={t.play} />
 
       <label className="flex flex-col gap-1">
         <span className="text-xs uppercase text-neutral-500">{t.detailPrompt}</span>
@@ -189,13 +168,6 @@ export default function CardDetailPage() {
       )}
 
       <div className="flex flex-wrap gap-4 text-sm">
-        {/* createFormsCard rejects a pl_forms parent, so offering it here
-            would burn a model call on a request the service refuses. */}
-        {card.type !== 'pl_forms' && (
-          <button onClick={() => void addForms()} className="underline">
-            {t.addForms}
-          </button>
-        )}
         {card.status === 'needs_input' && (
           <button onClick={() => void regenerate()} className="underline">
             {t.regenerate}
@@ -227,8 +199,6 @@ export default function CardDetailPage() {
       )}
 
       {saveError && <p className="text-sm text-red-600">{t.saveFailed}</p>}
-      {formsState === 'failed' && <p className="text-sm text-red-600">{t.formsFailed}</p>}
-      {formsState === 'done' && <p className="text-sm text-neutral-500">{t.formsAdded}</p>}
       {regenError && <p className="text-sm text-red-600">{t.regenerateFailed}</p>}
       {regenDuplicate && <p className="text-sm text-amber-600">{t.regenerateDuplicate}</p>}
       {langError && <p className="text-sm text-red-600">{t.languageFailed}</p>}

@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { CardRow } from '@/lib/cards/service'
-import { cardTitle } from '@/lib/cards/display'
 import { t } from '@/i18n/pl'
 
 /**
@@ -37,7 +36,7 @@ export default function CardsPage() {
         {rows.map((c) => (
           <li key={c.id} className="border-b">
             <Link href={`/fiszki/${c.id}`} className="flex items-baseline justify-between gap-3 py-3">
-              <span className="text-lg">{cardTitle(c)}</span>
+              <span className="text-lg">{c.answerPl}</span>
               <span className="flex shrink-0 gap-2 text-xs">
                 {c.status === 'needs_input' && <span className="text-amber-600">{t.needsInput}</span>}
                 {/* A suspended card is otherwise indistinguishable from an

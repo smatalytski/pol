@@ -4,7 +4,7 @@ import { createTestDb } from '../db/testing'
 import { cards, reviews } from '../db/schema'
 import { createCard, type CreateCardInput } from './service'
 import type { Generator } from '../generate'
-import { createFormsCard, deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
+import { deleteCard, findDuplicate, regenerateCard, searchCards, updateCard } from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -237,28 +237,6 @@ describe('deleteCard', () => {
     expect(() => deleteCard(db, 'ghost', NOW)).not.toThrow()
   })
 
-  // Important review finding: deleting a word must also retire its pl_forms
-  // conjugation/declension drill — otherwise you delete a word and keep being
-  // drilled on it, which feels identical to a deleted card reappearing.
-  // createFormsCard already treats parent_card_id as authoritative in the
-  // other direction (idempotent lookup by parent); deleteCard must honor the
-  // same link.
-  it('cascades to the pl_forms child it owns', async () => {
-    const { db } = createTestDb()
-    const generator = {
-      forms: vi.fn().mockResolvedValue({ prompt_pl: 'przyzwyczaić się — formy', answer_pl: '| … |' }),
-    } as unknown as Generator
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const child = await createFormsCard(db, generator, parent.cardId, NOW)
-
-    deleteCard(db, parent.cardId, NOW)
-
-    const parentRow = db.select().from(cards).where(eq(cards.id, parent.cardId)).get()!
-    const childRow = db.select().from(cards).where(eq(cards.id, child.cardId)).get()!
-    expect(parentRow.deletedAt).toBe(NOW.getTime())
-    expect(childRow.deletedAt).toBe(NOW.getTime())
-  })
-
   it('does not delete an unrelated card that merely shares no parent link', () => {
     const { db } = createTestDb()
     const a = createCard(db, input({ answerPl: 'jeden' }), NOW)
@@ -317,67 +295,6 @@ describe('findDuplicate and soft delete', () => {
     expect(
       findDuplicate(db, { type: 'ru_to_pl', answerPl: 'złośliwy', fallbackAnswerKey: 'zloslivy' }),
     ).toBeNull()
-  })
-})
-
-describe('createFormsCard', () => {
-  const generator = {
-    forms: vi.fn().mockResolvedValue({ prompt_pl: 'przyzwyczaić się — formy', answer_pl: '| … |' }),
-  } as unknown as Generator
-
-  it('creates a pl_forms child linked to its parent', async () => {
-    const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const child = await createFormsCard(db, generator, parent.cardId, NOW)
-    const row = db.select().from(cards).where(eq(cards.id, child.cardId)).get()!
-    expect(row.type).toBe('pl_forms')
-    expect(row.parentCardId).toBe(parent.cardId)
-    expect(row.promptText).toBe('przyzwyczaić się — formy')
-    expect(row.answerPl).toBe('| … |')
-  })
-
-  it('is idempotent — asking twice does not make two drills', async () => {
-    const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const first = await createFormsCard(db, generator, parent.cardId, NOW)
-    const second = await createFormsCard(db, generator, parent.cardId, NOW)
-    expect(second.cardId).toBe(first.cardId)
-    expect(db.select().from(cards).all()).toHaveLength(2)
-  })
-
-  it('throws on an unknown parent', async () => {
-    const { db } = createTestDb()
-    await expect(createFormsCard(db, generator, 'ghost', NOW)).rejects.toThrow(/ghost/)
-  })
-
-  it('throws on a soft-deleted parent, same as an unknown one', async () => {
-    const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    deleteCard(db, parent.cardId, NOW)
-    await expect(createFormsCard(db, generator, parent.cardId, NOW)).rejects.toThrow(/no such card/)
-  })
-
-  it('generates a fresh child once the previous forms child was soft-deleted', async () => {
-    const { db } = createTestDb()
-    const parent = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const first = await createFormsCard(db, generator, parent.cardId, NOW)
-    deleteCard(db, first.cardId, NOW)
-    const second = await createFormsCard(db, generator, parent.cardId, NOW)
-    expect(second.cardId).not.toBe(first.cardId)
-    expect(second.duplicateOf).toBeNull()
-  })
-
-  // Important review finding: nothing stopped a pl_forms card from being
-  // used as the *parent* of another forms request — one tap would send a
-  // whole Markdown table to generator.forms() as a "lemma", burning a model
-  // call and inserting a nonsense grandchild. Rejected here, not just hidden
-  // in the UI, because the route is reachable directly (e.g. by curl).
-  it('refuses to generate forms for a pl_forms parent', async () => {
-    const { db } = createTestDb()
-    const word = createCard(db, input({ answerPl: 'przyzwyczaić się' }), NOW)
-    const forms = await createFormsCard(db, generator, word.cardId, NOW)
-    await expect(createFormsCard(db, generator, forms.cardId, NOW)).rejects.toThrow(/pl_forms/)
-    expect(generator.forms).not.toHaveBeenCalledWith('| … |')
   })
 })
 

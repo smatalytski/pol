@@ -151,13 +151,6 @@ describe('geminiGenerator.fromDictation', () => {
   })
 })
 
-describe('geminiGenerator.forms', () => {
-  it('returns a Polish prompt and a Polish answer table', async () => {
-    const payload = { prompt_pl: 'przyzwyczaić się — wszystkie formy', answer_pl: '…' }
-    expect(await make(ok(payload)).forms('przyzwyczaić się')).toEqual(payload)
-  })
-})
-
 describe('geminiGenerator model resolution', () => {
   afterEach(() => {
     vi.unstubAllEnvs()

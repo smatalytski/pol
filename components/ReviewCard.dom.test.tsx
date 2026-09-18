@@ -72,41 +72,6 @@ describe('ReviewCard', () => {
     expect(screen.getByRole('button', { name: t.undo })).toBeTruthy()
   })
 
-  // Task 11 fixed GET /api/cards/:id/audio to 404 on `part=answer` for
-  // pl_forms cards (its answer is a declension table, never spoken). A play
-  // control that always renders would point at that 404 on every forms card,
-  // so eligibility here must mirror the route's table exactly.
-  it('does not offer a play control for a pl_forms card, whose answer audio 404s', () => {
-    render(
-      <ReviewCard
-        card={{ ...card, type: 'pl_forms', promptText: 'dopełniacz l.mn.' }}
-        revealed
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
-    expect(screen.queryByLabelText(t.play)).toBeNull()
-  })
-
-  // Decided 2026-09-16: pl_forms answers are Markdown (bold + pipe tables)
-  // and must render as real elements, not literal `**pies**` syntax.
-  it('renders a pl_forms answer through FormsTable instead of as literal Markdown', () => {
-    render(
-      <ReviewCard
-        card={{ ...card, type: 'pl_forms', promptText: 'dopełniacz l.mn.', answerPl: '**pies** → o **psie**' }}
-        revealed
-        canUndo={false}
-        onReveal={vi.fn()}
-        onRate={vi.fn()}
-        onUndo={vi.fn()}
-      />,
-    )
-    expect(screen.queryByText('**pies** → o **psie**')).toBeNull()
-    expect(screen.getByText('pies').tagName).toBe('STRONG')
-  })
-
   it('offers a play control for the answer of a ru_to_pl card', () => {
     render(<ReviewCard card={card} revealed canUndo={false} onReveal={vi.fn()} onRate={vi.fn()} onUndo={vi.fn()} />)
     expect(screen.getByLabelText(t.play)).toBeTruthy()

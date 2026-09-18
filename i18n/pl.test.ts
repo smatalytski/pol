@@ -8,7 +8,7 @@ describe('strings', () => {
       'show', 'again', 'hard', 'good', 'easy', 'undo',
       'doneForToday', 'noCards', 'sessionReviewed', 'nextReviewAt', 'rateFailed',
       'holdToRecord', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
-      'addForms', 'suspend', 'unsuspend', 'save', 'needsInput', 'formsFailed',
+      'suspend', 'unsuspend', 'save', 'needsInput',
       'saveFailed', 'chipSaveFailed',
       'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
     ]

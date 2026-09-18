@@ -32,7 +32,6 @@ export const t = {
   play: 'odtwórz',
   micDenied: 'Bez dostępu do mikrofonu nie da się nic dodać. Włącz mikrofon w ustawieniach przeglądarki i odśwież stronę.',
 
-  addForms: 'dodaj formy',
   regenerate: 'wygeneruj ponownie',
   suspend: 'zawieś',
   unsuspend: 'przywróć',
@@ -44,9 +43,7 @@ export const t = {
   detailHint: 'Podpowiedź',
   detailExample: 'Przykład',
   detailGrammar: 'Gramatyka',
-  formsAdded: 'formy dodane',
   cardNotFound: 'Nie ma takiej fiszki',
-  formsFailed: 'nie udało się wygenerować form',
   regenerateFailed: 'nie udało się wygenerować fiszki',
   regenerateDuplicate: 'to słowo już jest w talii — zapisano tylko podpowiedź',
   saveFailed: 'nie udało się zapisać zmian',

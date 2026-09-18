@@ -1,8 +1,6 @@
 'use client'
 import type { QueueItem } from '@/lib/review/queue'
 import type { RatingValue } from '@/lib/scheduler'
-import { FormsTable } from './FormsTable'
-import { hasAnswerAudio } from '@/lib/cards/display'
 import { t } from '@/i18n/pl'
 
 const RATINGS: ReadonlyArray<{ value: RatingValue; label: string }> = [
@@ -35,22 +33,13 @@ export function ReviewCard({
 
         {revealed && (
           <div className="mt-6 flex flex-col items-center gap-2">
-            {card.type === 'pl_forms' ? (
-              <FormsTable markdown={card.answerPl} />
-            ) : (
-              <p className="text-3xl font-semibold">{card.answerPl}</p>
-            )}
-            {hasAnswerAudio(card.type) && (
-              <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
-            )}
+            <p className="text-3xl font-semibold">{card.answerPl}</p>
+            <audio controls preload="none" src={`/api/cards/${card.id}/audio?part=answer`} aria-label={t.play} />
             {card.examplePl && <p className="text-lg">{card.examplePl}</p>}
             {/* No Russian on the answer side. The Russian prompt above is the
                 retrieval cue; once the card is turned over, a Russian gloss of
-                the Polish example just gives the eye an easier place to land
-                than the Polish it is supposed to be reading. `exampleRu` is
-                still generated and stored — ten existing cards hold real
-                values, and dropping the column is a migration with nothing
-                user-visible to show for it. */}
+                the Polish example gives the eye an easier place to land than
+                the Polish it is supposed to be reading. */}
             {card.grammarNote && <p className="text-sm text-neutral-500">{card.grammarNote}</p>}
           </div>
         )}

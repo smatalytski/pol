@@ -88,22 +88,6 @@ describe('CardsPage (browse list)', () => {
     expect(screen.getAllByRole('textbox')).toHaveLength(1)
   })
 
-  // A pl_forms answer is a Markdown declension table; rendered in a list it is
-  // an unreadable row of pipes, and rendered as a table it would swamp the
-  // list. Its Polish prompt is already a label.
-  it('titles a forms card with its Polish prompt, and does not render its table', async () => {
-    stubFetch(() => [
-      cardRow({
-        type: 'pl_forms',
-        promptText: 'patrzeć — odmiana czasownika',
-        answerPl: '| Osoba | Liczba |\n|---|---|\n| ja | patrzę |',
-      }),
-    ])
-    render(<CardsPage />)
-    expect(await screen.findByText('patrzeć — odmiana czasownika')).toBeTruthy()
-    expect(screen.queryByRole('table')).toBeNull()
-  })
-
   it('links each title to that card detail page', async () => {
     stubFetch(() => [cardRow({ id: 'abc', answerPl: 'prać' })])
     render(<CardsPage />)

@@ -43,11 +43,6 @@ function cardRow(over: Partial<CardRow> = {}): CardRow {
   }
 }
 
-const FORMS_MARKDOWN = '| a | b |\n|---|---|\n| 1 | 2 |'
-
-const formsCard = () =>
-  cardRow({ type: 'pl_forms', answerPl: FORMS_MARKDOWN, promptText: 'patrzeć — odmiana' })
-
 /** GET returns the card and its capture id; every other verb succeeds. */
 function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1') {
   const calls: Array<{ url: string; method: string; body?: unknown }> = []
@@ -99,6 +94,14 @@ afterEach(() => {
 })
 
 describe('CardDetailPage', () => {
+  // Forms are generated with the card now (spec §1); nothing asks for them.
+  it('offers no "dodaj formy" control', async () => {
+    stubFetch(() => cardRow())
+    render(<CardPage />)
+    await screen.findByDisplayValue('złośliwy')
+    expect(screen.queryByText('dodaj formy')).toBeNull()
+  })
+
   it('shows the card details, with the Russian prompt kept as the question', async () => {
     stubFetch(() => cardRow())
     render(<CardPage />)
@@ -117,13 +120,6 @@ describe('CardDetailPage', () => {
     render(<CardPage />)
     const player = await screen.findByLabelText(t.play)
     expect(player.getAttribute('src')).toBe('/api/cards/c1/audio?part=answer')
-  })
-
-  it('does not offer a player for a pl_forms card, whose answer audio 404s', async () => {
-    stubFetch(formsCard)
-    render(<CardPage />)
-    await screen.findByRole('table')
-    expect(screen.queryByLabelText(t.play)).toBeNull()
   })
 
   it('PATCHes the edited answer on blur, but only when it actually changed', async () => {
@@ -150,60 +146,6 @@ describe('CardDetailPage', () => {
       fireEvent.blur(prompt)
     })
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ promptText: 'злобный' })
-  })
-
-  // Critical finding from the original review, which applies verbatim now
-  // that editing has moved to this screen: an <input>'s value-sanitization
-  // strips CR/LF, so a forms table's newlines never survive a round trip
-  // through an editable input — the next blur would PATCH the flattened
-  // string over the only copy of the table. Render it read-only instead.
-  it('renders a pl_forms answer read-only through FormsTable, never as an editable <input>', async () => {
-    stubFetch(formsCard)
-    render(<CardPage />)
-    expect(await screen.findByRole('table')).toBeTruthy()
-    // The only text input is the unrelated promptText field.
-    expect(screen.queryAllByRole('textbox')).toHaveLength(1)
-  })
-
-  it('never PATCHes a pl_forms card on blur, since there is no editable answer field', async () => {
-    const calls = stubFetch(formsCard)
-    render(<CardPage />)
-    await screen.findByRole('table')
-    await act(async () => {
-      fireEvent.blur(screen.getByRole('textbox'))
-    })
-    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
-  })
-
-  it('does not offer "dodaj formy" for a pl_forms card', async () => {
-    stubFetch(formsCard)
-    render(<CardPage />)
-    await screen.findByRole('table')
-    expect(screen.queryByText(t.addForms)).toBeNull()
-  })
-
-  // On the old list screen a successful "dodaj formy" reloaded the list and
-  // the new card appeared in it. Here nothing on screen changes, so without a
-  // confirmation the button looks dead on success as well as on failure.
-  it('POSTs to the formy route and confirms it, so a success is not silent', async () => {
-    const calls = stubFetch(() => cardRow())
-    render(<CardPage />)
-    const button = await screen.findByText(t.addForms)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    expect(calls.some((c) => c.url === '/api/cards/c1/formy' && c.method === 'POST')).toBe(true)
-    expect(await screen.findByText(t.formsAdded)).toBeTruthy()
-  })
-
-  it('shows an error when generating forms fails, instead of silently doing nothing', async () => {
-    stubFailingWrites(() => cardRow())
-    render(<CardPage />)
-    const button = await screen.findByText(t.addForms)
-    await act(async () => {
-      fireEvent.click(button)
-    })
-    expect(await screen.findByText(t.formsFailed)).toBeTruthy()
   })
 
   it('offers "wygeneruj ponownie" only for a needs_input card', async () => {

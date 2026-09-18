@@ -17,7 +17,7 @@ const fromDictationMock = vi.fn().mockResolvedValue({
   grammar_note: 'краткая форма',
 })
 
-// Mocks only the generation seam, same approach as the formy route's test.
+// Mocks only the generation seam, so the route's own db lookups run unmocked.
 vi.mock('@/lib/generate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/generate')>()
   return { ...actual, getGenerator: () => ({ ...actual.getGenerator(), fromDictation: fromDictationMock }) }

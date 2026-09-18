@@ -12,12 +12,6 @@ export const GeneratedCardSchema = z.object({
 })
 export type GeneratedCard = z.infer<typeof GeneratedCardSchema>
 
-export const GeneratedFormsSchema = z.object({
-  prompt_pl: z.string().describe('The Polish lemma plus what forms are being asked for'),
-  answer_pl: z.string().describe('The form table as compact Markdown, Polish only'),
-})
-export type GeneratedForms = z.infer<typeof GeneratedFormsSchema>
-
 /**
  * Derive Gemini's responseSchema from the Zod schema, so the schema is declared
  * exactly once. Sound only because every field is a required string — which is
@@ -61,8 +55,6 @@ const SYSTEM = `Ты помогаешь взрослому человеку, к�
 - grammar_note заполняй только когда есть что сказать: род существительного, вид глагола и его пара, управление падежом. Пиши grammar_note ПО-ПОЛЬСКИ — она показывается на обратной стороне карточки, где всё по-польски.
 - Если поле не нужно, верни пустую строку.`
 
-const FORMS_SYSTEM = `Ты делаешь карточку-тренажёр форм для польского языка. prompt_pl — польская лемма и указание, какие формы нужны. answer_pl — компактная таблица форм в Markdown, только по-польски: для глагола — спряжение в настоящем/будущем, форма прошедшего времени по родам, вид и видовая пара; для существительного — склонение в единственном и множественном числе. Никакого английского и никакого русского в answer_pl.`
-
 export function toCardFields(g: GeneratedCard) {
   const orNull = (s: string) => (s.trim() === '' ? null : s)
   return {
@@ -77,7 +69,6 @@ export function toCardFields(g: GeneratedCard) {
 
 export interface Generator {
   fromDictation(transcript: string): Promise<GeneratedCard>
-  forms(lemma: string): Promise<GeneratedForms>
 }
 
 export type GenerateFn = (req: {
@@ -178,12 +169,6 @@ export function geminiGenerator(
       return run(GeneratedCardSchema, SYSTEM, [
         { text: `Продиктовано: «${text}»\n\nСделай карточку.` },
       ])
-    },
-
-    async forms(lemma) {
-      const text = lemma.trim()
-      if (!text) throw new GenerationError('empty lemma')
-      return run(GeneratedFormsSchema, FORMS_SYSTEM, [{ text: `Лемма: «${text}»` }])
     },
   }
 }
