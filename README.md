@@ -283,6 +283,11 @@ Card generation is not started by the request at all: a recording that leaves
 its review window becomes a job in the generation queue (`lib/queue/jobs.ts`),
 and the Gemini call happens when that job runs.
 
+A restart (every deploy is one) kills an unawaited recognition mid-flight,
+leaving its recording `uploaded`. The generation worker re-runs recognition
+for every such recording when it starts (`recognizeStranded` in
+`lib/capture/pipeline.ts`), so none waits at `rozpoznawanie…` forever.
+
 That said, this has only ever been exercised against `npm run dev` in
 development and in the automated test suite (which invokes the same
 in-process function directly, not through a real HTTP round-trip against a

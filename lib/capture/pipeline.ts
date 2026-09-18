@@ -134,6 +134,29 @@ export async function recognizeCapture(deps: RecognizeDeps, captureId: string): 
 }
 
 /**
+ * At worker startup: a recording still 'uploaded' lost the recognition its
+ * request started when the server restarted (a deploy is a restart), and
+ * would otherwise wait at rozpoznawanie… forever. Recognises each one again,
+ * oldest first and one at a time; an error is logged and the rest still run.
+ */
+export async function recognizeStranded(deps: RecognizeDeps): Promise<void> {
+  const ids = deps.db
+    .select({ id: captures.id })
+    .from(captures)
+    .where(eq(captures.status, 'uploaded'))
+    .orderBy(asc(captures.createdAt))
+    .all()
+    .map((r) => r.id)
+  for (const id of ids) {
+    try {
+      await recognizeCapture(deps, id)
+    } catch (err) {
+      console.error('stranded capture recognition failed', id, err)
+    }
+  }
+}
+
+/**
  * Re-recognises a recording's stored audio in the language the user names.
  * Speech-to-Text stays synchronous (fast, its own quota). Under review, the
  * transcript is replaced and the 10 s restarts (§3). With a card, or with a

@@ -7,7 +7,7 @@ import { GenerationError, type Generator, type GeneratedCard } from '../generate
 import type { Transcriber } from '../transcribe'
 import { enqueueJob } from '../queue/jobs'
 import {
-  createCapture, recognizeCapture, rerecognize, listOnScreen, pendingCaptures, knownCardFor,
+  createCapture, recognizeCapture, recognizeStranded, rerecognize, listOnScreen, pendingCaptures, knownCardFor,
   generateNewCard, giveUpNewCard, applyRerecognized, giveUpRerecognized, jobHandlers, creatorCaptureId,
 } from './pipeline'
 
@@ -791,6 +791,35 @@ describe('jobHandlers regenerate', () => {
       await expect(h.regenerate.run(job, NOW)).resolves.toBeUndefined()
     }
     expect(d.generator.fromDictation).not.toHaveBeenCalled()
+  })
+})
+
+// A deploy is a restart: a recording uploaded just before it never gets the
+// recognition its request started, and would sit at rozpoznawanie… forever.
+describe('recognizeStranded', () => {
+  it('recognises every recording left uploaded, oldest first, and keeps going past an error', async () => {
+    const d = deps()
+    const a = createCapture(d.db, AUDIO, NOW)
+    const b = createCapture(d.db, AUDIO, new Date(NOW.getTime() + 1))
+    const c = createCapture(d.db, AUDIO, new Date(NOW.getTime() + 2))
+    insertCapture(d, { id: 'failed', status: 'failed', error: 'x' })
+    const later = new Date(NOW.getTime() + 60_000)
+    d.transcriber.transcribe = vi.fn(async () => {
+      // b vanishes between the listing and its turn, so recognising it throws.
+      d.db.delete(captures).where(eq(captures.id, b)).run()
+      return 'kot'
+    })
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await recognizeStranded(at(d, later))
+      expect(row(d, a)).toMatchObject({ status: 'transcribed', transcribedAt: later.getTime() })
+      expect(row(d, c)).toMatchObject({ status: 'transcribed', transcribedAt: later.getTime() })
+      expect(row(d, 'failed')).toMatchObject({ status: 'failed' })
+      expect(d.transcriber.transcribe).toHaveBeenCalledTimes(2)
+      expect(errors).toHaveBeenCalledWith(expect.any(String), b, expect.any(Error))
+    } finally {
+      errors.mockRestore()
+    }
   })
 })
 
