@@ -43,8 +43,8 @@ function cardRow(over: Partial<CardRow> = {}): CardRow {
   }
 }
 
-/** GET returns the card and its capture id; every other verb succeeds. */
-function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1') {
+/** GET returns the card, its capture id and whether a job is in flight; every other verb succeeds. */
+function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1', generating = false) {
   const calls: Array<{ url: string; method: string; body?: unknown }> = []
   vi.stubGlobal(
     'fetch',
@@ -54,7 +54,7 @@ function stubFetch(card: () => CardRow, captureId: string | null = 'cap-1') {
       if (method === 'GET') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: card(), captureId }),
+          json: () => Promise.resolve({ card: card(), captureId, generating }),
         }) as unknown as Promise<Response>
       }
       return Promise.resolve({
@@ -269,19 +269,26 @@ describe('CardDetailPage', () => {
     expect(await screen.findByText(t.regenerateFailed)).toBeTruthy()
   })
 
-  it('tells you when the regenerated word already exists in the deck', async () => {
+  // wygeneruj ponownie now queues the rebuild and answers 202 at once (Task
+  // 7); the outcome — including a duplicate clash — arrives later, through
+  // the reloaded card, so there is no immediate duplicate notice to show.
+  it('queues wygeneruj ponownie and shows generowanie… until the card is rebuilt', async () => {
+    let generating = false
+    let card = cardRow({ status: 'needs_input', promptText: null })
     vi.stubGlobal(
       'fetch',
       vi.fn((_url: string, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'GET') {
+        if ((init?.method ?? 'GET') === 'POST') {
+          generating = true
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ card: cardRow({ status: 'needs_input', promptText: null }) }),
+            status: 202,
+            json: () => Promise.resolve({ queued: true }),
           }) as unknown as Promise<Response>
         }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: cardRow(), duplicateOf: 'other-card' }),
+          json: () => Promise.resolve({ card, captureId: null, generating }),
         }) as unknown as Promise<Response>
       }),
     )
@@ -290,7 +297,19 @@ describe('CardDetailPage', () => {
     await act(async () => {
       fireEvent.click(button)
     })
-    expect(await screen.findByText(t.regenerateDuplicate)).toBeTruthy()
+    expect(await screen.findByText(t.generating)).toBeTruthy()
+
+    card = cardRow({ status: 'ready', promptText: 'злобный' })
+    generating = false
+    expect(await screen.findByDisplayValue('злобный', undefined, { timeout: 4_000 })).toBeTruthy()
+    expect(screen.queryByText(t.generating)).toBeNull()
+  })
+
+  it('disables the generating controls while a job is in flight', async () => {
+    stubFetch(() => cardRow({ status: 'needs_input', promptText: null }), 'cap-1', true)
+    render(<CardPage />)
+    expect(await screen.findByText(t.generating)).toBeTruthy()
+    expect((screen.getByText(t.asRussian) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('sends a numeric suspendedAt when suspending a live card', async () => {
@@ -412,11 +431,15 @@ describe('CardDetailPage', () => {
     expect(pl.disabled).toBe(true)
     expect(screen.getByText(t.transcribing)).toBeTruthy()
 
+    // queued: true means the rebuild is now waiting in the generation queue,
+    // not finished — so the buttons stay disabled and generowanie… replaces
+    // rozpoznawanie… rather than the controls going back to normal.
     await act(async () => {
       finish({ ok: true, json: () => Promise.resolve({ queued: true, error: null }) })
     })
     await vi.waitFor(() => expect(screen.queryByText(t.transcribing)).toBeNull())
-    expect((screen.getByText(t.asRussian) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByText(t.generating)).toBeTruthy()
+    expect((screen.getByText(t.asRussian) as HTMLButtonElement).disabled).toBe(true)
   })
 
   // Re-recognition calls Speech-to-Text, and the route answers 200 with the
@@ -446,27 +469,24 @@ describe('CardDetailPage', () => {
     expect(await screen.findByText(t.languageFailed)).toBeTruthy()
   })
 
-  // The fields are uncontrolled `defaultValue` inputs, which React does not
-  // re-initialise when state changes. Re-recognition (and regeneration)
-  // replaces the card's contents wholesale, so without a remount the inputs
-  // keep showing the old answer — and the next blur would PATCH that stale
-  // value back over the repair, which is how the settings screen lost edits
-  // before A3.
-  it('shows the rebuilt card after re-recognition, not the stale input values', async () => {
-    let answer = 'sklep'
+  // Re-recognition is Speech-to-Text plus a queued Gemini rebuild (Task 5);
+  // when the route answers queued: true there is no rebuilt card yet, so the
+  // page shows generowanie… instead of reloading straight away.
+  it('shows generowanie… after a re-recognition queues the rebuild', async () => {
+    let generating = false
     vi.stubGlobal(
       'fetch',
       vi.fn((_url: string, init?: RequestInit) => {
-        if ((init?.method ?? 'GET') === 'GET') {
+        if ((init?.method ?? 'GET') === 'POST') {
+          generating = true
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ card: cardRow({ answerPl: answer }), captureId: 'cap-1' }),
+            json: () => Promise.resolve({ queued: true, error: null }),
           }) as unknown as Promise<Response>
         }
-        answer = 'krypta'
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ queued: true, error: null }),
+          json: () => Promise.resolve({ card: cardRow(), captureId: 'cap-1', generating }),
         }) as unknown as Promise<Response>
       }),
     )
@@ -475,7 +495,6 @@ describe('CardDetailPage', () => {
     await act(async () => {
       fireEvent.click(button)
     })
-    expect(await screen.findByDisplayValue('krypta')).toBeTruthy()
-    expect(screen.queryByDisplayValue('sklep')).toBeNull()
+    expect(await screen.findByText(t.generating)).toBeTruthy()
   })
 })
