@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { media } from '../db/schema'
 
-export type MediaKind = 'image' | 'audio' | 'tts'
+export type MediaKind = 'audio' | 'tts'
 
 /**
  * Duplicate-id semantics (C1/C6): neither current caller (lib/tts/index.ts,

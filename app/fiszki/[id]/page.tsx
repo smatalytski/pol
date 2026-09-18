@@ -21,8 +21,8 @@ export default function CardDetailPage() {
   const [regenError, setRegenError] = useState(false)
   const [regenDuplicate, setRegenDuplicate] = useState(false)
   // The recording this card came from, when there is one. Supplied by the GET
-  // so the re-recognition controls are offered only where they can work: an
-  // image card or a hand-typed card has no audio behind it.
+  // so the re-recognition controls are offered only where they can work: a
+  // hand-typed card has no audio behind it.
   const [captureId, setCaptureId] = useState<string | null>(null)
   const [langError, setLangError] = useState(false)
 

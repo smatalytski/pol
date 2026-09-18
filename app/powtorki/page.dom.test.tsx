@@ -10,7 +10,6 @@ type QueueItem = {
   type: 'ru_to_pl'
   promptText: string
   promptHint: null
-  promptMediaId: null
   answerPl: string
   examplePl: null
   exampleRu: null
@@ -24,7 +23,6 @@ function card(id: string, promptText: string): QueueItem {
     type: 'ru_to_pl',
     promptText,
     promptHint: null,
-    promptMediaId: null,
     answerPl: `answer-${id}`,
     examplePl: null,
     exampleRu: null,

@@ -11,7 +11,6 @@ const card: QueueItem = {
   type: 'ru_to_pl',
   promptText: 'злобный',
   promptHint: 'прилагательное',
-  promptMediaId: null,
   answerPl: 'złośliwy',
   examplePl: 'Zrobił to ze złośliwości.',
   exampleRu: 'Он сделал это из злобы.',

@@ -12,13 +12,11 @@ const input = (over: Partial<CreateCardInput> = {}): CreateCardInput => ({
   type: 'ru_to_pl',
   promptText: 'злобный',
   promptHint: null,
-  promptMediaId: null,
   answerPl: 'Złośliwy!',
   examplePl: null,
   exampleRu: null,
   grammarNote: null,
   status: 'ready',
-  parentCardId: null,
   ...over,
 })
 
@@ -46,7 +44,7 @@ describe('createCard', () => {
   it('treats the same answer under a different card type as a different card', () => {
     const { db } = createTestDb()
     createCard(db, input(), NOW)
-    const forms = createCard(db, input({ type: 'pl_forms', promptText: 'złośliwy — formy' }), NOW)
+    const forms = createCard(db, input({ type: 'pl_to_pl', promptText: 'złośliwy — formy' }), NOW)
     expect(forms.duplicateOf).toBeNull()
     expect(db.select().from(cards).all()).toHaveLength(2)
   })
@@ -101,7 +99,7 @@ describe('createCard', () => {
 
     it('scopes the fallback lookup by type, like the primary lookup', () => {
       const { db } = createTestDb()
-      const forms = createCard(db, input({ type: 'pl_forms', answerPl: 'zloslivy' }), NOW)
+      const forms = createCard(db, input({ type: 'pl_to_pl', answerPl: 'zloslivy' }), NOW)
       const ruToPl = createCard(
         db,
         input({ type: 'ru_to_pl', answerPl: 'złośliwy', fallbackAnswerKey: 'zloslivy' }),

@@ -22,12 +22,10 @@ export async function POST(req: Request) {
     db,
     {
       ...body.data,
-      promptMediaId: null,
       examplePl: null,
       exampleRu: null,
       grammarNote: null,
       status: 'ready',
-      parentCardId: null,
     },
     new Date(),
   )

@@ -7,7 +7,6 @@ const card = (id: string): QueueItem => ({
   type: 'ru_to_pl',
   promptText: 'злобный',
   promptHint: null,
-  promptMediaId: null,
   answerPl: 'złośliwy',
   examplePl: null,
   exampleRu: null,

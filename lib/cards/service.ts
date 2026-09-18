@@ -6,19 +6,17 @@ import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
 
-export type CardType = 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
+export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
 export type CreateCardInput = {
   type: CardType
   promptText: string | null
   promptHint: string | null
-  promptMediaId: string | null
   answerPl: string
   examplePl: string | null
   exampleRu: string | null
   grammarNote: string | null
   status: 'ready' | 'needs_input'
-  parentCardId: string | null
   /**
    * A caller-supplied secondary answer-key, consulted only when the primary
    * lookup on `answerKey(answerPl)` finds nothing. This exists for the
@@ -51,9 +49,9 @@ export type DuplicateLookup = {
  */
 export function findDuplicate(db: Db, input: DuplicateLookup): string | null {
   const key = answerKey(input.answerPl)
-  // Dedup is scoped by (answer_key, type): each card type is a distinct
-  // exercise, so a word's card of one type must not be mistaken for a
-  // duplicate of its card of another.
+  // Dedup is scoped by (answer_key, type): the same word may exist as a
+  // ru_to_pl card (recall it from Russian) and a pl_to_pl card (recall its
+  // forms), because those are different exercises (spec 2026-09-18 §2).
   //
   // Soft delete (decided 2026-09-16): a soft-deleted card must NOT be found
   // here. If it were, re-dictating a word you just deleted would silently
@@ -97,14 +95,12 @@ export function createCard(
       type: input.type,
       promptText: input.promptText,
       promptHint: input.promptHint,
-      promptMediaId: input.promptMediaId,
       answerPl: input.answerPl,
       answerKey: key,
       examplePl: input.examplePl,
       exampleRu: input.exampleRu,
       grammarNote: input.grammarNote,
       status: input.status,
-      parentCardId: input.parentCardId,
       suspendedAt: null,
       createdAt: now.getTime(),
       updatedAt: now.getTime(),
@@ -165,8 +161,7 @@ export function updateCard(db: Db, id: string, patch: UpdateCardPatch, now: Date
   const merged = { ...current, ...patch }
   // A needs_input card becomes reviewable the moment it has a prompt, so fixing
   // one by hand does not also require remembering to flip its status.
-  const status =
-    merged.status === 'needs_input' && (merged.promptText || merged.promptMediaId) ? 'ready' : merged.status
+  const status = merged.status === 'needs_input' && merged.promptText ? 'ready' : merged.status
 
   db.update(cards)
     .set({

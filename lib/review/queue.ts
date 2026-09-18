@@ -2,13 +2,13 @@ import { and, asc, eq, isNull, lte, notExists, sql } from 'drizzle-orm'
 import type { Db } from '../db/client'
 import { cards, reviews } from '../db/schema'
 import { getSettings } from '../settings'
+import type { CardType } from '../cards/service'
 
 export type QueueItem = {
   id: string
-  type: 'ru_to_pl' | 'image_to_pl' | 'pl_forms'
+  type: CardType
   promptText: string | null
   promptHint: string | null
-  promptMediaId: string | null
   answerPl: string
   examplePl: string | null
   exampleRu: string | null
@@ -78,7 +78,6 @@ const SELECTION = {
   type: cards.type,
   promptText: cards.promptText,
   promptHint: cards.promptHint,
-  promptMediaId: cards.promptMediaId,
   answerPl: cards.answerPl,
   examplePl: cards.examplePl,
   exampleRu: cards.exampleRu,
