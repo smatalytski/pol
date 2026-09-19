@@ -12,6 +12,7 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 const { GET, POST } = await import('./route')
 const { db } = await import('@/lib/db/client')
 const { captures, cards, generationJobs, topics } = await import('@/lib/db/schema')
+const { eq } = await import('drizzle-orm')
 const { deleteCard } = await import('@/lib/cards/service')
 
 const NOW = new Date('2026-09-18T10:00:00')
@@ -20,7 +21,8 @@ beforeEach(() => {
   db.delete(generationJobs).run()
   db.delete(captures).run()
   db.delete(cards).run()
-  db.delete(topics).run()
+  // Ogólne comes with the migration and stays: new cards are filed under it.
+  db.delete(topics).where(eq(topics.isDefault, false)).run()
 })
 
 function get(q?: string) {
@@ -89,16 +91,16 @@ describe('GET /api/cards', () => {
   })
 
   it('names each card’s topic', async () => {
-    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1 }).run()
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
     const body = await (await GET(new Request('http://test/api/cards'))).json()
-    expect(body.topicNames).toEqual({ t1: 'U lekarza' })
+    expect(body.topicNames).toEqual({ default: 'Ogólne', t1: 'U lekarza' })
   })
 
   // A card in a switched-off topic is out of review just like an
   // individually suspended one (spec §3.5), but nothing on /fiszki said so.
   it('lists the ids of switched-off topics, so their cards can be badged', async () => {
-    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: 5, createdAt: 1 }).run()
-    db.insert(topics).values({ id: 't2', name: 'U mechanika', context: 'y', suspendedAt: null, createdAt: 2 }).run()
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: 5, createdAt: 1, isDefault: false }).run()
+    db.insert(topics).values({ id: 't2', name: 'U mechanika', context: 'y', suspendedAt: null, createdAt: 2, isDefault: false }).run()
     const body = await (await GET(new Request('http://test/api/cards'))).json()
     expect(body.suspendedTopicIds).toEqual(['t1'])
   })

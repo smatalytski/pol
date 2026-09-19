@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { captures, cards, topics } from '../db/schema'
+import { captures, cards, topicItems, topics } from '../db/schema'
 import { createCard, regenerateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
@@ -210,14 +210,21 @@ export function pendingCaptures(db: Db): { id: string; transcript: string | null
     .all() as { id: string; transcript: string | null; status: 'queued' | 'generating' }[]
 }
 
-/** A topic item's intended sense and situation; undefined for a dictation. */
+/** A topic item's intended sense and situation; undefined when there is neither (spec 2026-09-19-topic-items §4.1). */
 function meaningOf(db: Db, capture: { topicId: string | null; glossRu: string | null }): Meaning | undefined {
-  if (!capture.topicId || !capture.glossRu) return undefined
+  if (!capture.topicId) return undefined
   const topic = db.select({ context: topics.context }).from(topics).where(eq(topics.id, capture.topicId)).get()
-  return topic ? { glossRu: capture.glossRu, context: topic.context } : undefined
+  const context = topic?.context.trim() ? topic.context : null
+  const glossRu = capture.glossRu?.trim() ? capture.glossRu : null
+  return glossRu || context ? { glossRu, context } : undefined
 }
 
-/** Job `new`: an approved recording, or an accepted topic item, becomes a card. A generation failure is thrown for the queue to classify. */
+/** A `+ karta` item (spec 2026-09-19-topic-items §4.1) learns which card it became. */
+function linkItem(db: Db, captureId: string, cardId: string): void {
+  db.update(topicItems).set({ cardId }).where(eq(topicItems.captureId, captureId)).run()
+}
+
+/** Job `new`: an approved recording, or a topic item sent with `+ karta`, becomes a card. A generation failure is thrown for the queue to classify. */
 export async function generateNewCard(deps: CaptureDeps, captureId: string, now: Date): Promise<void> {
   const { db, generator } = deps
   const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
@@ -225,13 +232,15 @@ export async function generateNewCard(deps: CaptureDeps, captureId: string, now:
   if (capture.cardId) {
     // The card was created but the process died before the job was marked
     // done, so the job ran again. Finish what that run was doing, or the
-    // recording would stay pending forever.
+    // recording would stay pending forever (and its item unlinked).
     db.update(captures).set({ status: 'generated' }).where(eq(captures.id, captureId)).run()
+    linkItem(db, captureId, capture.cardId)
     return
   }
   const transcript = capture.transcript
   const meaning = meaningOf(db, capture)
-  // Called with the transcript alone for a dictation, exactly as before.
+  // Called with the transcript alone for a dictation, exactly as before, and
+  // for a gloss-less item of a topic with no context (Ogólne).
   const generated = meaning ? await generator.fromDictation(transcript, meaning) : await generator.fromDictation(transcript)
   const fields = toCardFields(generated)
   // A stale read from before the await is never trusted for a decision that
@@ -255,6 +264,7 @@ export async function generateNewCard(deps: CaptureDeps, captureId: string, now:
     .set({ status: 'generated', cardId, generationJson: JSON.stringify({ ...generated, duplicateOf }), error: null })
     .where(eq(captures.id, captureId))
     .run()
+  linkItem(db, captureId, cardId)
 }
 
 /** Job `new` gave up: the word is kept as a needs_input card (§6). */
@@ -270,6 +280,7 @@ export function giveUpNewCard(db: Db, captureId: string, lastError: string, now:
     .set({ status: 'generated', cardId, generationJson: JSON.stringify({ duplicateOf }), error: lastError })
     .where(eq(captures.id, captureId))
     .run()
+  linkItem(db, captureId, cardId)
 }
 
 /** The three job kinds, wired to their bodies. */

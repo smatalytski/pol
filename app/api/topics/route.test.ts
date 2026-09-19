@@ -16,10 +16,11 @@ vi.mock('@/lib/transcribe', async (importOriginal) => {
 const topicsRoute = await import('./route')
 const transcribeRoute = await import('./transcribe/route')
 const topicRoute = await import('./[id]/route')
-const roundRoute = await import('./[id]/rounds/[round]/route')
 const retryRoute = await import('./[id]/retry/route')
 const { db } = await import('@/lib/db/client')
-const { captures, generationJobs, suggestions, topics } = await import('@/lib/db/schema')
+const { captures, generationJobs, topicItems, topics } = await import('@/lib/db/schema')
+const { eq } = await import('drizzle-orm')
+const { DEFAULT_TOPIC_ID } = await import('@/lib/topics/default')
 const { TranscriptionError } = await import('@/lib/transcribe')
 
 const json = (body: unknown, method = 'POST') =>
@@ -27,40 +28,48 @@ const json = (body: unknown, method = 'POST') =>
 const params = <T extends Record<string, string>>(p: T) => ({ params: Promise.resolve(p) })
 
 beforeEach(() => {
-  db.delete(suggestions).run()
+  db.delete(topicItems).run()
   db.delete(generationJobs).run()
   db.delete(captures).run()
-  db.delete(topics).run()
+  // Ogólne comes with the migration and stays.
+  db.delete(topics).where(eq(topics.isDefault, false)).run()
   transcribeMock.mockReset()
 })
 
 async function created() {
-  const res = await topicsRoute.POST(json({ context: 'u mechanika', count: 10, mix: 'mieszane' }))
+  const res = await topicsRoute.POST(json({ context: 'u mechanika', count: 10, mix: 'mieszane', level: 'zaawansowany' }))
   return ((await res.json()) as { topicId: string }).topicId
 }
 
 describe('POST /api/topics', () => {
-  it('creates the topic and queues its first round', async () => {
-    const res = await topicsRoute.POST(json({ context: 'u mechanika', count: 10, mix: 'slowa' }))
+  it('creates the topic and queues its first batch at the chosen level', async () => {
+    const res = await topicsRoute.POST(json({ context: 'u mechanika', count: 10, mix: 'slowa', level: 'sredni' }))
     expect(res.status).toBe(201)
     const { topicId } = (await res.json()) as { topicId: string }
-    expect(db.select().from(generationJobs).get()).toMatchObject({ kind: 'suggest', topicId })
+    const job = db.select().from(generationJobs).get()!
+    expect(job).toMatchObject({ kind: 'suggest', topicId })
+    expect(JSON.parse(job.paramsJson!)).toEqual({ count: 10, mix: 'slowa', level: 'sredni' })
   })
 
   it.each([
-    { context: '', count: 10, mix: 'mieszane' },
-    { context: 'x', count: 7, mix: 'mieszane' },
-    { context: 'x', count: 10, mix: 'wszystko' },
+    { context: '', count: 10, mix: 'mieszane', level: 'zaawansowany' },
+    { context: 'x', count: 7, mix: 'mieszane', level: 'zaawansowany' },
+    { context: 'x', count: 10, mix: 'wszystko', level: 'zaawansowany' },
+    { context: 'x', count: 10, mix: 'mieszane' },
+    { context: 'x', count: 10, mix: 'mieszane', level: 'latwy' },
   ])('refuses %o', async (body) => {
     expect((await topicsRoute.POST(json(body))).status).toBe(400)
   })
 })
 
 describe('GET /api/topics', () => {
-  it('lists topics with their counts', async () => {
+  it('lists topics with their counts, the default topic first', async () => {
     const id = await created()
     const body = (await (await topicsRoute.GET()).json()) as { topics: { id: string; cardCount: number }[] }
-    expect(body.topics).toEqual([expect.objectContaining({ id, cardCount: 0, pendingCount: 0 })])
+    expect(body.topics).toEqual([
+      expect.objectContaining({ id: DEFAULT_TOPIC_ID, isDefault: true }),
+      expect.objectContaining({ id, cardCount: 0, openCount: 0, discardedCount: 0, pendingCount: 0, searching: true }),
+    ])
   })
 })
 
@@ -98,7 +107,12 @@ describe('GET and PATCH /api/topics/:id', () => {
   it('returns the view', async () => {
     const id = await created()
     const res = await topicRoute.GET(new Request('http://test'), params({ id }))
-    expect(await res.json()).toMatchObject({ topic: { id }, state: 'searching' })
+    expect(await res.json()).toMatchObject({
+      topic: { id },
+      groups: { carded: [], open: [], discarded: [] },
+      pending: [],
+      batch: { state: 'searching', error: null },
+    })
   })
 
   it('is 404 for an unknown topic', async () => {
@@ -118,28 +132,8 @@ describe('GET and PATCH /api/topics/:id', () => {
   })
 })
 
-describe('POST /api/topics/:id/rounds/:round', () => {
-  it('accepts the round and queues the next', async () => {
-    const id = await created()
-    db.update(generationJobs).set({ status: 'done' }).run()
-    db.insert(suggestions).values({
-      id: 's1', topicId: id, round: 1, answerPl: 'sprzęgło', glossRu: 'сцепление', kind: 'slowo',
-      status: 'proposed', captureId: null, createdAt: 1,
-    }).run()
-    const res = await roundRoute.POST(json({ rejected: [], next: { count: 5, mix: 'frazy' } }), params({ id, round: '1' }))
-    expect(await res.json()).toEqual({ accepted: 1, nextJobId: expect.any(String) })
-  })
-
-  it('refuses a bad round number or body, and an unknown topic', async () => {
-    const id = await created()
-    expect((await roundRoute.POST(json({ rejected: [] }), params({ id, round: 'x' }))).status).toBe(400)
-    expect((await roundRoute.POST(json({}), params({ id, round: '1' }))).status).toBe(400)
-    expect((await roundRoute.POST(json({ rejected: [] }), params({ id: 'nope', round: '1' }))).status).toBe(404)
-  })
-})
-
 describe('POST /api/topics/:id/retry', () => {
-  it('re-queues a failed round', async () => {
+  it('re-queues a failed batch', async () => {
     const id = await created()
     db.update(generationJobs).set({ status: 'failed' }).run()
     const res = await retryRoute.POST(new Request('http://test', { method: 'POST' }), params({ id }))

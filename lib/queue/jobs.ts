@@ -188,7 +188,7 @@ export async function runNextJob(
     .select()
     .from(generationJobs)
     .where(and(eq(generationJobs.status, 'queued'), lte(generationJobs.nextAttemptAt, t)))
-    // A `suggest` job first: it is a round someone is watching the screen
+    // A `suggest` job first: it is a batch someone is watching the screen
     // for (spec 2026-09-18-topic-generation §6.1). Then oldest first;
     // createdAt can tie when promoteApproved inserts several jobs in one
     // tick, and rowid (insertion order) breaks the tie deterministically.

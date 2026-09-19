@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { getTableColumns, getTableName } from 'drizzle-orm'
 import { createTestDb } from './testing'
 import * as schema from './schema'
-import { media, cards, reviews, captures, ttsClips, settings, generationJobs } from './schema'
+import { media, cards, reviews, captures, ttsClips, settings, generationJobs, topics, topicItems } from './schema'
 
 describe('schema', () => {
   it('creates every table', () => {
@@ -16,7 +16,7 @@ describe('schema', () => {
     )
   })
 
-  it.each([media, cards, reviews, captures, ttsClips, settings, generationJobs])(
+  it.each([media, cards, reviews, captures, ttsClips, settings, generationJobs, topics, topicItems])(
     'drizzle definition matches the SQL for %s',
     (table) => {
       const { sqlite } = createTestDb()
@@ -41,7 +41,7 @@ describe('schema', () => {
 
   it('exports nothing unexpected', () => {
     expect(Object.keys(schema).sort()).toEqual(
-      ['captures', 'cards', 'generationJobs', 'media', 'reviews', 'settings', 'suggestions', 'topics', 'ttsClips'].sort(),
+      ['captures', 'cards', 'generationJobs', 'media', 'reviews', 'settings', 'topicItems', 'topics', 'ttsClips'].sort(),
     )
   })
 })

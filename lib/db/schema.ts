@@ -1,6 +1,6 @@
 import { blob, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { WORD_KINDS } from '../cards/forms'
-import { SUGGESTION_KINDS } from '../topics/rounds'
+import { LEVELS, SUGGESTION_KINDS } from '../topics/rounds'
 
 export const media = sqliteTable('media', {
   id: text('id').primaryKey(),
@@ -100,17 +100,24 @@ export const topics = sqliteTable('topics', {
   context: text('context').notNull(),
   suspendedAt: integer('suspended_at'),
   createdAt: integer('created_at').notNull(),
+  /** Ogólne, the one topic migration 005 creates (spec 2026-09-19-topic-items §3.2). */
+  isDefault: integer('is_default', { mode: 'boolean' }).notNull(),
 })
 
-export const suggestions = sqliteTable('suggestions', {
+/** Everything in a topic that is not a live card (spec 2026-09-19-topic-items §3.1); see migrations/005-topic-items.sql. */
+export const topicItems = sqliteTable('topic_items', {
   id: text('id').primaryKey(),
   topicId: text('topic_id').notNull(),
-  round: integer('round').notNull(),
   answerPl: text('answer_pl').notNull(),
-  glossRu: text('gloss_ru').notNull(),
-  kind: text('kind', { enum: SUGGESTION_KINDS }).notNull(),
-  status: text('status', { enum: ['proposed', 'accepted', 'rejected'] }).notNull(),
+  glossRu: text('gloss_ru'),
+  kind: text('kind', { enum: SUGGESTION_KINDS }),
+  source: text('source', { enum: ['suggested', 'manual'] }).notNull(),
+  level: text('level', { enum: LEVELS }),
+  status: text('status', { enum: ['open', 'discarded', 'carded'] }).notNull(),
   captureId: text('capture_id'),
+  cardId: text('card_id'),
+  batchJobId: text('batch_job_id'),
+  discardedAt: integer('discarded_at'),
   createdAt: integer('created_at').notNull(),
 })
 

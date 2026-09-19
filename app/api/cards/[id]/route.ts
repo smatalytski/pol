@@ -32,7 +32,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
   // The topic this card belongs to, for the detail screen's link back to it —
-  // null without one; its name is null while still pending its first round.
+  // null without one; its name is null while still pending its first batch.
   const topic = card.topicId
     ? (db.select({ id: topics.id, name: topics.name }).from(topics).where(eq(topics.id, card.topicId)).get() ?? null)
     : null

@@ -6,6 +6,7 @@ import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
 import { canDrillForms, type WordKind } from './forms'
+import { DEFAULT_TOPIC_ID } from '../topics/default'
 
 export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
@@ -34,7 +35,11 @@ export type CreateCardInput = {
    * only ever consulted when the primary lookup found nothing.
    */
   fallbackAnswerKey?: string
-  /** The topic a generated item belongs to (spec 2026-09-18-topic-generation §3.4). A duplicate keeps its own. */
+  /**
+   * The topic the card belongs to (spec 2026-09-18-topic-generation §3.4). A
+   * card without a topic is filed under Ogólne, the default topic (spec
+   * 2026-09-19-topic-items §3.2). A duplicate keeps its own.
+   */
   topicId?: string | null
 }
 
@@ -108,7 +113,7 @@ export function createCard(
       wordKind: input.wordKind,
       formsJson: input.formsJson,
       status: input.status,
-      topicId: input.topicId ?? null,
+      topicId: input.topicId ?? DEFAULT_TOPIC_ID,
       suspendedAt: null,
       createdAt: now.getTime(),
       updatedAt: now.getTime(),

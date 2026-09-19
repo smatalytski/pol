@@ -233,7 +233,7 @@ describe('buildQueue', () => {
 
 describe('topics in review', () => {
   function withTopic(db: ReturnType<typeof createTestDb>['db'], suspendedAt: number | null) {
-    db.insert(topics).values({ id: 't1', name: 'x', context: 'x', suspendedAt, createdAt: 1 }).run()
+    db.insert(topics).values({ id: 't1', name: 'x', context: 'x', suspendedAt, createdAt: 1, isDefault: false }).run()
   }
 
   it('leaves out a card whose topic is switched off', async () => {

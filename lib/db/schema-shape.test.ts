@@ -18,7 +18,7 @@ describe('schema after migrations', () => {
   it('applies the squashed base and then the appended migrations, in order', () => {
     const { sqlite } = createTestDb()
     const names = (sqlite.prepare('SELECT name FROM _migrations ORDER BY name').all() as { name: string }[]).map((r) => r.name)
-    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql'])
+    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql', '005-topic-items.sql'])
   })
 
   it('gives captures a recognition language', () => {
@@ -105,30 +105,70 @@ describe('schema after migrations', () => {
     ])
   })
 
-  it('has topics and suggestions, and topic columns on cards, captures and jobs', () => {
+  it('has topics and topic items, and topic columns on cards, captures and jobs', () => {
     const { sqlite } = createTestDb()
     const cols = (table: string) =>
       (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
-    expect(cols('topics')).toEqual(['id', 'name', 'context', 'suspended_at', 'created_at'])
-    expect(cols('suggestions')).toEqual([
-      'id', 'topic_id', 'round', 'answer_pl', 'gloss_ru', 'kind', 'status', 'capture_id', 'created_at',
+    expect(cols('topics')).toEqual(['id', 'name', 'context', 'suspended_at', 'created_at', 'is_default'])
+    expect(cols('topic_items')).toEqual([
+      'id', 'topic_id', 'answer_pl', 'gloss_ru', 'kind', 'source', 'level', 'status',
+      'capture_id', 'card_id', 'batch_job_id', 'discarded_at', 'created_at',
     ])
     expect(cols('cards')).toContain('topic_id')
     expect(cols('captures')).toEqual(expect.arrayContaining(['topic_id', 'gloss_ru']))
   })
 
-  // DELETE /api/captures/:id hard-deletes a recording with no card. A
-  // suggestion must not block that, and must not point at a missing row.
-  it("clears a suggestion's capture when the capture is deleted", () => {
+  // DELETE /api/captures/:id hard-deletes a recording with no card. An item
+  // must not block that, and must not point at a missing row.
+  it("clears an item's capture when the capture is deleted", () => {
     const { sqlite } = createTestDb()
     sqlite.prepare(`INSERT INTO topics (id, context, created_at) VALUES ('t1', 'x', 1)`).run()
     sqlite.prepare(`INSERT INTO captures (id, status, created_at) VALUES ('c1', 'queued', 1)`).run()
     sqlite
-      .prepare(`INSERT INTO suggestions (id, topic_id, round, answer_pl, gloss_ru, kind, status, capture_id, created_at)
-                VALUES ('s1', 't1', 1, 'katar', 'насморк', 'slowo', 'accepted', 'c1', 1)`)
+      .prepare(`INSERT INTO topic_items (id, topic_id, answer_pl, source, status, capture_id, created_at)
+                VALUES ('i1', 't1', 'katar', 'suggested', 'carded', 'c1', 1)`)
       .run()
     sqlite.prepare(`DELETE FROM captures WHERE id = 'c1'`).run()
-    expect(sqlite.prepare(`SELECT capture_id FROM suggestions`).get()).toEqual({ capture_id: null })
+    expect(sqlite.prepare(`SELECT capture_id FROM topic_items`).get()).toEqual({ capture_id: null })
+  })
+
+  it('upgrades 004 to topic items: a default topic, every card in a topic, suggestions mapped', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    for (const f of ['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql']) {
+      sqlite.exec(readFileSync(join(process.cwd(), 'migrations', f), 'utf8'))
+    }
+    sqlite.exec(`CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`)
+    sqlite.prepare(`INSERT INTO _migrations VALUES ('001-init.sql',1),('002-generation-queue.sql',1),('003-topics.sql',1),('004-capture-lang.sql',1)`).run()
+    const card = sqlite.prepare(`INSERT INTO cards (id, type, answer_pl, answer_key, status, created_at, updated_at, due, deleted_at, topic_id)
+      VALUES (?, 'ru_to_pl', ?, ?, 'ready', 1, 1, 1, ?, ?)`)
+    sqlite.prepare(`INSERT INTO topics (id, name, context, created_at) VALUES ('t1', 'U lekarza', 'x', 1)`).run()
+    card.run('live', 'kot', 'kot', null, null)
+    card.run('gone', 'pies', 'pies', 5, null)
+    card.run('topical', 'katar', 'katar', null, 't1')
+    sqlite.prepare(`INSERT INTO captures (id, status, created_at, card_id) VALUES ('c1', 'generated', 1, 'topical')`).run()
+    const sug = sqlite.prepare(`INSERT INTO suggestions (id, topic_id, round, answer_pl, gloss_ru, kind, status, capture_id, created_at)
+      VALUES (?, 't1', 1, ?, 'g', 'slowo', ?, ?, 1)`)
+    sug.run('p', 'gorączka', 'proposed', null)
+    sug.run('a', 'katar', 'accepted', 'c1')
+    sug.run('r', 'kaszel', 'rejected', null)
+
+    migrate(sqlite)
+
+    expect(sqlite.prepare(`SELECT id, name, is_default FROM topics WHERE is_default = 1`).all()).toEqual([
+      { id: 'default', name: 'Ogólne', is_default: 1 },
+    ])
+    expect(sqlite.prepare(`SELECT id, topic_id FROM cards ORDER BY id`).all()).toEqual([
+      { id: 'gone', topic_id: 'default' },
+      { id: 'live', topic_id: 'default' },
+      { id: 'topical', topic_id: 't1' },
+    ])
+    expect(sqlite.prepare(`SELECT id, status, source, level, card_id, discarded_at IS NOT NULL AS d FROM topic_items ORDER BY id`).all()).toEqual([
+      { id: 'a', status: 'carded', source: 'suggested', level: 'zaawansowany', card_id: 'topical', d: 0 },
+      { id: 'p', status: 'open', source: 'suggested', level: 'zaawansowany', card_id: null, d: 0 },
+      { id: 'r', status: 'discarded', source: 'suggested', level: 'zaawansowany', card_id: null, d: 1 },
+    ])
+    expect(sqlite.prepare(`SELECT name FROM sqlite_master WHERE name = 'suggestions'`).get()).toBeUndefined()
   })
 
   it('upgrades a database that has 002 applied, keeping its cards', () => {
@@ -147,6 +187,7 @@ describe('schema after migrations', () => {
 
     migrate(sqlite)
 
-    expect(sqlite.prepare('SELECT id, topic_id FROM cards').all()).toEqual([{ id: 'k1', topic_id: null }])
+    // 003 added the column empty; 005 files every topic-less card under Ogólne.
+    expect(sqlite.prepare('SELECT id, topic_id FROM cards').all()).toEqual([{ id: 'k1', topic_id: 'default' }])
   })
 })

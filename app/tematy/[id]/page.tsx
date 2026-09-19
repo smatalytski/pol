@@ -5,8 +5,25 @@ import { useParams } from 'next/navigation'
 import { CardListItem } from '@/components/CardListItem'
 import { RoundSettings } from '@/components/RoundSettings'
 import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
-import type { TopicView } from '@/lib/topics/service'
+import type { CardRow } from '@/lib/cards/service'
+import type { TopicRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
+
+/**
+ * The round-era topic view this page was written against. GET /api/topics/:id
+ * now returns the grouped view of spec 2026-09-19-topic-items (TopicView in
+ * lib/topics/service.ts); this page still reads the old shape until it is
+ * rewritten for the three groups.
+ */
+type TopicView = {
+  topic: TopicRow
+  state: 'searching' | 'failed' | 'ready' | 'idle'
+  error: string | null
+  round: number
+  items: { id: string; answerPl: string; glossRu: string; kind: 'slowo' | 'fraza' }[]
+  cards: CardRow[]
+  pending: { id: string; transcript: string | null; status: 'queued' | 'generating' }[]
+}
 
 /**
  * One topic (spec 2026-09-18-topic-generation §4.4): its current round, the

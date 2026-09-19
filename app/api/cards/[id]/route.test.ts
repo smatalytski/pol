@@ -12,6 +12,7 @@ afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 const { GET, PATCH, DELETE } = await import('./route')
 const { db } = await import('@/lib/db/client')
 const { captures, cards, generationJobs, media, reviews, topics } = await import('@/lib/db/schema')
+const { eq } = await import('drizzle-orm')
 const { newState } = await import('@/lib/scheduler')
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -66,7 +67,8 @@ beforeEach(() => {
   db.delete(generationJobs).run()
   db.delete(cards).run()
   db.delete(media).run()
-  db.delete(topics).run()
+  // Ogólne comes with the migration and stays: new cards are filed under it.
+  db.delete(topics).where(eq(topics.isDefault, false)).run()
 })
 
 describe('GET /api/cards/:id', () => {
@@ -119,7 +121,7 @@ describe('GET /api/cards/:id', () => {
   })
 
   it('names the card’s topic, or null without one', async () => {
-    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1 }).run()
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
     seedCard({ id: 'k1', topicId: 't1' })
     seedCard({ id: 'k2', answerPl: 'kot', answerKey: 'kot' })
     expect((await (await get('k1')).json()).topic).toEqual({ id: 't1', name: 'U lekarza' })
