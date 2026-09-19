@@ -461,7 +461,7 @@ describe('AddPage layout', () => {
     )
   })
 
-  // DOM order was not enough. `sticky bottom-0` shipped first, and sticky only
+  // DOM order was not enough. `sticky` shipped first, and sticky only
   // pins an element once its container overflows the viewport — nothing in the
   // shell constrains height, so with a few chips the page is shorter than the
   // screen and the button rendered right under the chips, near the top, which
@@ -484,7 +484,8 @@ describe('AddPage layout', () => {
     render(<AddPage />)
     const bar = (await screen.findByRole('button', { name: t.recordPolish })).closest('div')!
     expect(bar.className).toContain('fixed')
-    expect(bar.className).toContain('bottom-0')
+    // Sits on top of the bottom tab bar rather than at the screen's edge.
+    expect(bar.className).toContain('above-tabbar')
     expect(bar.className).not.toContain('sticky')
   })
 

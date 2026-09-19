@@ -5,6 +5,7 @@ export const t = {
   add: 'Dodaj',
   cards: 'Fiszki',
   settings: 'Ustawienia',
+  settingsTab: 'Ustaw.',
 
   show: 'pokaż',
   again: 'nie pamiętam',
