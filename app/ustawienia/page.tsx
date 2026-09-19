@@ -10,6 +10,7 @@ type Settings = {
   audioExample: number
   audioHint: number
   audioRepeatExample: number
+  audioNextSeconds: number
 }
 
 export default function SettingsPage() {
@@ -26,6 +27,7 @@ export default function SettingsPage() {
   const [newPerDayDraft, setNewPerDayDraft] = useState('')
   const [retentionDraft, setRetentionDraft] = useState('')
   const [gapDraft, setGapDraft] = useState('')
+  const [nextDraft, setNextDraft] = useState('')
   const [repeatDraft, setRepeatDraft] = useState(false)
   const [exampleDraft, setExampleDraft] = useState(false)
   const [hintDraft, setHintDraft] = useState(false)
@@ -40,6 +42,7 @@ export default function SettingsPage() {
         setNewPerDayDraft(String(s.newPerDay))
         setRetentionDraft(String(s.requestRetention))
         setGapDraft(String(s.audioGapSeconds))
+        setNextDraft(String(s.audioNextSeconds))
         setRepeatDraft(s.audioRepeatAnswer === 1)
         setExampleDraft(s.audioExample === 1)
         setHintDraft(s.audioHint === 1)
@@ -69,6 +72,7 @@ export default function SettingsPage() {
         if ('newPerDay' in patch) setNewPerDayDraft(String(settings.newPerDay))
         if ('requestRetention' in patch) setRetentionDraft(String(settings.requestRetention))
         if ('audioGapSeconds' in patch) setGapDraft(String(settings.audioGapSeconds))
+        if ('audioNextSeconds' in patch) setNextDraft(String(settings.audioNextSeconds))
         if ('audioRepeatAnswer' in patch) setRepeatDraft(settings.audioRepeatAnswer === 1)
         if ('audioExample' in patch) setExampleDraft(settings.audioExample === 1)
         if ('audioHint' in patch) setHintDraft(settings.audioHint === 1)
@@ -82,6 +86,7 @@ export default function SettingsPage() {
     if ('newPerDay' in patch) setNewPerDayDraft(String(s.newPerDay))
     if ('requestRetention' in patch) setRetentionDraft(String(s.requestRetention))
     if ('audioGapSeconds' in patch) setGapDraft(String(s.audioGapSeconds))
+    if ('audioNextSeconds' in patch) setNextDraft(String(s.audioNextSeconds))
     if ('audioRepeatAnswer' in patch) setRepeatDraft(s.audioRepeatAnswer === 1)
     if ('audioExample' in patch) setExampleDraft(s.audioExample === 1)
     if ('audioHint' in patch) setHintDraft(s.audioHint === 1)
@@ -130,6 +135,18 @@ export default function SettingsPage() {
             value={gapDraft}
             onChange={(e) => setGapDraft(e.target.value)}
             onBlur={() => void save({ audioGapSeconds: Number(gapDraft) })}
+            className="rounded border p-3"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          {t.listenNext}
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={nextDraft}
+            onChange={(e) => setNextDraft(e.target.value)}
+            onBlur={() => void save({ audioNextSeconds: Number(nextDraft) })}
             className="rounded border p-3"
           />
         </label>

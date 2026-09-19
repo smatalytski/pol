@@ -149,6 +149,12 @@ describe('ListenPage — idle', () => {
     render(<ListenPage />)
     expect(await screen.findByText('przerwa 5 s · przykład')).toBeTruthy()
   })
+
+  it('adds "następna N s" to the summary line when audioNextSeconds is set', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 0, audioHint: 0, audioRepeatExample: 0, audioNextSeconds: 8 })
+    render(<ListenPage />)
+    expect(await screen.findByText('przerwa 5 s · następna 8 s')).toBeTruthy()
+  })
 })
 
 describe('ListenPage — playing / paused', () => {

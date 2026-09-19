@@ -15,6 +15,7 @@ const Body = z.object({
   audioExample: z.union([z.literal(0), z.literal(1)]).optional(),
   audioHint: z.union([z.literal(0), z.literal(1)]).optional(),
   audioRepeatExample: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioNextSeconds: z.number().int().min(1).max(30).optional(),
 })
 
 export async function PUT(req: Request) {

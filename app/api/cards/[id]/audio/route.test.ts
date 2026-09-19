@@ -130,4 +130,18 @@ describe('GET /api/cards/:id/audio', () => {
     expect(getClipMock.mock.calls[0]?.[2]).toBe('kot')
     expect(getClipMock.mock.calls[0]?.[3]).toBe('pl')
   })
+
+  // Spec §3.2's speakable(): a slash is never spoken. The review screen's
+  // own audio route shares that normalization with the listening sequence.
+  it('normalizes a slash in the prompt before speaking it', async () => {
+    seedCard({ id: 'g1', type: 'ru_to_pl', promptText: 'седоватый / с проседью' })
+    await call('g1', 'prompt')
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('седоватый, с проседью')
+  })
+
+  it('normalizes a slash in the answer before speaking it', async () => {
+    seedCard({ id: 'g2', type: 'ru_to_pl', answerPl: 'siwy/siwawy' })
+    await call('g2', 'answer')
+    expect(getClipMock.mock.calls[0]?.[2]).toBe('siwy, siwawy')
+  })
 })

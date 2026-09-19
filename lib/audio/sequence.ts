@@ -3,7 +3,14 @@ import { VOICES } from '../tts/voices'
 
 export const ASSEMBLY_VERSION = 1
 
-export type SequenceSettings = { gapSeconds: number; repeatAnswer: boolean; example: boolean; hint: boolean; repeatExample: boolean }
+export type SequenceSettings = {
+  gapSeconds: number
+  repeatAnswer: boolean
+  example: boolean
+  hint: boolean
+  repeatExample: boolean
+  nextSeconds: number
+}
 
 export type SpokenPart =
   | { kind: 'speech'; lang: 'pl' | 'ru'; text: string }
@@ -17,6 +24,18 @@ export type ListenCard = {
 }
 
 /**
+ * Normalizes a spoken text so a slash is never read aloud. A slash written
+ * to separate alternatives (`седоватый / с проседью`, `a/b`) reads like a
+ * stray "slash" or a confusing pause to TTS, so every `/`, together with any
+ * whitespace around it, becomes `, ` instead (spec §3.2). Exported and pure
+ * so it can be unit-tested directly and reused by the review screen's own
+ * audio route.
+ */
+export function speakable(text: string): string {
+  return text.replace(/\s*\/\s*/g, ', ').trim()
+}
+
+/**
  * Builds the sequence of spoken parts and silences for a card.
  *
  * Sequence:
@@ -26,7 +45,10 @@ export type ListenCard = {
  * 4. if repeatAnswer: 1000 ms silence + PL answer_pl
  * 5. if example and example_pl: 1000 ms silence + PL example_pl
  *    if also repeatExample: 1000 ms silence + PL example_pl again
- * 6. 2000 ms trailing silence
+ * 6. nextSeconds trailing silence
+ *
+ * Every spoken text passes through `speakable` first, so a slash stored in
+ * the card never gets read aloud.
  */
 export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[] {
   const parts: SpokenPart[] = []
@@ -35,13 +57,13 @@ export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[]
   const promptText = card.promptText.trim()
   const hintText = s.hint ? card.promptHint?.trim() : undefined
   const ruText = hintText ? `${promptText}. ${hintText}` : promptText
-  parts.push({ kind: 'speech', lang: 'ru', text: ruText })
+  parts.push({ kind: 'speech', lang: 'ru', text: speakable(ruText) })
 
   // 2. Silence (gap)
   parts.push({ kind: 'silence', ms: s.gapSeconds * 1000 })
 
   // 3. PL answer
-  const answerText = card.answerPl.trim()
+  const answerText = speakable(card.answerPl.trim())
   parts.push({ kind: 'speech', lang: 'pl', text: answerText })
 
   // 4. Repeat answer if enabled
@@ -51,7 +73,7 @@ export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[]
   }
 
   // 5. Example if enabled and present, optionally repeated
-  const exampleText = card.examplePl?.trim()
+  const exampleText = card.examplePl?.trim() ? speakable(card.examplePl.trim()) : undefined
   if (s.example && exampleText) {
     parts.push({ kind: 'silence', ms: 1000 })
     parts.push({ kind: 'speech', lang: 'pl', text: exampleText })
@@ -61,8 +83,8 @@ export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[]
     }
   }
 
-  // 6. Trailing silence
-  parts.push({ kind: 'silence', ms: 2000 })
+  // 6. Trailing silence, before the next card
+  parts.push({ kind: 'silence', ms: s.nextSeconds * 1000 })
 
   return parts
 }
@@ -104,6 +126,7 @@ export function settingsToSequence(settings: {
   audioExample: number
   audioHint: number
   audioRepeatExample: number
+  audioNextSeconds: number
 }): SequenceSettings {
   return {
     gapSeconds: settings.audioGapSeconds,
@@ -111,5 +134,6 @@ export function settingsToSequence(settings: {
     example: settings.audioExample !== 0,
     hint: settings.audioHint !== 0,
     repeatExample: settings.audioRepeatExample !== 0,
+    nextSeconds: settings.audioNextSeconds,
   }
 }

@@ -17,7 +17,7 @@ const CARD: ListenCard = {
   examplePl: null,
 }
 
-const SETTINGS: SequenceSettings = { gapSeconds: 5, repeatAnswer: false, example: false, hint: false, repeatExample: false }
+const SETTINGS: SequenceSettings = { gapSeconds: 5, repeatAnswer: false, example: false, hint: false, repeatExample: false, nextSeconds: 5 }
 
 /** Deterministic, per-(lang,text) bytes: `[lang, ...text]` as a JSON array. */
 function expectedClipBytes(lang: 'pl' | 'ru', text: string): Uint8Array {

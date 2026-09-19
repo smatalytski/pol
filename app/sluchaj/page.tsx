@@ -15,6 +15,7 @@ type ListenSettings = {
   audioExample: number
   audioHint: number
   audioRepeatExample: number
+  audioNextSeconds?: number
 }
 
 /** The last chosen length, if the browser kept it and it's still one of the offered values. */
@@ -39,6 +40,7 @@ function rememberMinutes(n: number) {
 function summaryLine(s: ListenSettings): string {
   return [
     s.audioGapSeconds > 0 ? `${t.listenSummaryGap} ${s.audioGapSeconds} s` : null,
+    s.audioNextSeconds ? `${t.listenSummaryNext} ${s.audioNextSeconds} s` : null,
     s.audioHint === 1 ? t.listenSummaryHint : null,
     s.audioRepeatAnswer === 1 ? t.listenSummaryRepeat : null,
     s.audioExample === 1 ? (s.audioRepeatExample === 1 ? t.listenSummaryExampleTwice : t.listenSummaryExample) : null,

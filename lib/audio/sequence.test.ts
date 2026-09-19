@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { ASSEMBLY_VERSION, sequenceFor, audioKey, estimateMs, settingsToSequence, type SequenceSettings, type ListenCard } from './sequence'
+import { ASSEMBLY_VERSION, sequenceFor, audioKey, estimateMs, settingsToSequence, speakable, type SequenceSettings, type ListenCard } from './sequence'
 import { VOICES } from '../tts/voices'
 
 describe('sequence', () => {
@@ -11,7 +11,7 @@ describe('sequence', () => {
     expect(sourceCode).not.toContain(`from '../tts'`)
   })
   // All features on: hint spoken, answer repeated, example spoken and repeated.
-  const defaultSettings: SequenceSettings = { gapSeconds: 5, repeatAnswer: true, example: true, hint: true, repeatExample: true }
+  const defaultSettings: SequenceSettings = { gapSeconds: 5, repeatAnswer: true, example: true, hint: true, repeatExample: true, nextSeconds: 5 }
 
   const cardWithHintAndExample: ListenCard = {
     promptText: 'кот',
@@ -32,7 +32,7 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
-      { kind: 'silence', ms: 2000 },
+      { kind: 'silence', ms: 5000 },
     ])
   })
 
@@ -47,7 +47,7 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
-      { kind: 'silence', ms: 2000 },
+      { kind: 'silence', ms: 5000 },
     ])
   })
 
@@ -60,7 +60,7 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'kot' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'kot' },
-      { kind: 'silence', ms: 2000 },
+      { kind: 'silence', ms: 5000 },
     ])
   })
 
@@ -73,7 +73,7 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'kot' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'kot' },
-      { kind: 'silence', ms: 2000 },
+      { kind: 'silence', ms: 5000 },
     ])
   })
 
@@ -86,7 +86,7 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'kot' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'kot' },
-      { kind: 'silence', ms: 2000 },
+      { kind: 'silence', ms: 5000 },
     ])
   })
 
@@ -101,7 +101,7 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'kot' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
-      { kind: 'silence', ms: 2000 },
+      { kind: 'silence', ms: 5000 },
     ])
   })
 
@@ -141,10 +141,40 @@ describe('sequence', () => {
     expect(parts[0]).toEqual({ kind: 'speech', lang: 'ru', text: 'кот. животное' })
   })
 
+  it('applies speakable to every spoken part: the RU prompt, the hint, the PL answer, and the example', () => {
+    const card: ListenCard = {
+      promptText: 'седоватый / с проседью',
+      promptHint: 'прилаг. / разг.',
+      answerPl: 'siwy/siwawy',
+      examplePl: 'On jest siwy / szpakowaty.',
+    }
+    const parts = sequenceFor(card, defaultSettings)
+    const speechParts = parts.filter((p): p is Extract<typeof p, { kind: 'speech' }> => p.kind === 'speech')
+    for (const part of speechParts) expect(part.text).not.toContain('/')
+    expect(parts[0]).toEqual({ kind: 'speech', lang: 'ru', text: 'седоватый, с проседью. прилаг., разг.' })
+    expect(parts[2]).toEqual({ kind: 'speech', lang: 'pl', text: 'siwy, siwawy' })
+    expect(parts.find((p) => p.kind === 'speech' && p.text.includes('szpakowaty'))).toEqual({
+      kind: 'speech',
+      lang: 'pl',
+      text: 'On jest siwy, szpakowaty.',
+    })
+  })
+
   it('respects gapSeconds in the silence duration', () => {
     const settings = { ...defaultSettings, gapSeconds: 12 }
     const parts = sequenceFor(cardWithHintAndExample, settings)
     expect(parts[1]).toEqual({ kind: 'silence', ms: 12000 })
+  })
+
+  it('trails with a 5 s silence by default', () => {
+    const parts = sequenceFor(cardWithHintAndExample, defaultSettings)
+    expect(parts[parts.length - 1]).toEqual({ kind: 'silence', ms: 5000 })
+  })
+
+  it('respects nextSeconds in the trailing silence duration', () => {
+    const settings = { ...defaultSettings, nextSeconds: 17 }
+    const parts = sequenceFor(cardWithHintAndExample, settings)
+    expect(parts[parts.length - 1]).toEqual({ kind: 'silence', ms: 17000 })
   })
 
   it('audioKey is stable for the same input', () => {
@@ -216,6 +246,13 @@ describe('sequence', () => {
     expect(key1).not.toBe(key2)
   })
 
+  it('audioKey changes when nextSeconds changes', () => {
+    const key1 = audioKey(cardWithHintAndExample, defaultSettings)
+    const settings2 = { ...defaultSettings, nextSeconds: 9 }
+    const key2 = audioKey(cardWithHintAndExample, settings2)
+    expect(key1).not.toBe(key2)
+  })
+
   it('audioKey includes ASSEMBLY_VERSION', () => {
     const key = audioKey(cardWithHintAndExample, defaultSettings)
     // Verify the key contains the assembly version by building the hash ourselves
@@ -238,9 +275,9 @@ describe('sequence', () => {
   it('estimateMs calculates correctly for the full sequence', () => {
     const parts = sequenceFor(cardWithHintAndExample, defaultSettings)
     const estimated = estimateMs(parts)
-    // (13 + 3 + 3 + 9 + 9) * 60 + 5000 + 1000 + 1000 + 1000 + 2000
-    // 37 * 60 + 10000 = 2220 + 10000 = 12220
-    const expected = (13 + 3 + 3 + 9 + 9) * 60 + 5000 + 1000 + 1000 + 1000 + 2000
+    // (13 + 3 + 3 + 9 + 9) * 60 + 5000 (gap) + 1000 + 1000 + 1000 + 5000 (trailing, default nextSeconds)
+    // 37 * 60 + 13000 = 2220 + 13000 = 15220
+    const expected = (13 + 3 + 3 + 9 + 9) * 60 + 5000 + 1000 + 1000 + 1000 + 5000
     expect(estimated).toBe(expected)
   })
 
@@ -254,17 +291,56 @@ describe('sequence', () => {
   })
 
   it('settingsToSequence converts 0/1 to boolean', () => {
-    const settings = settingsToSequence({ audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1, audioHint: 1, audioRepeatExample: 1 })
-    expect(settings).toEqual({ gapSeconds: 5, repeatAnswer: true, example: true, hint: true, repeatExample: true })
+    const settings = settingsToSequence({ audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1, audioHint: 1, audioRepeatExample: 1, audioNextSeconds: 5 })
+    expect(settings).toEqual({ gapSeconds: 5, repeatAnswer: true, example: true, hint: true, repeatExample: true, nextSeconds: 5 })
   })
 
   it('settingsToSequence converts 0 to false', () => {
-    const settings = settingsToSequence({ audioGapSeconds: 10, audioRepeatAnswer: 0, audioExample: 0, audioHint: 0, audioRepeatExample: 0 })
-    expect(settings).toEqual({ gapSeconds: 10, repeatAnswer: false, example: false, hint: false, repeatExample: false })
+    const settings = settingsToSequence({ audioGapSeconds: 10, audioRepeatAnswer: 0, audioExample: 0, audioHint: 0, audioRepeatExample: 0, audioNextSeconds: 8 })
+    expect(settings).toEqual({ gapSeconds: 10, repeatAnswer: false, example: false, hint: false, repeatExample: false, nextSeconds: 8 })
   })
 
   it('settingsToSequence handles mixed 0/1', () => {
-    const settings = settingsToSequence({ audioGapSeconds: 3, audioRepeatAnswer: 1, audioExample: 0, audioHint: 0, audioRepeatExample: 1 })
-    expect(settings).toEqual({ gapSeconds: 3, repeatAnswer: true, example: false, hint: false, repeatExample: true })
+    const settings = settingsToSequence({ audioGapSeconds: 3, audioRepeatAnswer: 1, audioExample: 0, audioHint: 0, audioRepeatExample: 1, audioNextSeconds: 12 })
+    expect(settings).toEqual({ gapSeconds: 3, repeatAnswer: true, example: false, hint: false, repeatExample: true, nextSeconds: 12 })
+  })
+
+  it('settingsToSequence carries audioNextSeconds through as nextSeconds', () => {
+    const settings = settingsToSequence({ audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1, audioHint: 0, audioRepeatExample: 1, audioNextSeconds: 21 })
+    expect(settings.nextSeconds).toBe(21)
+  })
+})
+
+describe('speakable', () => {
+  it('replaces " / " (spaces both sides) with ", "', () => {
+    expect(speakable('a / b')).toBe('a, b')
+  })
+
+  it('replaces "/" (no spaces) with ", "', () => {
+    expect(speakable('a/b')).toBe('a, b')
+  })
+
+  it('replaces " /" (space before only) with ", "', () => {
+    expect(speakable('a /b')).toBe('a, b')
+  })
+
+  it('replaces "/ " (space after only) with ", "', () => {
+    expect(speakable('a/ b')).toBe('a, b')
+  })
+
+  it('leaves no slash behind for consecutive slashes', () => {
+    expect(speakable('x//y')).not.toContain('/')
+  })
+
+  it('trims the result', () => {
+    expect(speakable('  a / b  ')).toBe('a, b')
+  })
+
+  it('leaves text with no slash untouched (aside from trimming)', () => {
+    expect(speakable('kot')).toBe('kot')
+  })
+
+  it('handles several slashes in one string', () => {
+    expect(speakable('a/b/c')).toBe('a, b, c')
   })
 })

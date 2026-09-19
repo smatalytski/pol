@@ -13,6 +13,7 @@ describe('settings', () => {
       audioExample: 1,
       audioHint: 0,
       audioRepeatExample: 1,
+      audioNextSeconds: 5,
     })
   })
 
@@ -109,5 +110,19 @@ describe('settings', () => {
     const { db } = createTestDb()
     setSetting(db, 'audioRepeatExample', '2')
     expect(getSettings(db).audioRepeatExample).toBe(1)
+  })
+
+  it('reads back a legitimate audioNextSeconds override', () => {
+    const { db } = createTestDb()
+    setSetting(db, 'audioNextSeconds', '17')
+    expect(getSettings(db).audioNextSeconds).toBe(17)
+  })
+
+  it('falls back to the default (5) when audioNextSeconds is out of range', () => {
+    const { db } = createTestDb()
+    for (const bad of ['0', '31', '-1', '1.5']) {
+      setSetting(db, 'audioNextSeconds', bad)
+      expect(getSettings(db).audioNextSeconds).toBe(5)
+    }
   })
 })

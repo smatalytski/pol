@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/lib/db/client'
 import { cards } from '@/lib/db/schema'
 import { getClip, getSynthesizer } from '@/lib/tts'
+import { speakable } from '@/lib/audio/sequence'
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -25,7 +26,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const text = russianPrompt ? card.promptText : card.answerPl
   if (!text) return NextResponse.json({ error: 'nothing to speak' }, { status: 404 })
 
-  const mediaId = await getClip(db, getSynthesizer(), text, lang, new Date())
+  // A slash is never spoken (spec §3.2's speakable(), shared with the
+  // listening sequence) — this is the same text a card shows, and a stray
+  // "/" would otherwise be read aloud here too.
+  const mediaId = await getClip(db, getSynthesizer(), speakable(text), lang, new Date())
   // A RELATIVE Location (RFC 7231 7.1.2), deliberately. The browser resolves
   // it against the URL it actually requested, which is the only origin that is
   // reachable from the browser's side. NextResponse.redirect requires an

@@ -18,7 +18,10 @@ describe('schema after migrations', () => {
   it('applies the squashed base and then the appended migrations, in order', () => {
     const { sqlite } = createTestDb()
     const names = (sqlite.prepare('SELECT name FROM _migrations ORDER BY name').all() as { name: string }[]).map((r) => r.name)
-    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql', '005-topic-items.sql', '006-listening.sql'])
+    expect(names).toEqual([
+      '001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql',
+      '005-topic-items.sql', '006-listening.sql', '007-prompt-commas.sql',
+    ])
   })
 
   it('gives captures a recognition language', () => {
@@ -208,5 +211,47 @@ describe('schema after migrations', () => {
 
     // 003 added the column empty; 005 files every topic-less card under Ogólne.
     expect(sqlite.prepare('SELECT id, topic_id FROM cards').all()).toEqual([{ id: 'k1', topic_id: 'default' }])
+  })
+
+  // Spec 2026-09-19-hands-free-audio-design.md §3.2/part D: existing
+  // questions get the one-time slash-to-comma cleanup on upgrade.
+  it('upgrades a database at 006, rewriting prompt_text slashes to commas and leaving answers untouched', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    for (const f of [
+      '001-init.sql', '002-generation-queue.sql', '003-topics.sql',
+      '004-capture-lang.sql', '005-topic-items.sql', '006-listening.sql',
+    ]) {
+      sqlite.exec(readFileSync(join(process.cwd(), 'migrations', f), 'utf8'))
+    }
+    sqlite.exec(`CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`)
+    sqlite
+      .prepare(
+        `INSERT INTO _migrations VALUES
+          ('001-init.sql',1),('002-generation-queue.sql',1),('003-topics.sql',1),
+          ('004-capture-lang.sql',1),('005-topic-items.sql',1),('006-listening.sql',1)`,
+      )
+      .run()
+
+    const card = sqlite.prepare(`INSERT INTO cards (id, type, prompt_text, answer_pl, answer_key, status, created_at, updated_at, due)
+      VALUES (?, 'ru_to_pl', ?, ?, ?, 'ready', 1, 1, 1)`)
+    card.run('a', 'a / b', 'ans-a', 'key-a')
+    card.run('b', 'a/b', 'ans-b', 'key-b')
+    card.run('c', 'a /b', 'ans-c', 'key-c')
+    card.run('d', 'a/ b', 'ans-d', 'key-d')
+    card.run('e', 'a, b', 'ans-e', 'key-e')
+    card.run('f', null, 'ans-f', 'key-f')
+
+    migrate(sqlite)
+
+    const rows = sqlite.prepare(`SELECT id, prompt_text, answer_pl, answer_key FROM cards ORDER BY id`).all()
+    expect(rows).toEqual([
+      { id: 'a', prompt_text: 'a, b', answer_pl: 'ans-a', answer_key: 'key-a' },
+      { id: 'b', prompt_text: 'a, b', answer_pl: 'ans-b', answer_key: 'key-b' },
+      { id: 'c', prompt_text: 'a, b', answer_pl: 'ans-c', answer_key: 'key-c' },
+      { id: 'd', prompt_text: 'a, b', answer_pl: 'ans-d', answer_key: 'key-d' },
+      { id: 'e', prompt_text: 'a, b', answer_pl: 'ans-e', answer_key: 'key-e' },
+      { id: 'f', prompt_text: null, answer_pl: 'ans-f', answer_key: 'key-f' },
+    ])
   })
 })

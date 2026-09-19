@@ -24,6 +24,7 @@ describe('SettingsPage', () => {
               audioExample: 0,
               audioHint: 1,
               audioRepeatExample: 0,
+              audioNextSeconds: 9,
             }),
         }) as unknown as Promise<Response>,
       ),
@@ -32,6 +33,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByDisplayValue('12')).toBeTruthy()
     expect(screen.getByDisplayValue('0.87')).toBeTruthy()
     expect(screen.getByDisplayValue('5')).toBeTruthy()
+    expect(screen.getByLabelText(t.listenNext)).toHaveProperty('value', '9')
     expect((screen.getByLabelText(t.listenRepeat) as HTMLInputElement).checked).toBe(true)
     expect((screen.getByLabelText(t.listenExample) as HTMLInputElement).checked).toBe(false)
     expect((screen.getByLabelText(t.listenHint) as HTMLInputElement).checked).toBe(true)
@@ -79,6 +81,50 @@ describe('SettingsPage', () => {
     })
     expect(calls).toEqual([{ body: { audioGapSeconds: 8 } }])
     expect(await screen.findByDisplayValue('8')).toBeTruthy()
+  })
+
+  it('PUTs the next-card pause on blur', async () => {
+    const calls: Array<{ body: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          calls.push({ body: JSON.parse(init.body as string) })
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                newPerDay: 10,
+                requestRetention: 0.9,
+                audioGapSeconds: 5,
+                audioRepeatAnswer: 1,
+                audioExample: 1,
+                audioNextSeconds: 11,
+              }),
+          }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              newPerDay: 10,
+              requestRetention: 0.9,
+              audioGapSeconds: 5,
+              audioRepeatAnswer: 1,
+              audioExample: 1,
+              audioNextSeconds: 5,
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<SettingsPage />)
+    const nextInput = await screen.findByLabelText(t.listenNext)
+    fireEvent.change(nextInput, { target: { value: '11' } })
+    await act(async () => {
+      fireEvent.blur(nextInput)
+    })
+    expect(calls).toEqual([{ body: { audioNextSeconds: 11 } }])
+    expect(await screen.findByDisplayValue('11')).toBeTruthy()
   })
 
   it('PUTs each checkbox immediately as 0/1 on change', async () => {

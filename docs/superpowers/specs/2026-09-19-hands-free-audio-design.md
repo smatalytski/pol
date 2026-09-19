@@ -54,10 +54,11 @@ PL: answer_pl
 [if audioRepeatAnswer]  silence 1 s, PL: answer_pl          (default on)
 [if audioExample and example_pl]  silence 1 s, PL: example_pl  (default on)
   [if also audioRepeatExample]  silence 1 s, PL: example_pl     (default on)
-silence 2 s
+silence: audioNextSeconds           (setting, 1–30 s, default 5)
 ```
 
-- The trailing 2 s sit inside each card's file, so moving to the next card needs no timer.
+- The trailing `audioNextSeconds` sits inside each card's file, so moving to the next card needs no timer.
+- Every spoken text (the RU prompt, the hint, the PL answer, the example) passes through `speakable()` first (`lib/audio/sequence.ts`), which turns a slash and any surrounding whitespace into `, ` — a slash written to separate alternatives (`седоватый / с проседью`) is never read aloud. The review screen's own audio route (`app/api/cards/[id]/audio/route.ts`) applies the same normalization before calling `getClip`.
 - The example's Russian translation is never spoken.
 - Voices are the existing ones: `ru-RU-Chirp3-HD-Kore` and `pl-PL-Chirp3-HD-Kore`.
 
@@ -87,9 +88,16 @@ silence 2 s
 - New: `audioRepeatAnswer` and `audioExample`, stored as `1` / `0`, both defaulting to `1`.
 - New: `audioHint`, stored as `1` / `0`, defaulting to `0` — the Russian prompt is spoken alone unless turned on.
 - New: `audioRepeatExample`, stored as `1` / `0`, defaulting to `1` — has no effect when `audioExample` is off or the card has no example.
+- New: `audioNextSeconds`, an integer 1–30, defaulting to `5` — the trailing pause before the next card, replacing the old fixed 2 s.
 - `PUT /api/settings` accepts them.
 
 Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. Settings need no schema change: they are key/value rows.
+
+Migration `007-prompt-commas.sql` (append-only, part D below) is a one-time
+data cleanup, not a schema change: it rewrites existing `cards.prompt_text`
+values so a slash between alternatives becomes a comma, matching the
+generator's new rule (§3.2) and what `speakable()` already does at speak
+time. It touches no other column.
 
 ## 4. Sessions
 
@@ -132,7 +140,7 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
 
 - **Length:** `10 · 20 · 30 · 45 min`. The last choice is remembered in the browser.
 - **Topics:** `wszystkie` or a multi-select of switched-on topics, with Ogólne included.
-- **Sequence line:** the current sequence in words, e.g. `przerwa 5 s · odpowiedź ×2 · przykład`, linking to `/ustawienia`.
+- **Sequence line:** the current sequence in words, e.g. `przerwa 5 s · następna 5 s · odpowiedź ×2 · przykład`, linking to `/ustawienia`.
 - **Start:** a `Start` button.
 
 ### 5.2 Playing
@@ -160,6 +168,7 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
 
 `/ustawienia` gains a **Słuchanie** section:
 - `Przerwa na zastanowienie` (seconds, the existing setting);
+- `Przerwa przed następną kartą` (seconds, 1–30, default 5);
 - `Powtórz odpowiedź` (on/off);
 - `Czytaj przykład` (on/off);
 - `Czytaj podpowiedź` (on/off, default off);

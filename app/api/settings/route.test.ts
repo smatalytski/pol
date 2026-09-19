@@ -36,6 +36,7 @@ describe('GET /api/settings', () => {
       audioExample: 1,
       audioHint: 0,
       audioRepeatExample: 1,
+      audioNextSeconds: 5,
     })
   })
 })
@@ -98,6 +99,22 @@ describe('PUT /api/settings', () => {
 
   it('rejects audioRepeatExample of 2', async () => {
     const res = await put({ audioRepeatExample: 2 })
+    expect(res.status).toBe(400)
+  })
+
+  it('persists a legitimate audioNextSeconds override', async () => {
+    const res = await put({ audioNextSeconds: 12 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioNextSeconds).toBe(12)
+  })
+
+  it('rejects audioNextSeconds of 0', async () => {
+    const res = await put({ audioNextSeconds: 0 })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects audioNextSeconds of 31', async () => {
+    const res = await put({ audioNextSeconds: 31 })
     expect(res.status).toBe(400)
   })
 })

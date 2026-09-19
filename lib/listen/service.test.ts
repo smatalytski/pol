@@ -178,7 +178,8 @@ describe('time budget', () => {
     setSetting(db, 'audioRepeatAnswer', '0')
     setSetting(db, 'audioExample', '0')
 
-    // ruLen (299) + answerLen (1), times 60ms, plus 2000ms trailing silence = 20000ms.
+    // ruLen (299) + answerLen (1), times 60ms, plus the default 5000ms
+    // trailing silence (audioNextSeconds, default 5) = 23000ms.
     const promptText = 'a'.repeat(299)
     for (const answerPl of ['b', 'c', 'd', 'e']) {
       mkCard(db, { answerPl, promptText })
@@ -186,8 +187,8 @@ describe('time budget', () => {
 
     const result = planSession(db, { minutes: 1 }, NOW)
     expect(result).toHaveLength(3)
-    expect(result.every((c) => c.estimatedMs === 20_000)).toBe(true)
-    expect(result.reduce((sum, c) => sum + c.estimatedMs, 0)).toBe(60_000)
+    expect(result.every((c) => c.estimatedMs === 23_000)).toBe(true)
+    expect(result.reduce((sum, c) => sum + c.estimatedMs, 0)).toBe(69_000)
   })
 
   it("uses a cached card_audio row's duration instead of the estimate for the card's current key", () => {

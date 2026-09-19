@@ -291,6 +291,15 @@ describe('dictationMessage', () => {
   })
 })
 
+describe('card generation SYSTEM instruction', () => {
+  it('tells the model to separate prompt_ru alternatives with commas, never slashes', async () => {
+    const generate = ok(FULL)
+    await make(generate).fromDictation('złośliwy')
+    const req = generate.mock.calls[0][0]
+    expect(req.config.systemInstruction).toContain('никогда не через «/»')
+  })
+})
+
 describe('geminiGenerator with a meaning', () => {
   it('sends the meaning in the user message, not the system prompt', async () => {
     const generate = ok(FULL)

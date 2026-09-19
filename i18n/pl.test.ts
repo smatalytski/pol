@@ -18,8 +18,8 @@ describe('strings', () => {
       'addItem', 'cancel', 'moveToDiscarded',
       'listen', 'listenLength', 'listenAllTopics', 'listenStart', 'listenStop', 'listenPause', 'listenResume',
       'listenSkip', 'listenDone', 'listenCards', 'listenAgain', 'listenFailed', 'listenMinutesLeft',
-      'listenSection', 'listenGap', 'listenRepeat', 'listenExample', 'listenHint', 'listenRepeatExample',
-      'listenSummaryGap', 'listenSummaryRepeat', 'listenSummaryExample', 'listenSummaryHint', 'listenSummaryExampleTwice',
+      'listenSection', 'listenGap', 'listenNext', 'listenRepeat', 'listenExample', 'listenHint', 'listenRepeatExample',
+      'listenSummaryGap', 'listenSummaryNext', 'listenSummaryRepeat', 'listenSummaryExample', 'listenSummaryHint', 'listenSummaryExampleTwice',
     ]
     for (const key of required) expect(t).toHaveProperty(key)
   })
