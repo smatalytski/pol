@@ -15,6 +15,7 @@ const { db } = await import('@/lib/db/client')
 const { captures, cards, generationJobs, media, reviews, topics } = await import('@/lib/db/schema')
 const { eq } = await import('drizzle-orm')
 const { newState } = await import('@/lib/scheduler')
+const { DEFAULT_TOPIC_ID } = await import('@/lib/topics/default')
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -180,6 +181,21 @@ describe('PATCH /api/cards/:id', () => {
     seedCard({ id: 'c11' })
     const res = await patch('c11', { topicId: 'nope' })
     expect(res.status).toBe(404)
+  })
+
+  // Important fix-round finding: topicId combined with other fields in one
+  // body silently moved the card and dropped the field edits (the topicId
+  // branch returned early, before updateCard ever ran). A move and an edit
+  // must be requested separately.
+  it('rejects a body that combines topicId with other fields, leaving the card untouched', async () => {
+    db.insert(topics).values({ id: 't3', name: 'U mechanika', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    seedCard({ id: 'c16', topicId: DEFAULT_TOPIC_ID })
+    const res = await patch('c16', { topicId: 't3', answerPl: 'wredny' })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'move and edit separately' })
+    const row = db.select().from(cards).where(eq(cards.id, 'c16')).get()!
+    expect(row.topicId).toBe(DEFAULT_TOPIC_ID)
+    expect(row.answerPl).toBe('złośliwy')
   })
 })
 

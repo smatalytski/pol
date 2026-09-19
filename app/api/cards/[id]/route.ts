@@ -49,11 +49,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params
   const patch = Patch.safeParse(await req.json())
   if (!patch.success) return NextResponse.json({ error: 'bad patch' }, { status: 400 })
-  if (patch.data.topicId !== undefined) {
-    const card = moveCard(db, id, patch.data.topicId, new Date())
+  const { topicId, ...fields } = patch.data
+  if (topicId !== undefined) {
+    // A move and a field edit are separate requests — merging them silently
+    // dropped the field edits, since this branch returned before updateCard
+    // ever ran (fix-round finding).
+    if (Object.keys(fields).length > 0) return NextResponse.json({ error: 'move and edit separately' }, { status: 400 })
+    const card = moveCard(db, id, topicId, new Date())
     return card ? NextResponse.json({ card }) : NextResponse.json({ error: 'not found' }, { status: 404 })
   }
-  return NextResponse.json({ card: updateCard(db, id, patch.data, new Date()) })
+  return NextResponse.json({ card: updateCard(db, id, fields, new Date()) })
 }
 
 // Soft delete (decided 2026-09-16): sets `deleted_at` via `deleteCard` rather
