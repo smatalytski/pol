@@ -11,7 +11,8 @@ vi.mock('next/link', () => ({
 const TopicsPage = (await import('./page')).default
 
 const row = (over = {}) => ({
-  id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, cardCount: 23, pendingCount: 4, searching: false, ...over,
+  id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1,
+  cardCount: 23, openCount: 5, discardedCount: 3, pendingCount: 4, searching: false, ...over,
 })
 
 function stubFetch(topics: unknown[]) {
@@ -34,7 +35,9 @@ describe('TopicsPage', () => {
     render(<TopicsPage />)
     const name = await screen.findByText('U lekarza')
     expect(name.closest('a')?.getAttribute('href')).toBe('/tematy/t1')
-    expect(screen.getByText('23')).toBeTruthy()
+    const counts = screen.getByText('23 · 5 · 3')
+    expect(counts).toBeTruthy()
+    expect(counts.getAttribute('title')).toBe(`${t.tabCarded} · ${t.tabOpen} · ${t.tabDiscarded}`)
     expect(screen.getByText(`+4 ${t.queued}`)).toBeTruthy()
   })
 

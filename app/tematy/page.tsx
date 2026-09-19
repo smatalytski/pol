@@ -69,7 +69,9 @@ export default function TopicsPage() {
               {x.name ?? t.unnamedTopic}
             </Link>
             <span className="flex shrink-0 items-center gap-3 text-xs">
-              <span>{x.cardCount}</span>
+              <span title={`${t.tabCarded} · ${t.tabOpen} · ${t.tabDiscarded}`}>
+                {`${x.cardCount} · ${x.openCount} · ${x.discardedCount}`}
+              </span>
               {x.pendingCount > 0 && <span className="text-sky-700">{`+${x.pendingCount} ${t.queued}`}</span>}
               <button
                 type="button"

@@ -6,6 +6,7 @@ import type { CardRow, CardType } from '@/lib/cards/service'
 import { hasForms, parseForms } from '@/lib/cards/forms'
 import { CardTypeSwitch } from '@/components/CardTypeSwitch'
 import { FormsView } from '@/components/FormsView'
+import { MoveToTopic } from '@/components/MoveToTopic'
 import { t } from '@/i18n/pl'
 
 /**
@@ -22,9 +23,8 @@ export default function CardDetailPage() {
   const [missing, setMissing] = useState(false)
   const [saveError, setSaveError] = useState(false)
   const [regenError, setRegenError] = useState(false)
-  // The topic this card belongs to, if any, so the detail screen can link
-  // back to it. A named topic shows its name; one still awaiting its first
-  // round shows the placeholder instead.
+  // The topic this card belongs to, if any, so the detail screen can offer
+  // its move picker (`temat: …`) with the right `currentTopicId`.
   const [topic, setTopic] = useState<{ id: string; name: string | null } | null>(null)
   const [typeError, setTypeError] = useState(false)
   const [typeDuplicate, setTypeDuplicate] = useState(false)
@@ -110,8 +110,8 @@ export default function CardDetailPage() {
     setTypeDuplicate(body.duplicateOf !== null)
   }
 
-  // Deleting the card this screen is showing would otherwise leave it
-  // displaying something that no longer exists.
+  // Moving the card this screen is showing to its topic's odrzucone would
+  // otherwise leave it displaying a card no longer in view.
   async function remove() {
     const res = await fetch(`/api/cards/${id}`, { method: 'DELETE' })
     if (!res.ok) {
@@ -119,6 +119,23 @@ export default function CardDetailPage() {
       return
     }
     router.push('/fiszki')
+  }
+
+  // Moving the card to another topic (spec 2026-09-19-topic-items §5.3): a
+  // PATCH with only `topicId`, then the page reloads so the move picker's
+  // `currentTopicId` catches up with the move.
+  async function moveTopic(topicId: string) {
+    const res = await fetch(`/api/cards/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topicId }),
+    })
+    if (!res.ok) {
+      setSaveError(true)
+      return
+    }
+    setSaveError(false)
+    await load()
   }
 
   if (missing) return <p className="text-lg">{t.cardNotFound}</p>
@@ -130,11 +147,7 @@ export default function CardDetailPage() {
         {t.backToCards}
       </Link>
 
-      {topic && (
-        <Link href={`/tematy/${topic.id}`} className="text-sm text-neutral-500 underline">
-          {topic.name ?? t.unnamedTopic}
-        </Link>
-      )}
+      {topic && <MoveToTopic currentTopicId={topic.id} onMove={moveTopic} />}
 
       {/* Keyed on the value the server holds, so a card rebuilt underneath
           this screen — by wygeneruj ponownie — remounts the input with the
@@ -206,7 +219,7 @@ export default function CardDetailPage() {
           {card.suspendedAt ? t.unsuspend : t.suspend}
         </button>
         <button onClick={() => void remove()} className="underline text-red-600">
-          {t.deleteItem}
+          {t.moveToDiscarded}
         </button>
         {/* wygeneruj ponownie is the only thing that queues a rebuild here
             now that re-recognition is gone, so this shows while a queued or

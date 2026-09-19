@@ -15,7 +15,8 @@ import { t } from '@/i18n/pl'
 export default function NewTopicPage() {
   const router = useRouter()
   const [context, setContext] = useState('')
-  // level is not yet chosen here; a later task adds the control (spec §4.5).
+  // `zaawansowany` is the starting level; BatchSettings' level toggle
+  // changes it (spec §4.5), and the choice rides along in the POST body.
   const [params, setParams] = useState<BatchParams>({ count: DEFAULT_COUNT, mix: 'mieszane', level: 'zaawansowany' })
   const [lang, setLang] = useState<DictationLang>('ru')
   const [busy, setBusy] = useState(false)

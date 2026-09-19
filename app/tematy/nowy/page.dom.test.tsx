@@ -28,6 +28,18 @@ describe('NewTopicPage', () => {
     expect(JSON.parse(init.body)).toEqual({ context: 'u mechanika, wymiana sprzęgła', count: 10, mix: 'frazy', level: 'zaawansowany' })
   })
 
+  it('carries the chosen level, not just the default, in the POST body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ topicId: 't9' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<NewTopicPage />)
+    fireEvent.change(screen.getByLabelText(t.topicContext), { target: { value: 'u mechanika' } })
+    fireEvent.click(screen.getByRole('button', { name: t.levelIntermediate }))
+    fireEvent.click(screen.getByRole('button', { name: t.propose }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/tematy/t9'))
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init.body).level).toBe('sredni')
+  })
+
   it('cannot propose with an empty context', () => {
     vi.stubGlobal('fetch', vi.fn())
     render(<NewTopicPage />)
