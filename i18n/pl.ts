@@ -2,7 +2,7 @@ export const t = {
   appName: 'Fiszki',
 
   review: 'Powtórki',
-  add: 'Dodaj',
+  add: 'dodaj',
   cards: 'Fiszki',
   settings: 'Ustawienia',
 
@@ -73,14 +73,12 @@ export const t = {
   topicContextPlaceholder: 'Opisz sytuację: dokąd idziesz, z kim, po co…',
   propose: 'zaproponuj',
   searching: 'szukam…',
-  acceptAndMore: 'przyjmij i jeszcze',
-  acceptAndFinish: 'przyjmij i zakończ',
   more: 'jeszcze',
   tryAgain: 'spróbuj ponownie',
   roundCount: 'ile',
   mixMixed: 'mieszane',
-  mixWords: 'więcej słów',
-  mixPhrases: 'więcej fraz',
+  mixWords: 'tylko słowa',
+  mixPhrases: 'tylko frazy',
   kindWord: 'słowo',
   kindPhrase: 'fraza',
   topicOn: 'włączony',
@@ -91,6 +89,22 @@ export const t = {
   topicSaveFailed: 'nie udało się zapisać',
   topicsLoadFailed: 'nie udało się wczytać tematów',
   holdToDictate: 'przytrzymaj i opowiedz',
+
+  levelAdvanced: 'zaawansowany',
+  levelIntermediate: 'średniozaawansowany',
+  levelBadge: 'śr.',
+  tabCarded: 'z kartą',
+  tabOpen: 'bez karty',
+  tabDiscarded: 'odrzucone',
+  makeCard: '+ karta',
+  discard: 'odrzuć',
+  restore: 'przywróć',
+  cardBadge: 'karta',
+  moveTo: 'temat',
+  manualAdd: 'dodaj słowo lub frazę',
+  manualPlaceholder: 'wpisz albo nagraj…',
+  cancel: 'anuluj',
+  moveToDiscarded: 'przenieś do odrzuconych',
 } as const
 
 export type Strings = typeof t

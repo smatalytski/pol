@@ -2,7 +2,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { mediaRecorderFactory, useHoldToRecord } from '@/hooks/useHoldToRecord'
-import { RoundSettings } from '@/components/RoundSettings'
+import { BatchSettings } from '@/components/BatchSettings'
 import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
@@ -113,7 +113,7 @@ export default function NewTopicPage() {
         ))}
       </div>
       {micDenied && <p className="text-sm text-red-600">{t.micDenied}</p>}
-      <RoundSettings value={params} onChange={setParams} />
+      <BatchSettings value={params} onChange={setParams} />
       <button
         type="button"
         disabled={busy || context.trim() === ''}

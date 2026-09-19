@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { CardListItem } from '@/components/CardListItem'
-import { RoundSettings } from '@/components/RoundSettings'
+import { BatchSettings } from '@/components/BatchSettings'
 import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { CardRow } from '@/lib/cards/service'
 import type { TopicRow } from '@/lib/topics/service'
@@ -208,14 +208,17 @@ export default function TopicPage() {
 
       {(view.state === 'ready' || view.state === 'idle') && (
         <div className="flex flex-col gap-3">
-          <RoundSettings value={params} onChange={setParams} />
+          <BatchSettings value={params} onChange={setParams} />
           <div className="flex gap-3">
+            {/* Was acceptAndMore/acceptAndFinish — those strings are removed
+                (spec 2026-09-19-topic-items §4.6). This page is rewritten in
+                Task 6/7 for the grouped view; this is a minimal compile fix. */}
             <button type="button" disabled={busy} onClick={() => accept(true)} className="rounded bg-black px-4 py-2 text-white disabled:opacity-40">
-              {view.state === 'ready' ? t.acceptAndMore : t.more}
+              {t.more}
             </button>
             {view.state === 'ready' && (
               <button type="button" disabled={busy} onClick={() => accept(false)} className="rounded border px-4 py-2 disabled:opacity-40">
-                {t.acceptAndFinish}
+                {t.add}
               </button>
             )}
           </div>

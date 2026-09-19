@@ -11,8 +11,11 @@ describe('strings', () => {
       'suspend', 'unsuspend', 'needsInput', 'queued', 'generating',
       'saveFailed',
       'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
-      'topics', 'newTopic', 'propose', 'searching', 'acceptAndMore', 'acceptAndFinish', 'tryAgain',
+      'topics', 'newTopic', 'propose', 'searching', 'more', 'tryAgain',
       'topicsLoadFailed', 'topicSaveFailed',
+      'levelAdvanced', 'levelIntermediate', 'levelBadge', 'tabCarded', 'tabOpen', 'tabDiscarded',
+      'makeCard', 'discard', 'restore', 'cardBadge', 'moveTo', 'manualAdd', 'manualPlaceholder',
+      'add', 'cancel', 'moveToDiscarded',
     ]
     for (const key of required) expect(t).toHaveProperty(key)
   })

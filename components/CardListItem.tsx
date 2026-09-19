@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 import type { CardRow } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
@@ -6,22 +7,27 @@ import { t } from '@/i18n/pl'
  * One row of a card list (app/fiszki/page.tsx, and the topic page's cards —
  * spec 2026-09-18-topic-generation §4.4, "the same rows as /fiszki"): a
  * Polish title, linking to the card's detail screen, plus a status badge
- * where there is something to say.
+ * where there is something to say. `actions` (spec 2026-09-19-topic-items
+ * §4.6 — move/discard/restore row controls) renders in its own element
+ * beside the link, never inside it, so a click on a button doesn't also
+ * trigger the navigation.
  */
 export function CardListItem({
   card,
   topicName,
   topicSuspended,
   generating,
+  actions,
 }: {
   card: CardRow
   topicName?: string | null
   topicSuspended?: boolean
   generating?: boolean
+  actions?: ReactNode
 }) {
   return (
-    <li className="border-b">
-      <Link href={`/fiszki/${card.id}`} className="flex items-baseline justify-between gap-3 py-3">
+    <li className="flex items-center gap-3 border-b">
+      <Link href={`/fiszki/${card.id}`} className="flex flex-1 items-baseline justify-between gap-3 py-3">
         <span className="text-lg">{card.answerPl}</span>
         <span className="flex shrink-0 gap-2 text-xs">
           {topicName && <span className="text-neutral-400">{topicName}</span>}
@@ -39,6 +45,7 @@ export function CardListItem({
           {generating && <span className="text-sky-700">{t.generating}</span>}
         </span>
       </Link>
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </li>
   )
 }
