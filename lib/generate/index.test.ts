@@ -377,6 +377,18 @@ describe('level in the suggestion prompt', () => {
     await geminiSuggester({ generate: generate as never, model: 'm' }).suggest({ ...base, level: 'sredni' })
     expect(generate.mock.calls[0][0].config.systemInstruction).not.toContain('B1')
   })
+
+  // Controller ruling: the system prompt's own preamble used to claim the
+  // person "already reads and speaks Polish fluently" — true for
+  // zaawansowany, false for sredni (whose LEVEL_LINE describes a confident
+  // B1 speaker who lacks vocabulary in this area). The level line in the
+  // request is what must control the ask, not a fluency claim baked into
+  // the system prompt for every level alike.
+  it('makes no fluency claim in the system prompt, since sredni contradicts it', async () => {
+    const generate = ok(SUGGESTION)
+    await geminiSuggester({ generate: generate as never, model: 'm' }).suggest({ ...base, level: 'sredni' })
+    expect(generate.mock.calls[0][0].config.systemInstruction).not.toContain('свободно')
+  })
 })
 
 describe('dictationMessage with a partial meaning', () => {
