@@ -40,7 +40,7 @@ A real `<button>`: `type`, `onClick` and `disabled` pass through.
 | `danger` | as `icon` or `secondary` (`iconOnly` prop), red icon and text | as above |
 
 - **Sizes:** `sm` (32 px tall, rows) and `md` (40 px, screen-level). Every tap target is at least 32 × 32 px.
-- **`busy`:** disables the button and swaps the icon for a small spinner (`Loader2`, spinning; still under `prefers-reduced-motion`).
+- **`busy`:** disables the button and swaps the icon for a small spinner (`Loader2`, spinning; static under `prefers-reduced-motion`).
 - **`label`** is required. It keeps today's Polish action names (`odrzuć`, `temat`, `przywróć` …), so screen readers and tests that find buttons by name keep working.
 
 ### 3.3 `components/ui/Switch.tsx`
