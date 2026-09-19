@@ -173,6 +173,19 @@ describe('ListenPage — playing / paused', () => {
     expect(stop).toHaveBeenCalled()
   })
 
+  it('draws the player controls as icon buttons named for screen readers', () => {
+    // …same setup as the pause/skip/stop test, up to the playing phase…
+    mockState = { phase: 'playing', index: 0, cards: [card(), card({ id: 'c2' })], playedMs: 0, heard: 0 }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    for (const name of [t.listenPause, t.listenSkip]) {
+      const b = screen.getByRole('button', { name })
+      expect(b.textContent).toBe('')
+      expect(b.querySelector('svg')).not.toBeNull()
+    }
+    expect(screen.getByRole('button', { name: t.listenStop }).textContent).toBe(t.listenStop)
+  })
+
   it('renders the paused card and calls resume', () => {
     mockState = { phase: 'paused', index: 0, cards: [card()], playedMs: 0, heard: 0 }
     stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })

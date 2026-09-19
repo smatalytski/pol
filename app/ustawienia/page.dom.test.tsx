@@ -34,10 +34,10 @@ describe('SettingsPage', () => {
     expect(screen.getByDisplayValue('0.87')).toBeTruthy()
     expect(screen.getByDisplayValue('5')).toBeTruthy()
     expect(screen.getByLabelText(t.listenNext)).toHaveProperty('value', '9')
-    expect((screen.getByLabelText(t.listenRepeat) as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByLabelText(t.listenExample) as HTMLInputElement).checked).toBe(false)
-    expect((screen.getByLabelText(t.listenHint) as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByLabelText(t.listenRepeatExample) as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByLabelText(t.listenRepeat).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByLabelText(t.listenExample).getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByLabelText(t.listenHint).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByLabelText(t.listenRepeatExample).getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText(t.listenSection)).toBeTruthy()
   })
 
@@ -127,7 +127,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByDisplayValue('11')).toBeTruthy()
   })
 
-  it('PUTs each checkbox immediately as 0/1 on change', async () => {
+  it('PUTs each switch immediately as 0/1 on change', async () => {
     const calls: Array<{ body: unknown }> = []
     vi.stubGlobal(
       'fetch',
@@ -161,9 +161,9 @@ describe('SettingsPage', () => {
       }),
     )
     render(<SettingsPage />)
-    const repeat = (await screen.findByLabelText(t.listenRepeat)) as HTMLInputElement
-    const example = screen.getByLabelText(t.listenExample) as HTMLInputElement
-    expect(repeat.checked).toBe(true)
+    const repeat = await screen.findByLabelText(t.listenRepeat)
+    const example = screen.getByLabelText(t.listenExample)
+    expect(repeat.getAttribute('aria-checked')).toBe('true')
     await act(async () => {
       fireEvent.click(repeat)
     })
@@ -173,7 +173,7 @@ describe('SettingsPage', () => {
     expect(calls).toEqual([{ body: { audioRepeatAnswer: 0 } }, { body: { audioExample: 0 } }])
   })
 
-  it('PUTs the hint and repeat-example checkboxes immediately as 0/1 on change', async () => {
+  it('PUTs the hint and repeat-example switches immediately as 0/1 on change', async () => {
     const calls: Array<{ body: unknown }> = []
     vi.stubGlobal(
       'fetch',
@@ -211,10 +211,10 @@ describe('SettingsPage', () => {
       }),
     )
     render(<SettingsPage />)
-    const hint = (await screen.findByLabelText(t.listenHint)) as HTMLInputElement
-    const repeatExample = screen.getByLabelText(t.listenRepeatExample) as HTMLInputElement
-    expect(hint.checked).toBe(false)
-    expect(repeatExample.checked).toBe(true)
+    const hint = await screen.findByLabelText(t.listenHint)
+    const repeatExample = screen.getByLabelText(t.listenRepeatExample)
+    expect(hint.getAttribute('aria-checked')).toBe('false')
+    expect(repeatExample.getAttribute('aria-checked')).toBe('true')
     await act(async () => {
       fireEvent.click(hint)
     })
@@ -380,5 +380,33 @@ describe('SettingsPage', () => {
     await screen.findByDisplayValue('10')
     expect(screen.getByText(t.newPerDay)).toBeTruthy()
     expect(screen.getByText(t.targetRetention)).toBeTruthy()
+  })
+
+  it('shows the four listening toggles as switches', async () => {
+    // same GET stub as the first test in this file
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              newPerDay: 12,
+              requestRetention: 0.87,
+              audioGapSeconds: 5,
+              audioRepeatAnswer: 1,
+              audioExample: 0,
+              audioHint: 1,
+              audioRepeatExample: 0,
+              audioNextSeconds: 9,
+            }),
+        }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<SettingsPage />)
+    await screen.findByDisplayValue('12')
+    for (const label of [t.listenRepeat, t.listenExample, t.listenHint, t.listenRepeatExample]) {
+      expect(screen.getByRole('switch', { name: label })).toBeTruthy()
+    }
+    expect(screen.queryByRole('checkbox')).toBeNull()
   })
 })
