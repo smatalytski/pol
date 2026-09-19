@@ -18,7 +18,7 @@ describe('schema after migrations', () => {
   it('applies the squashed base and then the appended migrations, in order', () => {
     const { sqlite } = createTestDb()
     const names = (sqlite.prepare('SELECT name FROM _migrations ORDER BY name').all() as { name: string }[]).map((r) => r.name)
-    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql', '005-topic-items.sql'])
+    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql', '005-topic-items.sql', '006-listening.sql'])
   })
 
   it('gives captures a recognition language', () => {
@@ -130,6 +130,25 @@ describe('schema after migrations', () => {
       .run()
     sqlite.prepare(`DELETE FROM captures WHERE id = 'c1'`).run()
     expect(sqlite.prepare(`SELECT capture_id FROM topic_items`).get()).toEqual({ capture_id: null })
+  })
+
+  it('has card_audio table with the correct columns', () => {
+    const { sqlite } = createTestDb()
+    const cols = (sqlite.prepare('PRAGMA table_info(card_audio)').all() as { name: string }[]).map((c) => c.name)
+    expect(cols).toEqual(['key', 'media_id', 'duration_ms', 'created_at'])
+  })
+
+  it('has listens table with the correct columns', () => {
+    const { sqlite } = createTestDb()
+    const cols = (sqlite.prepare('PRAGMA table_info(listens)').all() as { name: string }[]).map((c) => c.name)
+    expect(cols).toEqual(['id', 'card_id', 'heard_at'])
+  })
+
+  it('fails to insert a listens row for an unknown card with foreign keys ON', () => {
+    const { sqlite } = createTestDb()
+    expect(() => {
+      sqlite.prepare(`INSERT INTO listens (card_id, heard_at) VALUES ('unknown-card', 1)`).run()
+    }).toThrow()
   })
 
   it('upgrades 004 to topic items: a default topic, every card in a topic, suggestions mapped', () => {

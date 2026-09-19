@@ -4,7 +4,7 @@ import { LEVELS, SUGGESTION_KINDS } from '../topics/rounds'
 
 export const media = sqliteTable('media', {
   id: text('id').primaryKey(),
-  kind: text('kind', { enum: ['audio', 'tts'] }).notNull(),
+  kind: text('kind', { enum: ['audio', 'tts', 'listen'] }).notNull(),
   mime: text('mime').notNull(),
   bytes: blob('bytes', { mode: 'buffer' }).notNull(),
   byteSize: integer('byte_size').notNull(),
@@ -124,4 +124,17 @@ export const topicItems = sqliteTable('topic_items', {
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+})
+
+export const cardAudio = sqliteTable('card_audio', {
+  key: text('key').primaryKey(),
+  mediaId: text('media_id').notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  createdAt: integer('created_at').notNull(),
+})
+
+export const listens = sqliteTable('listens', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  cardId: text('card_id').notNull(),
+  heardAt: integer('heard_at').notNull(),
 })

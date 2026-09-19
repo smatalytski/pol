@@ -28,7 +28,7 @@ function put(body: unknown) {
 describe('GET /api/settings', () => {
   it('returns the defaults on an empty table', async () => {
     const body = await (await GET()).json()
-    expect(body).toEqual({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 })
+    expect(body).toEqual({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
   })
 })
 
@@ -58,5 +58,16 @@ describe('PUT /api/settings', () => {
   it('rejects a negative or non-integer newPerDay', async () => {
     expect((await put({ newPerDay: -1 })).status).toBe(400)
     expect((await put({ newPerDay: 2.5 })).status).toBe(400)
+  })
+
+  it('persists audioRepeatAnswer of 0', async () => {
+    const res = await put({ audioRepeatAnswer: 0 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioRepeatAnswer).toBe(0)
+  })
+
+  it('rejects audioExample of 2', async () => {
+    const res = await put({ audioExample: 2 })
+    expect(res.status).toBe(400)
   })
 })

@@ -1,7 +1,7 @@
 import type { Db } from './db/client'
 import { settings } from './db/schema'
 
-const DEFAULTS = { newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 }
+const DEFAULTS = { newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 }
 export type Settings = typeof DEFAULTS
 
 // Per-key validity, beyond "is it a finite number". `request_retention` of 0 is
@@ -12,6 +12,8 @@ const VALIDATORS: { [K in keyof Settings]: (n: number) => boolean } = {
   requestRetention: (n) => n > 0 && n <= 1,
   newPerDay: (n) => Number.isInteger(n) && n >= 0,
   audioGapSeconds: (n) => n >= 0,
+  audioRepeatAnswer: (n) => n === 0 || n === 1,
+  audioExample: (n) => n === 0 || n === 1,
 }
 
 export function getSettings(db: Db): Settings {
