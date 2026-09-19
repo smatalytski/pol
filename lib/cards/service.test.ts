@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
+import { t } from '../../i18n/pl'
 import { createTestDb } from '../db/testing'
-import { cards, reviews } from '../db/schema'
+import { cards, reviews, topics } from '../db/schema'
+import { DEFAULT_TOPIC_ID } from '../topics/default'
 import { createCard, type CreateCardInput } from './service'
 import type { Generator, GeneratedCard } from '../generate'
 import {
@@ -9,7 +11,9 @@ import {
   CardTypeError,
   deleteCard,
   findDuplicate,
+  moveCard,
   regenerateCard,
+  restoreCard,
   searchCards,
   setCardType,
   updateCard,
@@ -42,6 +46,16 @@ describe('createCard', () => {
     expect(row.answerPl).toBe('Złośliwy!')
     expect(row.state).toBe(0)
     expect(row.due).toBe(NOW.getTime())
+  })
+
+  // Every card belongs to a topic (spec 2026-09-19-topic-items §3.2).
+  it('files a card without a topic under the default topic, and one with a topic under it', () => {
+    const { db } = createTestDb()
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    const plain = createCard(db, input(), NOW).cardId
+    const topical = createCard(db, input({ answerPl: 'katar', topicId: 't1' }), NOW).cardId
+    expect(db.select().from(cards).where(eq(cards.id, plain)).get()!.topicId).toBe(DEFAULT_TOPIC_ID)
+    expect(db.select().from(cards).where(eq(cards.id, topical)).get()!.topicId).toBe('t1')
   })
 
   it('returns the existing card instead of creating a duplicate', () => {
@@ -551,5 +565,47 @@ describe('setCardType', () => {
     const { card, duplicateOf } = setCardType(db, cardId, 'pl_to_pl', LATER)
     expect(duplicateOf).toBe(existing.cardId)
     expect(card.type).toBe('ru_to_pl')
+  })
+})
+
+describe('restoreCard', () => {
+  it('undeletes a card with its schedule untouched', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    db.update(cards).set({ reps: 3, stability: 7 }).where(eq(cards.id, cardId)).run()
+    deleteCard(db, cardId, NOW)
+    const r = restoreCard(db, cardId, NOW)
+    expect(r).toMatchObject({ ok: true, card: { id: cardId, deletedAt: null, reps: 3, stability: 7 } })
+  })
+
+  it('refuses when a live card with the same answer now exists, naming its topic', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    deleteCard(db, cardId, NOW)
+    createCard(db, input(), NOW) // a fresh one, filed under Ogólne
+    expect(restoreCard(db, cardId, NOW)).toEqual({ ok: false, reason: 'conflict', topicName: 'Ogólne' })
+  })
+
+  it('falls back to a placeholder name when the conflicting card sits in a not-yet-named topic', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    deleteCard(db, cardId, NOW)
+    db.insert(topics).values({ id: 't-unnamed', name: null, context: '', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    const { cardId: freshId } = createCard(db, input(), NOW)
+    moveCard(db, freshId, 't-unnamed', NOW)
+    expect(restoreCard(db, cardId, NOW)).toEqual({ ok: false, reason: 'conflict', topicName: t.unnamedTopic })
+  })
+})
+
+describe('moveCard', () => {
+  it('moves a card to another topic with an injected clock, refusing an unknown one', () => {
+    const { db } = createTestDb()
+    db.insert(topics).values({ id: 't2', name: 'B', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    const { cardId } = createCard(db, input(), NOW)
+    const LATER = new Date(NOW.getTime() + 1000)
+    const moved = moveCard(db, cardId, 't2', LATER)!
+    expect(moved.topicId).toBe('t2')
+    expect(moved.updatedAt).toBe(LATER.getTime())
+    expect(moveCard(db, cardId, 'nope', LATER)).toBeNull()
   })
 })

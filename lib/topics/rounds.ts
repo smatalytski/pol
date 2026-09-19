@@ -1,8 +1,9 @@
 import { answerKey } from '../cards/answer-key'
 
 /**
- * The pure rules of a topic's rounds (spec 2026-09-18-topic-generation §2, §5).
- * Nothing here touches the database or the model.
+ * The pure rules of a topic's batches (spec 2026-09-18-topic-generation §2,
+ * §5; levels and only-kinds: spec 2026-09-19-topic-items §4.5). Nothing here
+ * touches the database or the model.
  */
 
 /** ASCII, like WORD_KINDS's `przyslowek`; the screen shows `słowo`. */
@@ -12,12 +13,16 @@ export type SuggestionKind = (typeof SUGGESTION_KINDS)[number]
 export const MIXES = ['mieszane', 'slowa', 'frazy'] as const
 export type Mix = (typeof MIXES)[number]
 
+export const LEVELS = ['zaawansowany', 'sredni'] as const
+export type Level = (typeof LEVELS)[number]
+
 export const COUNTS = [5, 10, 20] as const
 export const DEFAULT_COUNT = 10
 
-export type RoundParams = { count: number; mix: Mix }
+export type BatchParams = { count: number; mix: Mix; level: Level }
 
-const WORD_SHARE: Record<Mix, number> = { mieszane: 0.5, slowa: 0.8, frazy: 0.2 }
+/** `slowa`/`frazy` mean only that kind — 100% of the request goes to it. */
+const WORD_SHARE: Record<Mix, number> = { mieszane: 0.5, slowa: 1, frazy: 0 }
 
 /** How many items to ask the model for, leaving room for dedup to drop some. */
 export function requestSize(count: number): number {
@@ -32,12 +37,18 @@ export function mixTarget(n: number, mix: Mix): { words: number; phrases: number
 export type SuggestedItem = { answer_pl: string; gloss_ru: string; kind: SuggestionKind }
 
 /**
- * The round that is shown: the model's items in its order (most useful first),
+ * The batch that is shown: the model's items in its order (most useful first),
  * minus empty ones, anything whose answer key is in `taken` (the deck and the
- * topic's history), and repeats within the response; at most `count` of them.
- * A shorter round is fine — it is never padded.
+ * topic's history), repeats within the response, and — for `slowa`/`frazy` —
+ * anything of the other kind; at most `count` of them. A shorter batch is
+ * fine — it is never padded.
  */
-export function pickRound(items: readonly SuggestedItem[], taken: ReadonlySet<string>, count: number): SuggestedItem[] {
+export function pickBatch(
+  items: readonly SuggestedItem[],
+  taken: ReadonlySet<string>,
+  count: number,
+  mix: Mix,
+): SuggestedItem[] {
   const seen = new Set(taken)
   const out: SuggestedItem[] = []
   for (const it of items) {
@@ -47,6 +58,8 @@ export function pickRound(items: readonly SuggestedItem[], taken: ReadonlySet<st
     const key = answerKey(answer)
     if (seen.has(key)) continue
     seen.add(key)
+    if (mix === 'slowa' && it.kind !== 'slowo') continue
+    if (mix === 'frazy' && it.kind !== 'fraza') continue
     out.push({ answer_pl: answer, gloss_ru: it.gloss_ru.trim(), kind: it.kind })
   }
   return out

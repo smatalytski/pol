@@ -10,9 +10,12 @@ process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
 afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, PATCH, DELETE } = await import('./route')
+const { POST: restore } = await import('./restore/route')
 const { db } = await import('@/lib/db/client')
 const { captures, cards, generationJobs, media, reviews, topics } = await import('@/lib/db/schema')
+const { eq } = await import('drizzle-orm')
 const { newState } = await import('@/lib/scheduler')
+const { DEFAULT_TOPIC_ID } = await import('@/lib/topics/default')
 
 const NOW = new Date('2026-09-12T10:00:00')
 
@@ -57,6 +60,10 @@ function del(id: string) {
   return DELETE(new Request(`http://test/api/cards/${id}`, { method: 'DELETE' }), { params: Promise.resolve({ id }) })
 }
 
+function restoreCard(id: string) {
+  return restore(new Request(`http://test/api/cards/${id}/restore`, { method: 'POST' }), { params: Promise.resolve({ id }) })
+}
+
 beforeEach(() => {
   // Order matters: reviews, captures and generationJobs all carry a foreign
   // key to cards, so clearing cards first fails with FOREIGN KEY constraint
@@ -66,7 +73,8 @@ beforeEach(() => {
   db.delete(generationJobs).run()
   db.delete(cards).run()
   db.delete(media).run()
-  db.delete(topics).run()
+  // Ogólne comes with the migration and stays: new cards are filed under it.
+  db.delete(topics).where(eq(topics.isDefault, false)).run()
 })
 
 describe('GET /api/cards/:id', () => {
@@ -119,7 +127,7 @@ describe('GET /api/cards/:id', () => {
   })
 
   it('names the card’s topic, or null without one', async () => {
-    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1 }).run()
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
     seedCard({ id: 'k1', topicId: 't1' })
     seedCard({ id: 'k2', answerPl: 'kot', answerKey: 'kot' })
     expect((await (await get('k1')).json()).topic).toEqual({ id: 't1', name: 'U lekarza' })
@@ -159,6 +167,62 @@ describe('PATCH /api/cards/:id', () => {
     seedCard({ id: 'c7' })
     await del('c7')
     await expect(patch('c7', { answerPl: 'x' })).rejects.toThrow(/no such card/)
+  })
+
+  it('moves a card to another topic via topicId', async () => {
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    seedCard({ id: 'c10' })
+    const res = await patch('c10', { topicId: 't1' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).card).toMatchObject({ topicId: 't1' })
+  })
+
+  it('is 404 when moving to an unknown topic', async () => {
+    seedCard({ id: 'c11' })
+    const res = await patch('c11', { topicId: 'nope' })
+    expect(res.status).toBe(404)
+  })
+
+  // Important fix-round finding: topicId combined with other fields in one
+  // body silently moved the card and dropped the field edits (the topicId
+  // branch returned early, before updateCard ever ran). A move and an edit
+  // must be requested separately.
+  it('rejects a body that combines topicId with other fields, leaving the card untouched', async () => {
+    db.insert(topics).values({ id: 't3', name: 'U mechanika', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    seedCard({ id: 'c16', topicId: DEFAULT_TOPIC_ID })
+    const res = await patch('c16', { topicId: 't3', answerPl: 'wredny' })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'move and edit separately' })
+    const row = db.select().from(cards).where(eq(cards.id, 'c16')).get()!
+    expect(row.topicId).toBe(DEFAULT_TOPIC_ID)
+    expect(row.answerPl).toBe('złośliwy')
+  })
+})
+
+describe('POST /api/cards/:id/restore', () => {
+  it('undeletes a card', async () => {
+    seedCard({ id: 'c12' })
+    await del('c12')
+    const res = await restoreCard('c12')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.card).toMatchObject({ id: 'c12', deletedAt: null })
+  })
+
+  it('is 404 for an unknown or non-deleted card', async () => {
+    seedCard({ id: 'c13' })
+    expect((await restoreCard('c13')).status).toBe(404)
+    expect((await restoreCard('ghost')).status).toBe(404)
+  })
+
+  it('refuses with 409 when a live card now owns the same answer key and type', async () => {
+    seedCard({ id: 'c14', answerPl: 'złośliwy', answerKey: 'złośliwy' })
+    await del('c14')
+    db.insert(topics).values({ id: 't2', name: 'U mechanika', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    seedCard({ id: 'c15', answerPl: 'złośliwy', answerKey: 'złośliwy', topicId: 't2' })
+    const res = await restoreCard('c14')
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'już masz — w temacie U mechanika' })
   })
 })
 

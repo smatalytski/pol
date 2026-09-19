@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
-import { cards, captures, generationJobs, media, suggestions, topics } from '../db/schema'
-import { createCard, deleteCard, type CreateCardInput } from '../cards/service'
+import { cards, captures, generationJobs, media, topicItems, topics } from '../db/schema'
+import { createCard, deleteCard, knownCardFor, type CreateCardInput } from '../cards/service'
 import { GenerationError, type Generator, type GeneratedCard } from '../generate'
 import type { Transcriber } from '../transcribe'
 import { enqueueJob } from '../queue/jobs'
-import { acceptRound } from '../topics/service'
+import { DEFAULT_TOPIC_ID } from '../topics/default'
 import {
-  createCapture, recognizeCapture, recognizeStranded, listOnScreen, pendingCaptures, knownCardFor,
+  createCapture, recognizeCapture, recognizeStranded, listOnScreen, pendingCaptures,
   generateNewCard, giveUpNewCard, jobHandlers,
 } from './pipeline'
 
@@ -512,15 +512,77 @@ describe('recognition language (spec 2026-09-18-recording-language §2)', () => 
 })
 
 describe('a topic item becoming a card', () => {
-  function accepted(d: ReturnType<typeof deps>) {
-    d.db.insert(topics).values({ id: 't1', name: null, context: 'u lekarza z dzieckiem', suspendedAt: null, createdAt: NOW.getTime() }).run()
-    d.db.insert(suggestions).values({
-      id: 's1', topicId: 't1', round: 1, answerPl: 'złośliwy', glossRu: 'злобный', kind: 'slowo',
-      status: 'proposed', captureId: null, createdAt: NOW.getTime(),
+  /**
+   * What `+ karta` leaves behind (spec 2026-09-19-topic-items §4.1): a
+   * `carded` item pointing at a queued, audio-less capture.
+   */
+  function accepted(
+    d: ReturnType<typeof deps>,
+    over: { topicId?: string; glossRu?: string | null } = {},
+  ) {
+    const topicId = over.topicId ?? 't1'
+    const glossRu = over.glossRu === undefined ? 'злобный' : over.glossRu
+    if (topicId !== DEFAULT_TOPIC_ID) {
+      d.db.insert(topics).values({
+        id: topicId, name: null, context: 'u lekarza z dzieckiem', suspendedAt: null, createdAt: NOW.getTime(), isDefault: false,
+      }).run()
+    }
+    const captureId = 'c-item'
+    d.db.insert(captures).values({
+      id: captureId, audioMediaId: null, transcript: 'złośliwy', status: 'queued', error: null, generationJson: null,
+      cardId: null, createdAt: NOW.getTime(), transcribedAt: null, duplicateOf: null, topicId, glossRu,
     }).run()
-    acceptRound(d.db, 't1', 1, [], null, NOW)
-    return d.db.select().from(captures).get()!.id
+    d.db.insert(topicItems).values({
+      id: 'i1', topicId, answerPl: 'złośliwy', glossRu, kind: glossRu ? 'slowo' : null,
+      source: glossRu ? 'suggested' : 'manual', level: glossRu ? 'zaawansowany' : null, status: 'carded',
+      captureId, cardId: null, batchJobId: null, discardedAt: null, createdAt: NOW.getTime(),
+    }).run()
+    return captureId
   }
+
+  const itemRow = (d: ReturnType<typeof deps>) => d.db.select().from(topicItems).where(eq(topicItems.id, 'i1')).get()!
+
+  it('links the item to the card it became', async () => {
+    const d = deps()
+    const id = accepted(d)
+    await generateNewCard(d, id, NOW)
+    expect(itemRow(d).cardId).toBe(d.db.select().from(cards).get()!.id)
+  })
+
+  it('links the item to the needs_input card when generation gives up', () => {
+    const d = deps()
+    const id = accepted(d)
+    giveUpNewCard(d.db, id, 'unusable', NOW)
+    const card = d.db.select().from(cards).get()!
+    expect(card.status).toBe('needs_input')
+    expect(itemRow(d).cardId).toBe(card.id)
+  })
+
+  // The process died after the capture learned its card but before the item
+  // did; the job runs again and must finish the link.
+  it('links the item when a rerun finds the card already made', async () => {
+    const d = deps()
+    const id = accepted(d)
+    const cardId = createCard(d.db, input(), NOW).cardId
+    d.db.update(captures).set({ cardId }).where(eq(captures.id, id)).run()
+    await generateNewCard(d, id, NOW)
+    expect(itemRow(d).cardId).toBe(cardId)
+    expect(d.generator.fromDictation).not.toHaveBeenCalled()
+  })
+
+  it('sends a hand-added item, which has no gloss, with the situation alone', async () => {
+    const d = deps()
+    const id = accepted(d, { glossRu: null })
+    await generateNewCard(d, id, NOW)
+    expect(d.generator.fromDictation).toHaveBeenCalledWith('złośliwy', { glossRu: null, context: 'u lekarza z dzieckiem' })
+  })
+
+  it('calls an item of the default topic with no gloss with the transcript alone', async () => {
+    const d = deps()
+    const id = accepted(d, { topicId: DEFAULT_TOPIC_ID, glossRu: null })
+    await generateNewCard(d, id, NOW)
+    expect(d.generator.fromDictation).toHaveBeenCalledWith('złośliwy')
+  })
 
   it('sends the gloss and the situation, and files the card under the topic', async () => {
     const d = deps()
@@ -544,7 +606,9 @@ describe('a topic item becoming a card', () => {
     const id = accepted(d)
     await generateNewCard(d, id, NOW)
     expect(d.db.select().from(cards).all()).toHaveLength(1)
-    expect(d.db.select().from(cards).get()!).toMatchObject({ id: existing, topicId: null })
+    expect(d.db.select().from(cards).get()!).toMatchObject({ id: existing, topicId: DEFAULT_TOPIC_ID })
+    // …and the item links to that card (§4.1).
+    expect(itemRow(d).cardId).toBe(existing)
   })
 
   it('calls a plain dictation with the transcript alone, as before', async () => {

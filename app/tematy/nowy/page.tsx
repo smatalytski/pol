@@ -2,8 +2,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { mediaRecorderFactory, useHoldToRecord } from '@/hooks/useHoldToRecord'
-import { RoundSettings } from '@/components/RoundSettings'
-import { DEFAULT_COUNT, type RoundParams } from '@/lib/topics/rounds'
+import { BatchSettings } from '@/components/BatchSettings'
+import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
 
@@ -15,7 +15,9 @@ import { t } from '@/i18n/pl'
 export default function NewTopicPage() {
   const router = useRouter()
   const [context, setContext] = useState('')
-  const [params, setParams] = useState<RoundParams>({ count: DEFAULT_COUNT, mix: 'mieszane' })
+  // `zaawansowany` is the starting level; BatchSettings' level toggle
+  // changes it (spec §4.5), and the choice rides along in the POST body.
+  const [params, setParams] = useState<BatchParams>({ count: DEFAULT_COUNT, mix: 'mieszane', level: 'zaawansowany' })
   const [lang, setLang] = useState<DictationLang>('ru')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -112,7 +114,7 @@ export default function NewTopicPage() {
         ))}
       </div>
       {micDenied && <p className="text-sm text-red-600">{t.micDenied}</p>}
-      <RoundSettings value={params} onChange={setParams} />
+      <BatchSettings value={params} onChange={setParams} />
       <button
         type="button"
         disabled={busy || context.trim() === ''}

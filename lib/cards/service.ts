@@ -1,11 +1,13 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { cards } from '../db/schema'
+import { cards, topics } from '../db/schema'
 import { newState } from '../scheduler'
 import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
 import { canDrillForms, type WordKind } from './forms'
+import { DEFAULT_TOPIC_ID } from '../topics/default'
+import { t } from '../../i18n/pl'
 
 export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
@@ -34,7 +36,11 @@ export type CreateCardInput = {
    * only ever consulted when the primary lookup found nothing.
    */
   fallbackAnswerKey?: string
-  /** The topic a generated item belongs to (spec 2026-09-18-topic-generation §3.4). A duplicate keeps its own. */
+  /**
+   * The topic the card belongs to (spec 2026-09-18-topic-generation §3.4). A
+   * card without a topic is filed under Ogólne, the default topic (spec
+   * 2026-09-19-topic-items §3.2). A duplicate keeps its own.
+   */
   topicId?: string | null
 }
 
@@ -108,7 +114,7 @@ export function createCard(
       wordKind: input.wordKind,
       formsJson: input.formsJson,
       status: input.status,
-      topicId: input.topicId ?? null,
+      topicId: input.topicId ?? DEFAULT_TOPIC_ID,
       suspendedAt: null,
       createdAt: now.getTime(),
       updatedAt: now.getTime(),
@@ -366,4 +372,78 @@ export function applyGeneratedFields(
     grammarNote: fields.grammarNote,
   }
   return { card: updateCard(db, card.id, patch, now), duplicateOf }
+}
+
+const CYRILLIC = /[Ѐ-ӿ]/
+
+/**
+ * `już masz` at recognition time (spec 2026-09-18-generation-queue §4). Checks
+ * the raw transcript against live ru_to_pl cards — new dictations are always
+ * ru_to_pl, and dedup is type-scoped. Best-effort by design: a card is keyed by
+ * its generated answer, so a transcript that lost a diacritic misses here, and
+ * createCard's dedup at generation time stays as the backstop.
+ */
+export function knownCardFor(db: Db, transcript: string): string | null {
+  const key = answerKey(transcript)
+  if (!key) return null
+  const live = and(eq(cards.type, 'ru_to_pl'), isNull(cards.deletedAt))
+  if (!CYRILLIC.test(transcript)) {
+    return db.select({ id: cards.id }).from(cards).where(and(live, eq(cards.answerKey, key))).get()?.id ?? null
+  }
+  // The Russian prompt is stored raw, not keyed, so keys are compared in JS —
+  // the same personal-scale trade-off as searchCards.
+  const match = db
+    .select({ id: cards.id, promptText: cards.promptText })
+    .from(cards)
+    .where(and(live, isNotNull(cards.promptText)))
+    .all()
+    .find((c) => answerKey(c.promptText!) === key)
+  return match?.id ?? null
+}
+
+/**
+ * The topic name of a card, for the `już masz — w temacie <name>` texts.
+ * `''` only for a card whose topic was somehow removed (never happens:
+ * topics are never hard-deleted); a topic that exists but has no name yet
+ * (still awaiting its first batch) falls back to `t.unnamedTopic`, or the
+ * message would otherwise end with a bare `temacie `.
+ */
+export function cardTopicName(db: Db, cardId: string): string {
+  const topicId = db.select({ topicId: cards.topicId }).from(cards).where(eq(cards.id, cardId)).get()?.topicId
+  if (!topicId) return ''
+  return db.select({ name: topics.name }).from(topics).where(eq(topics.id, topicId)).get()?.name ?? t.unnamedTopic
+}
+
+/**
+ * `przywróć` on a soft-deleted card in odrzucone (spec 2026-09-19-topic-items
+ * §4.3). Refused, with the conflicting card's topic name, when a live card
+ * now owns the same (type, answer_key) — the same collision `findDuplicate`
+ * guards everywhere else; restoring here would otherwise fork the deck into
+ * two live cards sharing one answer key. FSRS state and reviews are untouched.
+ */
+export function restoreCard(
+  db: Db,
+  id: string,
+  now: Date,
+): { ok: true; card: CardRow } | { ok: false; reason: 'not-found' } | { ok: false; reason: 'conflict'; topicName: string } {
+  const card = db.select().from(cards).where(eq(cards.id, id)).get()
+  if (!card || !card.deletedAt) return { ok: false, reason: 'not-found' }
+  const conflictId = findDuplicate(db, { type: card.type, answerPl: card.answerPl })
+  if (conflictId) return { ok: false, reason: 'conflict', topicName: cardTopicName(db, conflictId) }
+  db.update(cards).set({ deletedAt: null, updatedAt: now.getTime() }).where(eq(cards.id, id)).run()
+  return { ok: true, card: db.select().from(cards).where(eq(cards.id, id)).get()! }
+}
+
+/**
+ * `temat: …` on a card (spec 2026-09-19-topic-items §4.4): sets its topic
+ * without touching its group. Null for an unknown or soft-deleted card, or an
+ * unknown topic — the caller (the API route) turns that into a 404.
+ */
+export function moveCard(db: Db, id: string, topicId: string, now: Date): CardRow | null {
+  const card = db.select({ id: cards.id }).from(cards).where(and(eq(cards.id, id), isNull(cards.deletedAt))).get()
+  if (!card) return null
+  const topic = db.select({ id: topics.id }).from(topics).where(eq(topics.id, topicId)).get()
+  if (!topic) return null
+  db.update(cards).set({ topicId, updatedAt: now.getTime() }).where(eq(cards.id, id)).run()
+  return db.select().from(cards).where(eq(cards.id, id)).get()!
 }

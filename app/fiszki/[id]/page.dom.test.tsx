@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CardRow } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
@@ -334,12 +334,12 @@ describe('CardDetailPage', () => {
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ suspendedAt: null })
   })
 
-  // Deleting the card you are looking at would otherwise leave this screen
-  // showing a card that no longer exists.
-  it('DELETEs the card and returns to the list', async () => {
+  // Moving the card you are looking at to its topic's odrzucone would
+  // otherwise leave this screen showing a card no longer in view.
+  it('moves the card to odrzucone (DELETE) and returns to the list', async () => {
     const calls = stubFetch(() => cardRow())
     render(<CardPage />)
-    const button = await screen.findByText(t.deleteItem)
+    const button = await screen.findByText(t.moveToDiscarded)
     await act(async () => {
       fireEvent.click(button)
     })
@@ -384,17 +384,65 @@ describe('CardDetailPage', () => {
     expect(screen.queryByText(t.asRussian)).toBeNull()
   })
 
-  it('links to the card’s topic', async () => {
+  // The topic link is now a move picker (spec 2026-09-19-topic-items §5.3):
+  // choosing another topic PATCHes { topicId } and reloads the card so the
+  // picker's `currentTopicId` and anything else topic-dependent catch up.
+  it('offers a move picker for the card’s topic, and moves it on choosing another one', async () => {
+    let topicId = 't1'
+    const calls: Array<{ url: string; method: string; body?: unknown }> = []
     vi.stubGlobal(
       'fetch',
-      vi.fn(() =>
-        Promise.resolve({
+      vi.fn((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined })
+        if (url === '/api/topics') {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                topics: [
+                  { id: 't1', name: 'U lekarza' },
+                  { id: 't2', name: 'U mechanika' },
+                ],
+              }),
+          }) as unknown as Promise<Response>
+        }
+        if (method === 'PATCH') {
+          topicId = (JSON.parse(init!.body as string) as { topicId: string }).topicId
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ card: cardRow({ topicId }) }) }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ card: cardRow(), generating: false, topic: { id: 't1', name: 'U lekarza' } }),
-        }) as unknown as Promise<Response>,
+          json: () => Promise.resolve({ card: cardRow(), generating: false, topic: { id: topicId, name: topicId === 't1' ? 'U lekarza' : 'U mechanika' } }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<CardPage />)
+    fireEvent.click(await screen.findByText(`${t.moveTo}: U lekarza`))
+    fireEvent.click(await screen.findByText('U mechanika'))
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/cards/c1' && c.method === 'PATCH')).toBe(true))
+    const patch = calls.find((c) => c.url === '/api/cards/c1' && c.method === 'PATCH')!
+    expect(patch.body).toEqual({ topicId: 't2' })
+    // A reload follows the move: a fresh GET for the card picks up the new topic.
+    await waitFor(() => expect(calls.filter((c) => c.url === `/api/cards/c1` && c.method === 'GET').length).toBeGreaterThan(1))
+  })
+
+  // The card page dropped its topic name entirely (whole-branch review
+  // finding): the button always read `temat: …`, even for a card sitting
+  // in Ogólne.
+  it('shows the topic name — temat: Ogólne — for a card filed under Ogólne', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({ card: cardRow({ topicId: 'default' }), generating: false, topic: { id: 'default', name: 'Ogólne' } }),
+          }) as unknown as Promise<Response>,
       ),
     )
     render(<CardPage />)
-    expect((await screen.findByText('U lekarza')).closest('a')?.getAttribute('href')).toBe('/tematy/t1')
+    expect(await screen.findByText(`${t.moveTo}: Ogólne`)).toBeTruthy()
   })
 })

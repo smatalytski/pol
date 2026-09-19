@@ -1,8 +1,8 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
-import { captures, cards, topics } from '../db/schema'
-import { createCard, regenerateCard, type GeneratedFields } from '../cards/service'
+import { captures, cards, topicItems, topics } from '../db/schema'
+import { createCard, knownCardFor, regenerateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator, type Meaning, type Suggester } from '../generate'
@@ -70,33 +70,6 @@ function strandedFields(transcript: string): GeneratedFields {
  * so the time is read then. Routes pass `() => new Date()`; tests a fake.
  */
 export type RecognizeDeps = { db: Db; transcriber: Transcriber; clock: () => Date }
-
-const CYRILLIC = /[Ѐ-ӿ]/
-
-/**
- * `już masz` at recognition time (spec 2026-09-18-generation-queue §4). Checks
- * the raw transcript against live ru_to_pl cards — new dictations are always
- * ru_to_pl, and dedup is type-scoped. Best-effort by design: a card is keyed by
- * its generated answer, so a transcript that lost a diacritic misses here, and
- * createCard's dedup at generation time stays as the backstop.
- */
-export function knownCardFor(db: Db, transcript: string): string | null {
-  const key = answerKey(transcript)
-  if (!key) return null
-  const live = and(eq(cards.type, 'ru_to_pl'), isNull(cards.deletedAt))
-  if (!CYRILLIC.test(transcript)) {
-    return db.select({ id: cards.id }).from(cards).where(and(live, eq(cards.answerKey, key))).get()?.id ?? null
-  }
-  // The Russian prompt is stored raw, not keyed, so keys are compared in JS —
-  // the same personal-scale trade-off as searchCards.
-  const match = db
-    .select({ id: cards.id, promptText: cards.promptText })
-    .from(cards)
-    .where(and(live, isNotNull(cards.promptText)))
-    .all()
-    .find((c) => answerKey(c.promptText!) === key)
-  return match?.id ?? null
-}
 
 /**
  * Recognises an uploaded (or failed) recording and opens its review window.
@@ -210,14 +183,21 @@ export function pendingCaptures(db: Db): { id: string; transcript: string | null
     .all() as { id: string; transcript: string | null; status: 'queued' | 'generating' }[]
 }
 
-/** A topic item's intended sense and situation; undefined for a dictation. */
+/** A topic item's intended sense and situation; undefined when there is neither (spec 2026-09-19-topic-items §4.1). */
 function meaningOf(db: Db, capture: { topicId: string | null; glossRu: string | null }): Meaning | undefined {
-  if (!capture.topicId || !capture.glossRu) return undefined
+  if (!capture.topicId) return undefined
   const topic = db.select({ context: topics.context }).from(topics).where(eq(topics.id, capture.topicId)).get()
-  return topic ? { glossRu: capture.glossRu, context: topic.context } : undefined
+  const context = topic?.context.trim() ? topic.context : null
+  const glossRu = capture.glossRu?.trim() ? capture.glossRu : null
+  return glossRu || context ? { glossRu, context } : undefined
 }
 
-/** Job `new`: an approved recording, or an accepted topic item, becomes a card. A generation failure is thrown for the queue to classify. */
+/** A `+ karta` item (spec 2026-09-19-topic-items §4.1) learns which card it became. */
+function linkItem(db: Db, captureId: string, cardId: string): void {
+  db.update(topicItems).set({ cardId }).where(eq(topicItems.captureId, captureId)).run()
+}
+
+/** Job `new`: an approved recording, or a topic item sent with `+ karta`, becomes a card. A generation failure is thrown for the queue to classify. */
 export async function generateNewCard(deps: CaptureDeps, captureId: string, now: Date): Promise<void> {
   const { db, generator } = deps
   const capture = db.select().from(captures).where(eq(captures.id, captureId)).get()
@@ -225,13 +205,15 @@ export async function generateNewCard(deps: CaptureDeps, captureId: string, now:
   if (capture.cardId) {
     // The card was created but the process died before the job was marked
     // done, so the job ran again. Finish what that run was doing, or the
-    // recording would stay pending forever.
+    // recording would stay pending forever (and its item unlinked).
     db.update(captures).set({ status: 'generated' }).where(eq(captures.id, captureId)).run()
+    linkItem(db, captureId, capture.cardId)
     return
   }
   const transcript = capture.transcript
   const meaning = meaningOf(db, capture)
-  // Called with the transcript alone for a dictation, exactly as before.
+  // Called with the transcript alone for a dictation, exactly as before, and
+  // for a gloss-less item of a topic with no context (Ogólne).
   const generated = meaning ? await generator.fromDictation(transcript, meaning) : await generator.fromDictation(transcript)
   const fields = toCardFields(generated)
   // A stale read from before the await is never trusted for a decision that
@@ -255,6 +237,7 @@ export async function generateNewCard(deps: CaptureDeps, captureId: string, now:
     .set({ status: 'generated', cardId, generationJson: JSON.stringify({ ...generated, duplicateOf }), error: null })
     .where(eq(captures.id, captureId))
     .run()
+  linkItem(db, captureId, cardId)
 }
 
 /** Job `new` gave up: the word is kept as a needs_input card (§6). */
@@ -270,6 +253,7 @@ export function giveUpNewCard(db: Db, captureId: string, lastError: string, now:
     .set({ status: 'generated', cardId, generationJson: JSON.stringify({ duplicateOf }), error: lastError })
     .where(eq(captures.id, captureId))
     .run()
+  linkItem(db, captureId, cardId)
 }
 
 /** The three job kinds, wired to their bodies. */

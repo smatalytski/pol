@@ -1,11 +1,12 @@
 'use client'
-import { COUNTS, MIXES, type Mix, type RoundParams } from '@/lib/topics/rounds'
+import { COUNTS, LEVELS, MIXES, type BatchParams, type Level, type Mix } from '@/lib/topics/rounds'
 import { t } from '@/i18n/pl'
 
 const MIX_LABEL: Record<Mix, string> = { mieszane: t.mixMixed, slowa: t.mixWords, frazy: t.mixPhrases }
+const LEVEL_LABEL: Record<Level, string> = { zaawansowany: t.levelAdvanced, sredni: t.levelIntermediate }
 
-/** How big the next round is and how it leans (spec 2026-09-18-topic-generation §2). */
-export function RoundSettings({ value, onChange }: { value: RoundParams; onChange: (p: RoundParams) => void }) {
+/** How big the next batch is, how it leans, and how hard it should be (spec 2026-09-19-topic-items §4.5). */
+export function BatchSettings({ value, onChange }: { value: BatchParams; onChange: (p: BatchParams) => void }) {
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <label className="flex items-center gap-2">
@@ -30,6 +31,19 @@ export function RoundSettings({ value, onChange }: { value: RoundParams; onChang
             className={`px-2 py-1 ${value.mix === m ? 'bg-black text-white' : ''}`}
           >
             {MIX_LABEL[m]}
+          </button>
+        ))}
+      </div>
+      <div className="flex overflow-hidden rounded border">
+        {LEVELS.map((l) => (
+          <button
+            key={l}
+            type="button"
+            aria-pressed={value.level === l}
+            onClick={() => onChange({ ...value, level: l })}
+            className={`px-2 py-1 ${value.level === l ? 'bg-black text-white' : ''}`}
+          >
+            {LEVEL_LABEL[l]}
           </button>
         ))}
       </div>

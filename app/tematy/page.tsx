@@ -4,7 +4,7 @@ import Link from 'next/link'
 import type { TopicListRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
-/** Every topic, with its card count, what is still generating, and its on/off switch (spec §4.2). */
+/** Every topic, with its card count, what is still generating, and its on/off switch (spec §5.1). */
 export default function TopicsPage() {
   const [topics, setTopics] = useState<TopicListRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +32,7 @@ export default function TopicsPage() {
   }, [load])
 
   // A brand-new topic has no pending captures yet — it is still searching for
-  // its first round — so it must keep the page polling too, or it sits at
+  // its first batch — so it must keep the page polling too, or it sits at
   // "nowy temat…" until the page happens to reload.
   const pending = topics.some((x) => x.pendingCount > 0 || x.searching)
   useEffect(() => {
@@ -64,17 +64,22 @@ export default function TopicsPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
       <ul>
         {topics.map((x) => (
-          <li key={x.id} className="flex items-center justify-between gap-3 border-b py-3">
-            <Link href={`/tematy/${x.id}`} className={`text-lg ${x.suspendedAt !== null ? 'text-neutral-400' : ''}`}>
+          <li key={x.id} className="flex flex-col gap-1 border-b py-3">
+            <Link
+              href={`/tematy/${x.id}`}
+              className={`break-words text-lg ${x.suspendedAt !== null ? 'text-neutral-400' : ''}`}
+            >
               {x.name ?? t.unnamedTopic}
             </Link>
-            <span className="flex shrink-0 items-center gap-3 text-xs">
-              <span>{x.cardCount}</span>
+            <span className="flex flex-wrap items-center gap-2 text-xs">
+              <span>
+                {`${x.cardCount} ${t.tabCarded} · ${x.openCount} ${t.tabOpen} · ${x.discardedCount} ${t.tabDiscarded}`}
+              </span>
               {x.pendingCount > 0 && <span className="text-sky-700">{`+${x.pendingCount} ${t.queued}`}</span>}
               <button
                 type="button"
                 onClick={() => void toggle(x)}
-                className="rounded border px-2 py-1"
+                className="ml-auto rounded border px-2 py-1"
               >
                 {x.suspendedAt === null ? t.topicOn : t.topicOffToggle}
               </button>

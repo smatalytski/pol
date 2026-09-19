@@ -1,12 +1,12 @@
 // Live check of the suggestion prompt (spec 2026-09-18-topic-generation §7):
-// one round for each of the three example situations, printed for a human to
+// one batch for each of the three example situations, printed for a human to
 // judge. Not a test — the question is whether the words are good.
 //
-// Usage: npx tsx --env-file=.env.local scripts/try-suggestions.ts [count] [mix]
+// Usage: npx tsx --env-file=.env.local scripts/try-suggestions.ts [count] [mix] [level]
 // Needs GOOGLE_CLOUD_PROJECT, FISZKI_MODEL and ADC, like check-providers.
 
 import { getSuggester } from '../lib/generate/index'
-import { MIXES, mixTarget, requestSize, type Mix } from '../lib/topics/rounds'
+import { LEVELS, MIXES, mixTarget, pickBatch, requestSize, type Level, type Mix } from '../lib/topics/rounds'
 
 const SITUATIONS = [
   'Иду к врачу с ребёнком, у него грипп: температура, кашель, насморк.',
@@ -16,13 +16,16 @@ const SITUATIONS = [
 
 const count = Number(process.argv[2] ?? 10)
 const mix = (process.argv[3] ?? 'mieszane') as Mix
+const level = (process.argv[4] ?? 'zaawansowany') as Level
 if (!MIXES.includes(mix)) throw new Error(`mix must be one of ${MIXES.join(', ')}`)
+if (!LEVELS.includes(level)) throw new Error(`level must be one of ${LEVELS.join(', ')}`)
 
 const suggester = getSuggester()
 for (const context of SITUATIONS) {
   const n = requestSize(count)
   const started = Date.now()
-  const s = await suggester.suggest({ context, count: n, ...mixTarget(n, mix), exclude: [] })
-  console.log(`\n=== ${s.topic_name}  (${Date.now() - started} ms)\n${context}`)
-  for (const i of s.items) console.log(`  [${i.kind}] ${i.answer_pl} — ${i.gloss_ru}`)
+  const s = await suggester.suggest({ context, count: n, ...mixTarget(n, mix), exclude: [], level })
+  const batch = pickBatch(s.items, new Set(), count, mix)
+  console.log(`\n=== ${s.topic_name} [${level}] (${Date.now() - started} ms)\n${context}`)
+  for (const i of batch) console.log(`  [${i.kind}] ${i.answer_pl} — ${i.gloss_ru}`)
 }

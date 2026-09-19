@@ -1,18 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
-import { captures, cards, generationJobs, suggestions, topics } from '../db/schema'
+import { captures, cards, generationJobs, topicItems, topics } from '../db/schema'
 import { createCard, deleteCard } from '../cards/service'
+import { createCapture } from '../capture/pipeline'
 import type { Suggestion, Suggester } from '../generate'
 import { enqueueJob } from '../queue/jobs'
+import { DEFAULT_TOPIC_ID } from './default'
 import {
-  acceptRound,
   activeSuggestJob,
+  addManualItem,
+  cardItem,
   createTopic,
+  discardItem,
   enqueueSuggest,
-  latestRound,
   listTopics,
-  parseRoundJob,
+  moveItem,
+  parseBatchJob,
+  restoreItem,
   retrySuggest,
   runSuggest,
   topicView,
@@ -23,15 +28,17 @@ type Db = ReturnType<typeof createTestDb>['db']
 const NOW = new Date('2026-09-18T10:00:00')
 
 function topic(db: Db, id = 't1', over: Partial<typeof topics.$inferInsert> = {}) {
-  db.insert(topics).values({ id, name: null, context: 'u lekarza z dzieckiem, grypa', suspendedAt: null, createdAt: NOW.getTime(), ...over }).run()
+  db.insert(topics).values({
+    id, name: null, context: 'u lekarza z dzieckiem, grypa', suspendedAt: null, createdAt: NOW.getTime(), isDefault: false, ...over,
+  }).run()
   return id
 }
 
-function suggestion(db: Db, answerPl: string, over: Partial<typeof suggestions.$inferInsert> = {}) {
-  const id = over.id ?? `s-${answerPl}`
-  db.insert(suggestions).values({
-    id, topicId: 't1', round: 1, answerPl, glossRu: 'перевод', kind: 'slowo', status: 'proposed',
-    captureId: null, createdAt: NOW.getTime(), ...over,
+function item(db: Db, answerPl: string, over: Partial<typeof topicItems.$inferInsert> = {}) {
+  const id = over.id ?? `i-${answerPl}`
+  db.insert(topicItems).values({
+    id, topicId: 't1', answerPl, glossRu: 'перевод', kind: 'slowo', source: 'suggested', level: 'zaawansowany',
+    status: 'open', captureId: null, cardId: null, batchJobId: null, discardedAt: null, createdAt: NOW.getTime(), ...over,
   }).run()
   return id
 }
@@ -53,64 +60,56 @@ function suggester(items: Suggestion['items'], topic_name = 'U lekarza z dziecki
 const it_ = (answer_pl: string, kind: 'slowo' | 'fraza' = 'slowo') => ({ answer_pl, gloss_ru: `ru:${answer_pl}`, kind })
 
 describe('enqueueSuggest', () => {
-  it('queues round 1 for a new topic', () => {
+  it('queues a batch with its params', () => {
     const { db } = createTestDb()
     topic(db)
-    const id = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)!
+    const id = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'sredni' }, NOW)!
     expect(jobRow(db, id)).toMatchObject({ kind: 'suggest', topicId: 't1', status: 'queued' })
-    expect(parseRoundJob(jobRow(db, id).paramsJson)).toEqual({ round: 1, count: 10, mix: 'mieszane' })
+    expect(parseBatchJob(jobRow(db, id).paramsJson)).toEqual({ count: 10, mix: 'mieszane', level: 'sredni' })
   })
 
-  it('queues the round after the highest one that exists', () => {
+  it('refuses a second batch while one is queued or running', () => {
     const { db } = createTestDb()
     topic(db)
-    suggestion(db, 'katar', { round: 2 })
-    expect(latestRound(db, 't1')).toBe(2)
-    const id = enqueueSuggest(db, 't1', { count: 5, mix: 'frazy' }, NOW)!
-    expect(parseRoundJob(jobRow(db, id).paramsJson).round).toBe(3)
-  })
-
-  it('refuses a second round while one is queued or running', () => {
-    const { db } = createTestDb()
-    topic(db)
-    const first = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)!
-    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)).toBeNull()
+    const first = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)!
+    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).toBeNull()
     db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, first)).run()
-    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)).toBeNull()
+    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).toBeNull()
     db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, first)).run()
     expect(activeSuggestJob(db, 't1')).toBeUndefined()
-    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)).not.toBeNull()
+    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).not.toBeNull()
   })
 })
 
 describe('runSuggest', () => {
   function queued(db: Db, count = 10, mix: 'mieszane' | 'slowa' | 'frazy' = 'mieszane') {
-    return jobRow(db, enqueueSuggest(db, 't1', { count, mix }, NOW)!)
+    return jobRow(db, enqueueSuggest(db, 't1', { count, mix, level: 'zaawansowany' }, NOW)!)
   }
 
   it('asks for count × 1.5 split by the mix, excluding the topic history', async () => {
     const { db } = createTestDb()
     topic(db)
-    suggestion(db, 'katar', { status: 'rejected' })
-    suggestion(db, 'kaszel', { status: 'accepted' })
+    item(db, 'katar', { status: 'discarded' })
+    item(db, 'kaszel', { status: 'carded' })
     const s = suggester([])
     await runSuggest({ db, suggester: s }, queued(db, 10, 'slowa'), NOW)
     expect(s.suggest).toHaveBeenCalledWith({
-      context: 'u lekarza z dzieckiem, grypa', count: 15, words: 12, phrases: 3, exclude: ['katar', 'kaszel'],
+      context: 'u lekarza z dzieckiem, grypa', count: 15, words: 15, phrases: 0, exclude: ['katar', 'kaszel'], level: 'zaawansowany',
     })
   })
 
-  it('stores the round as proposed, dropping deck words, history and repeats, trimmed to count', async () => {
+  it('stores the batch as open, dropping deck words, history and repeats, trimmed to count', async () => {
     const { db } = createTestDb()
     topic(db)
-    suggestion(db, 'katar', { status: 'rejected' })
+    item(db, 'katar', { status: 'discarded' })
     card(db, 'gorączka')
     const s = suggester([it_('Gorączka'), it_('katar'), it_('osłuchać'), it_('osłuchać'), it_('L4'), it_('recepta')])
-    await runSuggest({ db, suggester: s }, queued(db, 2), NOW)
-    const round2 = db.select().from(suggestions).where(eq(suggestions.round, 2)).all()
-    expect(round2.map((r) => [r.answerPl, r.glossRu, r.status])).toEqual([
-      ['osłuchać', 'ru:osłuchać', 'proposed'],
-      ['L4', 'ru:L4', 'proposed'],
+    const job = queued(db, 2)
+    await runSuggest({ db, suggester: s }, job, NOW)
+    const batch = db.select().from(topicItems).where(eq(topicItems.batchJobId, job.id)).all()
+    expect(batch.map((r) => [r.answerPl, r.glossRu, r.status])).toEqual([
+      ['osłuchać', 'ru:osłuchać', 'open'],
+      ['L4', 'ru:L4', 'open'],
     ])
   })
 
@@ -120,29 +119,18 @@ describe('runSuggest', () => {
     deleteCard(db, card(db, 'gorączka'), NOW)
     card(db, 'katar', { type: 'pl_to_pl' })
     await runSuggest({ db, suggester: suggester([it_('gorączka'), it_('katar')]) }, queued(db), NOW)
-    expect(db.select().from(suggestions).all()).toHaveLength(2)
+    expect(db.select().from(topicItems).all()).toHaveLength(2)
   })
 
   it('names an unnamed topic, and leaves a named one alone', async () => {
     const { db } = createTestDb()
     topic(db)
+    const name = () => db.select().from(topics).where(eq(topics.id, 't1')).get()!.name
     await runSuggest({ db, suggester: suggester([it_('a')], 'U lekarza') }, queued(db), NOW)
-    expect(db.select().from(topics).get()!.name).toBe('U lekarza')
+    expect(name()).toBe('U lekarza')
     db.update(generationJobs).set({ status: 'done' }).run()
     await runSuggest({ db, suggester: suggester([it_('b')], 'Inna nazwa') }, queued(db), NOW)
-    expect(db.select().from(topics).get()!.name).toBe('U lekarza')
-  })
-
-  // The process died after inserting the round but before the job was marked
-  // done; the job runs again and must not produce a second copy.
-  it('does nothing when its round already exists', async () => {
-    const { db } = createTestDb()
-    topic(db)
-    const job = queued(db)
-    suggestion(db, 'katar', { round: 1 })
-    const s = suggester([it_('osłuchać')])
-    await runSuggest({ db, suggester: s }, job, NOW)
-    expect(s.suggest).not.toHaveBeenCalled()
+    expect(name()).toBe('U lekarza')
   })
 
   it('throws the suggester’s error for the queue to classify', async () => {
@@ -155,140 +143,149 @@ describe('runSuggest', () => {
   })
 
   it('refuses unreadable params rather than guessing', () => {
-    expect(() => parseRoundJob('{"round":1}')).toThrow()
-    expect(() => parseRoundJob(null)).toThrow()
+    expect(() => parseBatchJob('{"count":10}')).toThrow()
+    expect(() => parseBatchJob('{"count":10,"mix":"mieszane","level":"latwy"}')).toThrow()
+    expect(() => parseBatchJob(null)).toThrow()
   })
 
   it('does nothing for a job whose topic is gone', async () => {
     const { db } = createTestDb()
-    const jobId = enqueueJob(db, { kind: 'suggest', topicId: null, paramsJson: '{"round":1,"count":10,"mix":"mieszane"}' }, NOW)
+    const jobId = enqueueJob(db, { kind: 'suggest', topicId: null, paramsJson: '{"count":10,"mix":"mieszane","level":"sredni"}' }, NOW)
     const s = suggester([it_('a')])
     await runSuggest({ db, suggester: s }, jobRow(db, jobId), NOW)
     expect(s.suggest).not.toHaveBeenCalled()
   })
+
+  // A job queued before levels existed (a round job: {"round","count","mix"})
+  // may still be waiting, or failed and retried, when this version deploys.
+  it('reads a legacy round job with no stored level as zaawansowany', async () => {
+    const { db } = createTestDb()
+    topic(db)
+    const jobId = enqueueJob(db, { kind: 'suggest', topicId: 't1', paramsJson: '{"round":1,"count":10,"mix":"mieszane"}' }, NOW)
+    expect(parseBatchJob(jobRow(db, jobId).paramsJson)).toEqual({ count: 10, mix: 'mieszane', level: 'zaawansowany' })
+    const s = suggester([])
+    await runSuggest({ db, suggester: s }, jobRow(db, jobId), NOW)
+    expect(s.suggest).toHaveBeenCalledWith(expect.objectContaining({ level: 'zaawansowany' }))
+  })
 })
 
-describe('acceptRound', () => {
-  function round1(db: Db) {
-    topic(db)
-    return ['gorączka', 'katar', 'osłuchać'].map((w) => suggestion(db, w))
-  }
-
-  it('turns every item not struck out into a queued, audio-less capture with a new job', () => {
+describe('batches (spec 2026-09-19-topic-items §4.5)', () => {
+  it('stores a batch as open suggested items with its level and job id', async () => {
     const { db } = createTestDb()
-    const [a, b, c] = round1(db)
-    expect(acceptRound(db, 't1', 1, [b], null, NOW)).toEqual({ accepted: 2, nextJobId: null })
-
-    const caps = db.select().from(captures).all()
-    expect(caps.map((x) => [x.transcript, x.status, x.audioMediaId, x.topicId, x.glossRu]).sort()).toEqual([
-      ['gorączka', 'queued', null, 't1', 'перевод'],
-      ['osłuchać', 'queued', null, 't1', 'перевод'],
+    topic(db)
+    const jobId = enqueueSuggest(db, 't1', { count: 2, mix: 'mieszane', level: 'sredni' }, NOW)!
+    await runSuggest({ db, suggester: suggester([it_('katar'), it_('kaszel')]) }, jobRow(db, jobId), NOW)
+    expect(db.select().from(topicItems).all().map((i) => [i.answerPl, i.status, i.source, i.level, i.batchJobId])).toEqual([
+      ['katar', 'open', 'suggested', 'sredni', jobId],
+      ['kaszel', 'open', 'suggested', 'sredni', jobId],
     ])
-    const jobs = db.select().from(generationJobs).all()
-    expect(jobs.map((j) => j.kind)).toEqual(['new', 'new'])
-    expect(new Set(jobs.map((j) => j.captureId))).toEqual(new Set(caps.map((x) => x.id)))
-
-    const byId = new Map(db.select().from(suggestions).all().map((s) => [s.id, s]))
-    expect(byId.get(a)!.status).toBe('accepted')
-    expect(byId.get(a)!.captureId).not.toBeNull()
-    expect(byId.get(b)!).toMatchObject({ status: 'rejected', captureId: null })
-    expect(byId.get(c)!.status).toBe('accepted')
   })
 
-  it('changes nothing when repeated', () => {
-    const { db } = createTestDb()
-    round1(db)
-    acceptRound(db, 't1', 1, [], null, NOW)
-    expect(acceptRound(db, 't1', 1, [], null, NOW)).toEqual({ accepted: 0, nextJobId: null })
-    expect(db.select().from(captures).all()).toHaveLength(3)
-  })
-
-  it('touches only the given round', () => {
-    const { db } = createTestDb()
-    round1(db)
-    suggestion(db, 'L4', { round: 2 })
-    acceptRound(db, 't1', 2, [], null, NOW)
-    expect(db.select().from(suggestions).where(eq(suggestions.round, 1)).all().every((s) => s.status === 'proposed')).toBe(true)
-  })
-
-  it('queues exactly one next round when asked', () => {
-    const { db } = createTestDb()
-    round1(db)
-    const { nextJobId } = acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy' }, NOW)!
-    expect(parseRoundJob(jobRow(db, nextJobId!).paramsJson)).toEqual({ round: 2, count: 5, mix: 'frazy' })
-    expect(acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy' }, NOW)!.nextJobId).toBeNull()
-    expect(db.select().from(generationJobs).where(eq(generationJobs.kind, 'suggest')).all()).toHaveLength(1)
-  })
-
-  it('answers null for an unknown topic', () => {
-    const { db } = createTestDb()
-    expect(acceptRound(db, 'nope', 1, [], null, NOW)).toBeNull()
-  })
-
-  // A stale tab can still show an older, undecided round while the topic has
-  // moved on to a newer one. Posting `next` for that stale round must not
-  // queue round (latestRound + 1) out from under the current round, or the
-  // newer round's proposed items are stranded with no way to reach them.
-  it('queues no next round when the posted round is behind the latest one', () => {
+  it('passes the level to the suggester', async () => {
     const { db } = createTestDb()
     topic(db)
-    suggestion(db, 'gorączka', { round: 2 })
-    expect(acceptRound(db, 't1', 1, [], { count: 10, mix: 'mieszane' }, NOW)).toEqual({ accepted: 0, nextJobId: null })
-    expect(db.select().from(generationJobs).where(eq(generationJobs.kind, 'suggest')).all()).toHaveLength(0)
-    expect(db.select().from(suggestions).where(eq(suggestions.round, 2)).get()!.status).toBe('proposed')
+    const s = suggester([])
+    await runSuggest({ db, suggester: s }, jobRow(db, enqueueSuggest(db, 't1', { count: 10, mix: 'slowa', level: 'sredni' }, NOW)!), NOW)
+    expect(s.suggest).toHaveBeenCalledWith(expect.objectContaining({ level: 'sredni', words: 15, phrases: 0 }))
+  })
+
+  it('excludes everything the topic ever held, in any status', async () => {
+    const { db } = createTestDb()
+    topic(db)
+    item(db, 'a', { status: 'open' })
+    item(db, 'b', { status: 'discarded' })
+    item(db, 'c', { status: 'carded' })
+    const s = suggester([it_('a'), it_('b'), it_('c'), it_('d')])
+    await runSuggest({ db, suggester: s }, jobRow(db, enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)!), NOW)
+    expect(s.suggest).toHaveBeenCalledWith(expect.objectContaining({ exclude: ['a', 'b', 'c'] }))
+    expect(db.select().from(topicItems).where(eq(topicItems.status, 'open')).all().map((i) => i.answerPl)).toEqual(['a', 'd'])
+  })
+
+  // The process died after storing the batch but before the job was marked
+  // done; the job runs again and must not produce a second batch.
+  it('does nothing when rerun after its batch was stored', async () => {
+    const { db } = createTestDb()
+    topic(db)
+    const job = jobRow(db, enqueueSuggest(db, 't1', { count: 5, mix: 'mieszane', level: 'zaawansowany' }, NOW)!)
+    await runSuggest({ db, suggester: suggester([it_('a')]) }, job, NOW)
+    const s = suggester([it_('b')])
+    await runSuggest({ db, suggester: s }, job, NOW)
+    expect(s.suggest).not.toHaveBeenCalled()
+  })
+
+  it('never queues a batch for the default topic', () => {
+    const { db } = createTestDb()
+    expect(enqueueSuggest(db, DEFAULT_TOPIC_ID, { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).toBeNull()
   })
 })
 
 describe('createTopic', () => {
-  it('stores the trimmed context and queues round 1', () => {
+  it('stores the trimmed context and queues its first batch', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: '  u mechanika  ', count: 5, mix: 'slowa' }, NOW)
-    expect(db.select().from(topics).get()).toMatchObject({ id, name: null, context: 'u mechanika', suspendedAt: null })
-    expect(parseRoundJob(activeSuggestJob(db, id)!.paramsJson)).toEqual({ round: 1, count: 5, mix: 'slowa' })
+    const id = createTopic(db, { context: '  u mechanika  ', count: 5, mix: 'slowa', level: 'sredni' }, NOW)
+    expect(db.select().from(topics).where(eq(topics.id, id)).get()).toMatchObject({
+      id, name: null, context: 'u mechanika', suspendedAt: null, isDefault: false,
+    })
+    expect(parseBatchJob(activeSuggestJob(db, id)!.paramsJson)).toEqual({ count: 5, mix: 'slowa', level: 'sredni' })
   })
 })
 
 describe('topicView', () => {
-  it('is searching while a round is in flight', () => {
+  it('is searching while a batch is in flight', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
-    expect(topicView(db, id)).toMatchObject({ state: 'searching', round: 0, items: [] })
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)
+    expect(topicView(db, id)).toMatchObject({
+      batch: { state: 'searching', error: null }, groups: { carded: [], open: [], discarded: [] },
+    })
   })
 
-  it('is failed, with the error, when the latest round gave up', () => {
+  it('is failed, with the error, when the latest batch gave up', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)
     db.update(generationJobs).set({ status: 'failed', lastError: 'unusable payload' }).run()
-    expect(topicView(db, id)).toMatchObject({ state: 'failed', error: 'unusable payload' })
+    expect(topicView(db, id)).toMatchObject({ batch: { state: 'failed', error: 'unusable payload' } })
   })
 
-  it('is ready with the latest round’s proposed items, then idle once they are decided', () => {
+  it('is idle once the batch is done, with its items open in the model’s order', () => {
     const { db } = createTestDb()
     topic(db)
-    suggestion(db, 'katar', { round: 1, status: 'accepted' })
-    suggestion(db, 'gorączka', { round: 2 })
+    item(db, 'katar')
+    item(db, 'gorączka', { glossRu: null, kind: null, source: 'manual', level: null })
     expect(topicView(db, 't1')).toMatchObject({
-      state: 'ready', round: 2, items: [{ id: 's-gorączka', answerPl: 'gorączka', glossRu: 'перевод', kind: 'slowo' }],
+      batch: { state: 'idle', error: null },
+      groups: {
+        open: [
+          { id: 'i-katar', answerPl: 'katar', glossRu: 'перевод', kind: 'slowo', source: 'suggested', level: 'zaawansowany' },
+          { id: 'i-gorączka', answerPl: 'gorączka', glossRu: null, kind: null, source: 'manual', level: null },
+        ],
+      },
     })
-    acceptRound(db, 't1', 2, [], null, NOW)
-    expect(topicView(db, 't1')).toMatchObject({ state: 'idle', round: 2, items: [] })
   })
 
-  it('lists the topic’s live cards and its pending items, and nothing else', () => {
+  it('lists the topic’s pending captures, and no other topic’s', () => {
     const { db } = createTestDb()
     topic(db)
     topic(db, 't2')
-    const mine = card(db, 'katar')
-    db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, mine)).run()
-    const gone = card(db, 'kaszel')
-    db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, gone)).run()
-    deleteCard(db, gone, NOW)
-    card(db, 'kot')
-    suggestion(db, 'gorączka')
-    acceptRound(db, 't1', 1, [], null, NOW)
-    const v = topicView(db, 't1')!
-    expect(v.cards.map((c) => c.answerPl)).toEqual(['katar'])
-    expect(v.pending).toEqual([{ id: expect.any(String), transcript: 'gorączka', status: 'queued' }])
+    const cap = (id: string, topicId: string, transcript: string) =>
+      db.insert(captures).values({
+        id, audioMediaId: null, transcript, status: 'queued', error: null, generationJson: null, cardId: null,
+        createdAt: NOW.getTime(), transcribedAt: null, duplicateOf: null, topicId, glossRu: null,
+      }).run()
+    cap('c1', 't1', 'gorączka')
+    cap('c2', 't2', 'sprzęgło')
+    expect(topicView(db, 't1')!.pending).toEqual([{ id: 'c1', transcript: 'gorączka', status: 'queued' }])
+  })
+
+  // Controller ruling from Task 2's review: /dodaj creates its captures with
+  // topic_id NULL (unchanged here), so a NULL capture topic must be treated
+  // as the default topic here too, the same as listTopics's pendingCount.
+  it('treats a /dodaj-style capture (topic_id null) as Ogólne’s pending, and not another topic’s', () => {
+    const { db } = createTestDb()
+    topic(db, 't2')
+    const capId = createCapture(db, { bytes: new Uint8Array([1, 2, 3]), mime: 'audio/webm' }, NOW)
+    db.update(captures).set({ status: 'queued' }).where(eq(captures.id, capId)).run()
+    expect(topicView(db, DEFAULT_TOPIC_ID)!.pending).toEqual([{ id: capId, transcript: null, status: 'queued' }])
+    expect(topicView(db, 't2')!.pending).toEqual([])
   })
 
   it('is null for an unknown topic', () => {
@@ -297,30 +294,77 @@ describe('topicView', () => {
   })
 })
 
+describe('topicView groups (§3.3)', () => {
+  it('splits a topic into carded, open and discarded', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const live = card(db, 'kot'); db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, live)).run()
+    const gone = card(db, 'pies'); db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, gone)).run()
+    deleteCard(db, gone, new Date(NOW.getTime() + 10))
+    item(db, 'katar', { status: 'open' })
+    item(db, 'kaszel', { status: 'discarded', discardedAt: NOW.getTime() + 5 })
+    item(db, 'x', { status: 'carded' })
+    const v = topicView(db, 't1')!
+    expect(v.groups.carded.map((c) => c.answerPl)).toEqual(['kot'])
+    expect(v.groups.open.map((i) => i.answerPl)).toEqual(['katar'])
+    expect(v.groups.discarded.map((d) => (d.kind === 'card' ? d.card.answerPl : d.item.answerPl))).toEqual(['pies', 'kaszel'])
+  })
+})
+
 describe('listTopics', () => {
-  it('counts live cards and pending items per topic, newest topic first', () => {
+  it('lists the default topic first with all three counts', () => {
+    const { db } = createTestDb()
+    topic(db, 't1', { createdAt: NOW.getTime() + 1 })
+    item(db, 'a', { status: 'open' })
+    item(db, 'b', { status: 'discarded' })
+    card(db, 'kot') // lands in the default topic
+    const rows = listTopics(db)
+    expect(rows[0]).toMatchObject({ id: DEFAULT_TOPIC_ID, cardCount: 1, openCount: 0, discardedCount: 0 })
+    expect(rows[1]).toMatchObject({ id: 't1', cardCount: 0, openCount: 1, discardedCount: 1 })
+  })
+
+  // Same controller ruling as topicView's pending: a NULL capture topic
+  // (/dodaj) counts toward Ogólne's pendingCount, not toward no topic at all.
+  it('counts a /dodaj-style capture (topic_id null) toward Ogólne’s pendingCount, and not another topic’s', () => {
+    const { db } = createTestDb()
+    topic(db, 't2')
+    const capId = createCapture(db, { bytes: new Uint8Array([1, 2, 3]), mime: 'audio/webm' }, NOW)
+    db.update(captures).set({ status: 'queued' }).where(eq(captures.id, capId)).run()
+    const rows = listTopics(db)
+    expect(rows.find((t) => t.id === DEFAULT_TOPIC_ID)!.pendingCount).toBe(1)
+    expect(rows.find((t) => t.id === 't2')!.pendingCount).toBe(0)
+  })
+
+  it('counts live and deleted cards and pending captures per topic, newest topic first after the default', () => {
     const { db } = createTestDb()
     topic(db, 't1', { createdAt: 1 })
     topic(db, 't2', { createdAt: 2 })
     const k = card(db, 'katar')
     db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, k)).run()
-    suggestion(db, 'gorączka')
-    acceptRound(db, 't1', 1, [], null, NOW)
-    expect(listTopics(db).map((t) => [t.id, t.cardCount, t.pendingCount])).toEqual([
-      ['t2', 0, 0],
-      ['t1', 1, 1],
+    const gone = card(db, 'kaszel')
+    db.update(cards).set({ topicId: 't1' }).where(eq(cards.id, gone)).run()
+    deleteCard(db, gone, NOW)
+    db.insert(captures).values({
+      id: 'c1', audioMediaId: null, transcript: 'gorączka', status: 'queued', error: null, generationJson: null, cardId: null,
+      createdAt: NOW.getTime(), transcribedAt: null, duplicateOf: null, topicId: 't1', glossRu: null,
+    }).run()
+    expect(listTopics(db).map((t) => [t.id, t.cardCount, t.discardedCount, t.pendingCount])).toEqual([
+      [DEFAULT_TOPIC_ID, 0, 0, 0],
+      ['t2', 0, 0, 0],
+      ['t1', 1, 1, 1],
     ])
   })
 
-  // /tematy polls while a topic is still searching for its first (or next)
-  // round, so a brand-new topic must not look permanently stuck at
-  // "nowy temat…" until the page happens to reload.
-  it('says a topic is searching while its suggest job is in flight, and not once it is decided', () => {
+  // /tematy polls while a topic is still searching for a batch, so a
+  // brand-new topic must not look permanently stuck at "nowy temat…" until
+  // the page happens to reload.
+  it('says a topic is searching while its suggest job is in flight, and not once it is done', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
-    expect(listTopics(db).map((t) => [t.id, t.searching])).toEqual([[id, true]])
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)
+    const searching = () => listTopics(db).find((t) => t.id === id)!.searching
+    expect(searching()).toBe(true)
     db.update(generationJobs).set({ status: 'done' }).run()
-    expect(listTopics(db).map((t) => [t.id, t.searching])).toEqual([[id, false]])
+    expect(searching()).toBe(false)
   })
 })
 
@@ -337,13 +381,107 @@ describe('updateTopic', () => {
 })
 
 describe('retrySuggest', () => {
-  it('re-queues a failed round with the same params, and only then', () => {
+  it('re-queues a failed batch with the same params, and only then', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 5, mix: 'frazy' }, NOW)
+    const id = createTopic(db, { context: 'x', count: 5, mix: 'frazy', level: 'sredni' }, NOW)
     expect(retrySuggest(db, id, NOW)).toBeNull()
     db.update(generationJobs).set({ status: 'failed' }).run()
     const again = retrySuggest(db, id, NOW)!
-    expect(parseRoundJob(jobRow(db, again).paramsJson)).toEqual({ round: 1, count: 5, mix: 'frazy' })
+    expect(parseBatchJob(jobRow(db, again).paramsJson)).toEqual({ count: 5, mix: 'frazy', level: 'sredni' })
     expect(retrySuggest(db, id, NOW)).toBeNull()
+  })
+
+  // Same legacy case as runSuggest's: retrying a failed round job from before
+  // levels existed must not throw, and the new job carries a level.
+  it('re-queues a legacy failed round job as a zaawansowany batch', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const jobId = enqueueJob(db, { kind: 'suggest', topicId: 't1', paramsJson: '{"round":1,"count":10,"mix":"mieszane"}' }, NOW)
+    db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, jobId)).run()
+    const again = retrySuggest(db, 't1', NOW)!
+    expect(JSON.parse(jobRow(db, again).paramsJson!)).toEqual({ count: 10, mix: 'mieszane', level: 'zaawansowany' })
+  })
+})
+
+describe('+ karta (§4.1)', () => {
+  it('turns an open item into a queued capture with a new job, and marks it carded', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const id = item(db, 'gorączka', { glossRu: 'жар' })
+    const { captureId } = cardItem(db, 't1', id, NOW)!
+    expect(db.select().from(captures).where(eq(captures.id, captureId)).get()).toMatchObject({
+      status: 'queued', audioMediaId: null, transcript: 'gorączka', topicId: 't1', glossRu: 'жар',
+    })
+    expect(db.select().from(generationJobs).where(eq(generationJobs.captureId, captureId)).get()!.kind).toBe('new')
+    expect(db.select().from(topicItems).where(eq(topicItems.id, id)).get()).toMatchObject({ status: 'carded', captureId })
+  })
+
+  it('refuses an item that is not open, or not in this topic', () => {
+    const { db } = createTestDb()
+    topic(db); topic(db, 't2')
+    const gone = item(db, 'a', { status: 'discarded' })
+    expect(cardItem(db, 't1', gone, NOW)).toBeNull()
+    expect(cardItem(db, 't2', item(db, 'b'), NOW)).toBeNull()
+  })
+})
+
+describe('discard and restore (§4.2, §4.3)', () => {
+  it('discards an item with a timestamp and restores it to open', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const id = item(db, 'a')
+    expect(discardItem(db, 't1', id, NOW)).toBe(true)
+    expect(db.select().from(topicItems).get()).toMatchObject({ status: 'discarded', discardedAt: NOW.getTime() })
+    expect(restoreItem(db, 't1', id)).toBe(true)
+    expect(db.select().from(topicItems).get()).toMatchObject({ status: 'open', discardedAt: null })
+  })
+})
+
+describe('adding by hand (§4.6)', () => {
+  it('saves a trimmed manual open item with no gloss, kind or level', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const r = addManualItem(db, 't1', '  wahacz  ', NOW)
+    expect(r).toMatchObject({ ok: true, item: { answerPl: 'wahacz', glossRu: null, kind: null, source: 'manual', level: null } })
+  })
+
+  it('refuses empty text, a word the topic already holds in any status, and a deck word', () => {
+    const { db } = createTestDb()
+    topic(db)
+    item(db, 'Katar', { status: 'discarded' })
+    card(db, 'kot') // in Ogólne
+    expect(addManualItem(db, 't1', '  ', NOW)).toEqual({ ok: false, reason: 'empty' })
+    expect(addManualItem(db, 't1', 'katar.', NOW)).toEqual({ ok: false, reason: 'in-topic' })
+    expect(addManualItem(db, 't1', 'Kot', NOW)).toEqual({ ok: false, reason: 'in-deck', topicName: 'Ogólne' })
+  })
+
+  it('matches a Cyrillic entry against cards\' Russian prompts', () => {
+    const { db } = createTestDb()
+    topic(db)
+    card(db, 'kot') // helper's promptText is 'x'
+    db.update(cards).set({ promptText: 'кот' }).run()
+    expect(addManualItem(db, 't1', 'Кот', NOW)).toMatchObject({ ok: false, reason: 'in-deck' })
+  })
+
+  it('is allowed in the default topic', () => {
+    const { db } = createTestDb()
+    expect(addManualItem(db, DEFAULT_TOPIC_ID, 'wahacz', NOW)).toMatchObject({ ok: true })
+  })
+})
+
+describe('moving (§4.4)', () => {
+  it('moves an item to another topic without changing its status', () => {
+    const { db } = createTestDb()
+    topic(db); topic(db, 't2')
+    const id = item(db, 'a', { status: 'discarded' })
+    expect(moveItem(db, id, 't2')).toBe(true)
+    expect(db.select().from(topicItems).get()).toMatchObject({ topicId: 't2', status: 'discarded' })
+    expect(moveItem(db, id, 'nope')).toBe(false)
+  })
+
+  it('is false for an unknown item, even into a real topic', () => {
+    const { db } = createTestDb()
+    topic(db, 't2')
+    expect(moveItem(db, 'ghost', 't2')).toBe(false)
   })
 })

@@ -2,7 +2,7 @@ import { GoogleGenAI, type GenerateContentParameters } from '@google/genai'
 import { z } from 'zod'
 import { gcpProject, vertexLocation } from '../gcp/clients'
 import { WORD_KINDS, hasForms, serializeForms } from '../cards/forms'
-import { SUGGESTION_KINDS } from '../topics/rounds'
+import { SUGGESTION_KINDS, type Level } from '../topics/rounds'
 
 const FormRowSchema = z.object({
   label: z.string().describe('Short Polish grammatical label, e.g. "D. l.poj." or "tryb rozk."'),
@@ -127,10 +127,10 @@ const SYSTEM = `Ты помогаешь взрослому человеку, к�
   - przyslowek: forms_basic — «przymiotnik», от которого он образован; forms_extended пустой.
 - Если поле не нужно, верни пустую строку.`
 
-const SUGGEST_SYSTEM = `Ты помогаешь взрослому человеку, который уже свободно читает и говорит по-польски, подготовиться к конкретной ситуации. Он описывает ситуацию, а ты предлагаешь польскую лексику, которая ему там понадобится.
+const SUGGEST_SYSTEM = `Ты помогаешь взрослому человеку, который учит польский, подготовиться к конкретной ситуации. Он описывает ситуацию, а ты предлагаешь польскую лексику, которая ему там понадобится — с поправкой на его уровень, который указан в запросе.
 
 Правила:
-- Человек знает польский хорошо. Не предлагай базовую повседневную лексику (для визита к врачу — не «lekarz», «dziecko», «chory»). Предлагай то, что специфично для этой ситуации и чего носителю другого языка, скорее всего, не хватает: термины, устойчивые сочетания, типичные вопросы и ответы.
+- Уровень человека указан в запросе — подбирай лексику под него. Базовые слова вроде «lekarz», «dziecko», «chory» не предлагай ни на каком уровне.
 - kind:
   - slowo — одно слово в словарной форме; возвратный глагол с «się» — тоже одно слово;
   - fraza — всё длиннее одного слова: сочетание, реплика, вопрос, ответ. Фразы — то, что реально говорят или слышат в этой ситуации, а не книжные предложения.
@@ -159,8 +159,8 @@ export function toCardFields(g: GeneratedCard) {
   }
 }
 
-/** For a topic item: the Russian sense the card must be built around, and the situation. */
-export type Meaning = { glossRu: string; context: string }
+/** For a topic item: the Russian sense the card must be built around, and the situation. Either may be absent. */
+export type Meaning = { glossRu: string | null; context: string | null }
 
 export interface Generator {
   fromDictation(transcript: string, meaning?: Meaning): Promise<GeneratedCard>
@@ -174,6 +174,7 @@ export type SuggestInput = {
   phrases: number
   /** Every answer_pl the topic has ever been offered. */
   exclude: readonly string[]
+  level: Level
 }
 
 export interface Suggester {
@@ -284,11 +285,11 @@ function geminiRunner(opts: { generate?: GenerateFn; model?: string }): Run {
 /** The user message for a card. Without a meaning it is exactly what a dictation always sent. */
 export function dictationMessage(text: string, meaning?: Meaning): string {
   const lines = [`Продиктовано: «${text}»`]
-  if (meaning) {
-    lines.push(
-      `Имеется в виду значение: «${meaning.glossRu}». Ситуация, для которой нужна карточка: «${meaning.context}».`,
-    )
-  }
+  const parts = [
+    meaning?.glossRu ? `Имеется в виду значение: «${meaning.glossRu}».` : null,
+    meaning?.context ? `Ситуация, для которой нужна карточка: «${meaning.context}».` : null,
+  ].filter(Boolean)
+  if (parts.length > 0) lines.push(parts.join(' '))
   lines.push('Сделай карточку.')
   return lines.join('\n\n')
 }
@@ -308,11 +309,19 @@ export function geminiGenerator(opts: { generate?: GenerateFn; model?: string } 
   }
 }
 
+const LEVEL_LINE: Record<Level, string> = {
+  zaawansowany:
+    'Уровень: продвинутый. Человек свободно говорит по-польски — не предлагай повседневную лексику; предлагай то, что специфично для ситуации и чего ему, скорее всего, не хватает: термины, устойчивые сочетания, типичные вопросы и ответы.',
+  sredni:
+    'Уровень: средний (B1). Человек уверенно объясняется по-польски, но в этой области лексики ему не хватает: предлагай употребительные слова и фразы этой ситуации, которых B1 может не знать; самые базовые не предлагай.',
+}
+
 export function suggestMessage(input: SuggestInput): string {
   const exclude = input.exclude.length > 0 ? input.exclude.join('; ') : 'ничего'
   return [
     `Ситуация: «${input.context}»`,
     `Нужно ${input.count}: примерно ${input.words} отдельных слов и ${input.phrases} фраз.`,
+    LEVEL_LINE[input.level],
     `Уже предлагалось, не повторяй: ${exclude}`,
   ].join('\n\n')
 }

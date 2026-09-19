@@ -11,7 +11,8 @@ vi.mock('next/link', () => ({
 const TopicsPage = (await import('./page')).default
 
 const row = (over = {}) => ({
-  id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, cardCount: 23, pendingCount: 4, searching: false, ...over,
+  id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1,
+  cardCount: 23, openCount: 5, discardedCount: 3, pendingCount: 4, searching: false, ...over,
 })
 
 function stubFetch(topics: unknown[]) {
@@ -34,8 +35,18 @@ describe('TopicsPage', () => {
     render(<TopicsPage />)
     const name = await screen.findByText('U lekarza')
     expect(name.closest('a')?.getAttribute('href')).toBe('/tematy/t1')
-    expect(screen.getByText('23')).toBeTruthy()
+    expect(screen.getByText(`23 ${t.tabCarded} · 5 ${t.tabOpen} · 3 ${t.tabDiscarded}`)).toBeTruthy()
     expect(screen.getByText(`+4 ${t.queued}`)).toBeTruthy()
+  })
+
+  it('lays out the name on its own line from the controls', async () => {
+    stubFetch([row()])
+    render(<TopicsPage />)
+    const name = await screen.findByText('U lekarza')
+    const li = name.closest('li')!
+    const toggle = screen.getByRole('button', { name: t.topicOn })
+    expect(name.parentElement).toBe(li)
+    expect(toggle.parentElement).not.toBe(li)
   })
 
   it('links to a new topic', async () => {

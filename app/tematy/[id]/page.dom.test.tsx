@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { t } from '@/i18n/pl'
@@ -11,174 +11,358 @@ vi.mock('next/navigation', () => ({ useParams: () => ({ id: 't1' }) }))
 
 const TopicPage = (await import('./page')).default
 
-function view(over = {}) {
+const card = (id: string, answerPl: string, over = {}) => ({
+  id,
+  answerPl,
+  status: 'ready',
+  suspendedAt: null,
+  type: 'ru_to_pl',
+  topicId: 't1',
+  ...over,
+})
+
+const item = (id: string, answerPl: string, over = {}) => ({
+  id,
+  answerPl,
+  glossRu: null,
+  kind: null,
+  source: 'suggested',
+  level: null,
+  ...over,
+})
+
+function view(over: Record<string, unknown> = {}, groups: Record<string, unknown> = {}) {
   return {
-    topic: { id: 't1', name: 'U lekarza', context: 'z dzieckiem, grypa', suspendedAt: null, createdAt: 1 },
-    state: 'ready',
-    error: null,
-    round: 1,
-    items: [
-      { id: 's1', answerPl: 'gorączka', glossRu: 'температура, жар', kind: 'slowo' },
-      { id: 's2', answerPl: 'ma gorączkę od wczoraj', glossRu: 'у него температура со вчера', kind: 'fraza' },
-    ],
-    cards: [],
+    topic: { id: 't1', name: 'U lekarza', context: 'z dzieckiem, grypa', suspendedAt: null, createdAt: 1, isDefault: false },
+    groups: {
+      carded: [card('k1', 'katar')],
+      open: [
+        item('i1', 'gorączka', { glossRu: 'температура, жар', kind: 'slowo' }),
+        item('i2', 'ma gorączkę od wczoraj', { kind: 'fraza', level: 'sredni' }),
+      ],
+      discarded: [
+        { kind: 'item', at: 3, item: item('i3', 'kaszel') },
+        { kind: 'card', at: 2, card: card('k9', 'wysypka') },
+      ],
+      ...groups,
+    },
     pending: [],
+    batch: { state: 'idle', error: null },
     ...over,
   }
 }
 
-function stubFetch(v: () => unknown) {
-  const calls: { url: string; init?: RequestInit }[] = []
-  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
-    calls.push({ url, init })
-    const body = init?.method === 'POST' ? { accepted: 1, nextJobId: null, jobId: 'j' } : v()
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) }) as unknown as Promise<Response>
-  }))
+type Call = { url: string; method: string; body: unknown }
+type Reply = { status: number; body: unknown }
+
+/**
+ * A URL- and method-aware fetch: `GET /api/topics/t1` answers with `v()`,
+ * `GET /api/topics` with the move picker's list, and anything else with
+ * `routes['METHOD url']` or a plain 200 `{ ok: true }`.
+ */
+function stubFetch(v: () => unknown, routes: Record<string, Reply> = {}) {
+  const calls: Call[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+      const key = `${method} ${url}`
+      let reply: Reply = { status: 200, body: { ok: true } }
+      if (routes[key]) reply = routes[key]
+      else if (key === 'GET /api/topics/t1') reply = { status: 200, body: v() }
+      else if (key === 'GET /api/topics')
+        reply = {
+          status: 200,
+          body: { topics: [{ id: 't1', name: 'U lekarza' }, { id: 't2', name: 'W sklepie' }] },
+        }
+      return Promise.resolve({
+        ok: reply.status >= 200 && reply.status < 300,
+        status: reply.status,
+        json: () => Promise.resolve(reply.body),
+      }) as unknown as Promise<Response>
+    }),
+  )
   return calls
 }
 
-const posts = (calls: { url: string; init?: RequestInit }[]) => calls.filter((c) => c.init?.method === 'POST')
+const writes = (calls: Call[]) => calls.filter((c) => c.method !== 'GET')
+const tab = (label: string, n: number) => screen.findByRole('button', { name: `${label} (${n})` })
+const row = (text: string) => screen.getByText(text).closest('li') as HTMLElement
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 describe('TopicPage', () => {
-  it('shows the round as Polish with its Russian gloss', async () => {
+  it('counts each group in its tab, pending included in "z kartą"', async () => {
+    stubFetch(() => view({ pending: [{ id: 'c1', transcript: 'osłuchać', status: 'queued' }] }))
+    render(<TopicPage />)
+    expect(await tab(t.tabCarded, 2)).toBeTruthy()
+    expect(screen.getByRole('button', { name: `${t.tabOpen} (2)` })).toBeTruthy()
+    expect(screen.getByRole('button', { name: `${t.tabDiscarded} (2)` })).toBeTruthy()
+  })
+
+  it('opens on "bez karty" when the topic has open items', async () => {
+    stubFetch(() => view())
+    render(<TopicPage />)
+    expect((await tab(t.tabOpen, 2)).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('gorączka')).toBeTruthy()
+  })
+
+  it('opens on "z kartą" when there are no open items', async () => {
+    stubFetch(() => view({}, { open: [] }))
+    render(<TopicPage />)
+    expect((await tab(t.tabCarded, 1)).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('katar')).toBeTruthy()
+  })
+
+  it('opens on the tab last used for this topic, and remembers a new choice', async () => {
+    localStorage.setItem('fiszki:tab:t1', 'discarded')
+    stubFetch(() => view())
+    render(<TopicPage />)
+    expect((await tab(t.tabDiscarded, 2)).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('kaszel')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: `${t.tabCarded} (1)` }))
+    expect(localStorage.getItem('fiszki:tab:t1')).toBe('carded')
+    expect(screen.getByText('katar')).toBeTruthy()
+  })
+
+  it('lists pending captures above the cards, and ✕ on a card deletes it', async () => {
+    localStorage.setItem('fiszki:tab:t1', 'carded')
+    const calls = stubFetch(() => view({ pending: [{ id: 'c1', transcript: 'osłuchać', status: 'generating' }] }))
+    render(<TopicPage />)
+    expect(await screen.findByText('osłuchać')).toBeTruthy()
+    expect(within(row('osłuchać')).getByText(t.generating)).toBeTruthy()
+    const items = screen.getAllByRole('listitem')
+    expect(items.indexOf(row('osłuchać'))).toBeLessThan(items.indexOf(row('katar')))
+    expect(screen.getByText('katar').closest('a')?.getAttribute('href')).toBe('/fiszki/k1')
+    fireEvent.click(within(row('katar')).getByRole('button', { name: t.discard }))
+    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/cards/k1', method: 'DELETE', body: undefined }]))
+  })
+
+  it('moves a card to another topic', async () => {
+    localStorage.setItem('fiszki:tab:t1', 'carded')
+    const calls = stubFetch(() => view())
+    render(<TopicPage />)
+    await screen.findByText('katar')
+    fireEvent.click(within(row('katar')).getByRole('button', { name: `${t.moveTo}: …` }))
+    fireEvent.click(await screen.findByRole('button', { name: 'W sklepie' }))
+    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/cards/k1', method: 'PATCH', body: { topicId: 't2' } }]))
+  })
+
+  it('shows an item with its gloss, kind and level badge', async () => {
     stubFetch(() => view())
     render(<TopicPage />)
     expect(await screen.findByText('gorączka')).toBeTruthy()
-    expect(screen.getByText('температура, жар')).toBeTruthy()
-    expect(screen.getByText(t.kindPhrase)).toBeTruthy()
+    expect(within(row('gorączka')).getByText(/температура, жар/)).toBeTruthy()
+    expect(within(row('gorączka')).getByText(t.kindWord)).toBeTruthy()
+    expect(within(row('gorączka')).queryByText(t.levelBadge)).toBeNull()
+    expect(within(row('ma gorączkę od wczoraj')).getByText(t.kindPhrase)).toBeTruthy()
+    expect(within(row('ma gorączkę od wczoraj')).getByText(t.levelBadge)).toBeTruthy()
+    expect(within(row('ma gorączkę od wczoraj')).queryByText(/—/)).toBeNull()
   })
 
-  it('strikes an item out and restores it on a second tap', async () => {
+  it('splits an item row into a title line and a right-aligned controls line', async () => {
     stubFetch(() => view())
     render(<TopicPage />)
-    const item = (await screen.findByText('gorączka')).closest('button')!
-    fireEvent.click(item)
-    expect(item.getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(item)
-    expect(item.getAttribute('aria-pressed')).toBe('false')
+    await screen.findByText('gorączka')
+    const li = row('gorączka')
+    const controls = within(li).getByRole('button', { name: t.makeCard }).parentElement!
+    expect(li.children.length).toBe(2)
+    expect(li.children[1]).toBe(controls)
+    expect(controls.className).toContain('justify-end')
+    expect(li.className).toContain('relative')
   })
 
-  it('accepts the rest and finishes', async () => {
-    const calls = stubFetch(() => view())
-    render(<TopicPage />)
-    fireEvent.click((await screen.findByText('gorączka')).closest('button')!)
-    fireEvent.click(screen.getByRole('button', { name: t.acceptAndFinish }))
-    await waitFor(() => expect(posts(calls)).toHaveLength(1))
-    expect(posts(calls)[0].url).toBe('/api/topics/t1/rounds/1')
-    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: ['s1'] })
-  })
-
-  it('accepts the rest and asks for another round with the chosen settings', async () => {
+  it('makes a card of an item', async () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)
     await screen.findByText('gorączka')
-    fireEvent.click(screen.getByRole('button', { name: t.mixWords }))
-    fireEvent.click(screen.getByRole('button', { name: t.acceptAndMore }))
-    await waitFor(() => expect(posts(calls)).toHaveLength(1))
-    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: [], next: { count: 10, mix: 'slowa' } })
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.makeCard }))
+    await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/items/i1/card']))
   })
 
-  it('offers only "more" once the round is decided', async () => {
-    const calls = stubFetch(() => view({ state: 'idle', items: [] }))
+  it('discards an item', async () => {
+    const calls = stubFetch(() => view())
     render(<TopicPage />)
-    fireEvent.click(await screen.findByRole('button', { name: t.more }))
-    expect(screen.queryByRole('button', { name: t.acceptAndFinish })).toBeNull()
-    await waitFor(() => expect(posts(calls)).toHaveLength(1))
-    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: [], next: { count: 10, mix: 'mieszane' } })
+    await screen.findByText('gorączka')
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.discard }))
+    await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/items/i1/discard']))
   })
 
-  it('says it is searching while a round is in flight', async () => {
-    stubFetch(() => view({ state: 'searching', items: [] }))
+  it('moves an item to another topic', async () => {
+    const calls = stubFetch(() => view())
+    render(<TopicPage />)
+    await screen.findByText('gorączka')
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: `${t.moveTo}: …` }))
+    fireEvent.click(await screen.findByRole('button', { name: 'W sklepie' }))
+    await waitFor(() =>
+      expect(writes(calls)).toEqual([{ url: '/api/topics/t1/items/i1', method: 'PATCH', body: { topicId: 't2' } }]),
+    )
+  })
+
+  it('disables a row’s buttons while its action is in flight, then reloads', async () => {
+    let release!: () => void
+    const calls = stubFetch(() => view())
+    const base = globalThis.fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Promise<void>((r) => (release = r)).then(() => base(url, init))
+      return base(url, init)
+    }))
+    render(<TopicPage />)
+    await screen.findByText('gorączka')
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.makeCard }))
+    await waitFor(() => expect((within(row('gorączka')).getByRole('button', { name: t.discard }) as HTMLButtonElement).disabled).toBe(true))
+    expect((within(row('ma gorączkę od wczoraj')).getByRole('button', { name: t.discard }) as HTMLButtonElement).disabled).toBe(false)
+    const gets = calls.filter((c) => c.method === 'GET').length
+    release()
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(gets))
+    await waitFor(() => expect((within(row('gorączka')).getByRole('button', { name: t.discard }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('shows a save error when an action fails, leaving the list as it was', async () => {
+    stubFetch(() => view(), { 'POST /api/topics/t1/items/i1/discard': { status: 500, body: { error: 'boom' } } })
+    render(<TopicPage />)
+    await screen.findByText('gorączka')
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.discard }))
+    expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
+    expect(screen.queryByText('boom')).toBeNull()
+    expect(screen.getByText('gorączka')).toBeTruthy()
+  })
+
+  it('adds an item by hand', async () => {
+    const calls = stubFetch(() => view(), { 'POST /api/topics/t1/items': { status: 201, body: { item: item('i4', 'recepta') } } })
+    render(<TopicPage />)
+    fireEvent.change(await screen.findByLabelText(t.manualAdd), { target: { value: 'recepta' } })
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
+    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/topics/t1/items', method: 'POST', body: { text: 'recepta' } }]))
+  })
+
+  it('shows the server’s message when a hand-added item is a duplicate', async () => {
+    stubFetch(() => view(), { 'POST /api/topics/t1/items': { status: 409, body: { error: 'już masz — w temacie Ogólne' } } })
+    render(<TopicPage />)
+    fireEvent.change(await screen.findByLabelText(t.manualAdd), { target: { value: 'katar' } })
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
+    expect(await screen.findByText('już masz — w temacie Ogólne')).toBeTruthy()
+  })
+
+  it('shows a Polish save error, not the English 400 text, when a hand-added item is rejected', async () => {
+    stubFetch(() => view(), { 'POST /api/topics/t1/items': { status: 400, body: { error: 'empty' } } })
+    render(<TopicPage />)
+    fireEvent.change(await screen.findByLabelText(t.manualAdd), { target: { value: '?' } })
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
+    expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
+    expect(screen.queryByText('empty')).toBeNull()
+  })
+
+  it('restores a discarded item', async () => {
+    localStorage.setItem('fiszki:tab:t1', 'discarded')
+    const calls = stubFetch(() => view())
+    render(<TopicPage />)
+    await screen.findByText('kaszel')
+    expect(within(row('kaszel')).queryByText(t.cardBadge)).toBeNull()
+    fireEvent.click(within(row('kaszel')).getByRole('button', { name: t.restore }))
+    await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/items/i3/restore']))
+  })
+
+  it('restores a discarded card, marked as a card', async () => {
+    localStorage.setItem('fiszki:tab:t1', 'discarded')
+    const calls = stubFetch(() => view())
+    render(<TopicPage />)
+    await screen.findByText('wysypka')
+    expect(within(row('wysypka')).getByText(t.cardBadge)).toBeTruthy()
+    fireEvent.click(within(row('wysypka')).getByRole('button', { name: t.restore }))
+    await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/cards/k9/restore']))
+  })
+
+  it('shows the server’s message when a restored card would be a duplicate', async () => {
+    localStorage.setItem('fiszki:tab:t1', 'discarded')
+    stubFetch(() => view(), { 'POST /api/cards/k9/restore': { status: 409, body: { error: 'już masz — w temacie Ogólne' } } })
+    render(<TopicPage />)
+    await screen.findByText('wysypka')
+    fireEvent.click(within(row('wysypka')).getByRole('button', { name: t.restore }))
+    expect(await screen.findByText('już masz — w temacie Ogólne')).toBeTruthy()
+    expect(screen.getByText('wysypka')).toBeTruthy()
+  })
+
+  it('asks for a batch with the chosen settings', async () => {
+    const calls = stubFetch(() => view(), { 'POST /api/topics/t1/batches': { status: 202, body: { jobId: 'j' } } })
+    render(<TopicPage />)
+    await screen.findByText('gorączka')
+    fireEvent.click(screen.getByRole('button', { name: t.mixWords }))
+    fireEvent.click(screen.getByRole('button', { name: t.levelIntermediate }))
+    fireEvent.click(screen.getByRole('button', { name: t.more }))
+    await waitFor(() =>
+      expect(writes(calls)).toEqual([
+        { url: '/api/topics/t1/batches', method: 'POST', body: { count: 10, mix: 'slowa', level: 'sredni' } },
+      ]),
+    )
+  })
+
+  it('has no batch controls, no context editor and a fixed name for the default topic', async () => {
+    stubFetch(() =>
+      view({ topic: { id: 't1', name: 'Ogólne', context: '', suspendedAt: null, createdAt: 1, isDefault: true } }),
+    )
+    render(<TopicPage />)
+    await screen.findByText('gorączka')
+    expect(screen.queryByRole('button', { name: t.more })).toBeNull()
+    expect(screen.queryByRole('button', { name: t.mixWords })).toBeNull()
+    expect((screen.getByDisplayValue('Ogólne') as HTMLInputElement).disabled).toBe(true)
+    expect(screen.queryByText(t.topicContext)).toBeNull()
+    expect(screen.getByRole('button', { name: t.topicOn })).toBeTruthy()
+  })
+
+  it('says it is searching while a batch runs', async () => {
+    stubFetch(() => view({ batch: { state: 'searching', error: null } }))
     render(<TopicPage />)
     expect(await screen.findByText(t.searching)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: t.more })).toBeNull()
   })
 
-  it('shows a failed round with its error and a retry', async () => {
-    const calls = stubFetch(() => view({ state: 'failed', error: 'unusable payload', items: [] }))
+  it('shows a failed batch with its error and a retry', async () => {
+    const calls = stubFetch(() => view({ batch: { state: 'failed', error: 'unusable payload' } }))
     render(<TopicPage />)
     expect(await screen.findByText('unusable payload')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: t.tryAgain }))
-    await waitFor(() => expect(posts(calls).map((c) => c.url)).toEqual(['/api/topics/t1/retry']))
-  })
-
-  it('lists pending items above the topic’s cards', async () => {
-    stubFetch(() =>
-      view({
-        pending: [{ id: 'c1', transcript: 'osłuchać', status: 'queued' }],
-        cards: [{ id: 'k1', answerPl: 'katar', status: 'ready', suspendedAt: null, type: 'ru_to_pl' }],
-      }),
-    )
-    render(<TopicPage />)
-    expect(await screen.findByText('osłuchać')).toBeTruthy()
-    expect(screen.getByText('katar').closest('a')?.getAttribute('href')).toBe('/fiszki/k1')
-  })
-
-  // spec §4.4: the topic's cards render "in the same rows as /fiszki" — a
-  // suspended or needs-input card must carry the same badge here as there,
-  // not look like a normal, ready card.
-  it('badges a suspended card and one that needs input, like /fiszki', async () => {
-    stubFetch(() =>
-      view({
-        cards: [
-          { id: 'k1', answerPl: 'katar', status: 'ready', suspendedAt: 123, type: 'ru_to_pl' },
-          { id: 'k2', answerPl: 'kaszel', status: 'needs_input', suspendedAt: null, type: 'ru_to_pl' },
-        ],
-      }),
-    )
-    render(<TopicPage />)
-    expect(await screen.findByText(t.suspended)).toBeTruthy()
-    expect(screen.getByText(t.suspended).closest('li')).toBe(screen.getByText('katar').closest('li'))
-    expect(screen.getByText(t.needsInput)).toBeTruthy()
-    expect(screen.getByText(t.needsInput).closest('li')).toBe(screen.getByText('kaszel').closest('li'))
-  })
-
-  // A card in a switched-off topic is out of review just like an
-  // individually suspended one (spec §3.5), and the topic page must say so
-  // on every card row, "the same rows as /fiszki".
-  it('badges every card when the topic itself is switched off', async () => {
-    stubFetch(() =>
-      view({
-        topic: { id: 't1', name: 'U lekarza', context: 'x', suspendedAt: 123, createdAt: 1 },
-        cards: [{ id: 'k1', answerPl: 'katar', status: 'ready', suspendedAt: null, type: 'ru_to_pl' }],
-      }),
-    )
-    render(<TopicPage />)
-    expect(await screen.findByText(t.topicOff)).toBeTruthy()
-    expect(screen.getByText(t.topicOff).closest('li')).toBe(screen.getByText('katar').closest('li'))
+    await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/retry']))
   })
 
   it('switches the topic off', async () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)
     fireEvent.click(await screen.findByRole('button', { name: t.topicOn }))
-    await waitFor(() => expect(calls.some((c) => c.init?.method === 'PATCH')).toBe(true))
+    await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['PATCH /api/topics/t1']))
+  })
+
+  it('shows a save error when a rename fails with a non-2xx status', async () => {
+    stubFetch(() => view(), { 'PATCH /api/topics/t1': { status: 500, body: {} } })
+    render(<TopicPage />)
+    const input = await screen.findByDisplayValue('U lekarza')
+    fireEvent.change(input, { target: { value: 'Nowa nazwa' } })
+    fireEvent.blur(input)
+    expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
   })
 
   it('says so for an unknown topic', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) }))
+    stubFetch(() => view(), { 'GET /api/topics/t1': { status: 404, body: {} } })
     render(<TopicPage />)
     expect(await screen.findByText(t.topicNotFound)).toBeTruthy()
   })
 
-  // Controller ruling (carried over from Task 10's review): only a 404 means
-  // "not found" — any other non-2xx, malformed body or network error must
-  // not claim the topic doesn't exist, must not crash, and must never
-  // produce an unhandled rejection, whether on the first load or a poll.
+  // Only a 404 means "not found" — any other non-2xx, malformed body or
+  // network error must not claim the topic doesn't exist, must not crash,
+  // and must never produce an unhandled rejection, on a first load or a poll.
   it('shows a load error rather than "not found" for a non-404 failure', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) }))
+    stubFetch(() => view(), { 'GET /api/topics/t1': { status: 500, body: {} } })
     render(<TopicPage />)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
     expect(screen.queryByText(t.topicNotFound)).toBeNull()
   })
 
   it('shows a load error rather than "not found" for a malformed body', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }))
+    stubFetch(() => ({}))
     render(<TopicPage />)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
     expect(screen.queryByText(t.topicNotFound)).toBeNull()
@@ -191,31 +375,16 @@ describe('TopicPage', () => {
     expect(screen.queryByText(t.topicNotFound)).toBeNull()
   })
 
-  it('keeps the previous view on screen and shows an error when a reload after an action fails', async () => {
+  it('keeps the last view on screen and shows a load error when a reload after an action fails', async () => {
     let gets = 0
-    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') return Promise.resolve({ ok: true, json: () => Promise.resolve({ accepted: 1, nextJobId: null, jobId: 'j' }) })
+    stubFetch(() => {
       gets++
-      if (gets === 1) return Promise.resolve({ ok: true, json: () => Promise.resolve(view({ state: 'failed', error: 'unusable payload', items: [] })) })
-      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) })
-    }))
+      return gets === 1 ? view() : {}
+    })
     render(<TopicPage />)
-    expect(await screen.findByText('unusable payload')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: t.tryAgain }))
-    await waitFor(() => expect(screen.getByText(t.topicsLoadFailed)).toBeTruthy())
-    // the stale view (still "failed", with its retry button) stays on screen
-    expect(screen.getByText('unusable payload')).toBeTruthy()
-  })
-
-  it('shows a save error when a rename fails with a non-2xx status (not just a network error)', async () => {
-    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
-      if (init?.method === 'PATCH') return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) })
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(view()) })
-    }))
-    render(<TopicPage />)
-    const input = await screen.findByDisplayValue('U lekarza')
-    fireEvent.change(input, { target: { value: 'Nowa nazwa' } })
-    fireEvent.blur(input)
-    expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
+    await screen.findByText('gorączka')
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.makeCard }))
+    expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
+    expect(screen.getByText('gorączka')).toBeTruthy()
   })
 })
