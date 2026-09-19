@@ -47,6 +47,21 @@ describe('MoveToTopic', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Ogólne' })).toBeNull())
   })
 
+  it('opens a full-width panel and is not itself the positioning context', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(topicsResponse()) }))
+    const { container } = render(<MoveToTopic currentTopicId="t1" onMove={vi.fn()} />)
+    const wrapper = container.firstElementChild as HTMLElement
+    expect(wrapper.className).not.toContain('relative')
+
+    fireEvent.click(screen.getByRole('button', { name: `${t.moveTo}: …` }))
+    const panelButton = await screen.findByRole('button', { name: 'Ogólne' })
+    const panel = panelButton.parentElement!
+    expect(panel.className).toContain('absolute')
+    expect(panel.className).toContain('inset-x-0')
+    expect(panelButton.className).not.toContain('whitespace-nowrap')
+    expect(panelButton.className).toContain('break-words')
+  })
+
   it('shows an error when the topics fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) }))
     render(<MoveToTopic currentTopicId="t1" onMove={vi.fn()} />)

@@ -39,6 +39,16 @@ describe('TopicsPage', () => {
     expect(screen.getByText(`+4 ${t.queued}`)).toBeTruthy()
   })
 
+  it('lays out the name on its own line from the controls', async () => {
+    stubFetch([row()])
+    render(<TopicsPage />)
+    const name = await screen.findByText('U lekarza')
+    const li = name.closest('li')!
+    const toggle = screen.getByRole('button', { name: t.topicOn })
+    expect(name.parentElement).toBe(li)
+    expect(toggle.parentElement).not.toBe(li)
+  })
+
   it('links to a new topic', async () => {
     stubFetch([])
     render(<TopicsPage />)

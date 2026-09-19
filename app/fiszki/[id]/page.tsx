@@ -147,7 +147,13 @@ export default function CardDetailPage() {
         {t.backToCards}
       </Link>
 
-      {topic && <MoveToTopic currentTopicId={topic.id} currentName={topic.name} onMove={moveTopic} />}
+      {/* `relative` so the move panel spans this full-width block, not just
+          the button (spec 2026-09-19-topic-items layout fix §4). */}
+      {topic && (
+        <div className="relative">
+          <MoveToTopic currentTopicId={topic.id} currentName={topic.name} onMove={moveTopic} />
+        </div>
+      )}
 
       {/* Keyed on the value the server holds, so a card rebuilt underneath
           this screen — by wygeneruj ponownie — remounts the input with the

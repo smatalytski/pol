@@ -37,4 +37,33 @@ describe('CardListItem actions', () => {
     )
     expect(screen.queryByRole('button')).toBeNull()
   })
+
+  it('stacks the link above right-aligned actions when actions are given', () => {
+    render(
+      <ul>
+        <CardListItem card={card} actions={<button type="button">zrób coś</button>} />
+      </ul>,
+    )
+    const link = screen.getByText('katar').closest('a')!
+    const li = link.closest('li')!
+    const actionsContainer = screen.getByRole('button', { name: 'zrób coś' }).parentElement!
+    expect(li.children.length).toBe(2)
+    expect(li.children[0]).toBe(link)
+    expect(li.children[1]).toBe(actionsContainer)
+    expect(actionsContainer.className).toContain('justify-end')
+    expect(li.className).toContain('relative')
+  })
+
+  it('keeps the current single-line markup when no actions are given', () => {
+    render(
+      <ul>
+        <CardListItem card={card} />
+      </ul>,
+    )
+    const link = screen.getByText('katar').closest('a')!
+    const li = link.closest('li')!
+    expect(li.className).toContain('items-center')
+    expect(li.className).not.toContain('flex-col')
+    expect(li.children.length).toBe(1)
+  })
 })

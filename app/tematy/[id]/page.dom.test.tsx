@@ -165,6 +165,18 @@ describe('TopicPage', () => {
     expect(within(row('ma gorączkę od wczoraj')).queryByText(/—/)).toBeNull()
   })
 
+  it('splits an item row into a title line and a right-aligned controls line', async () => {
+    stubFetch(() => view())
+    render(<TopicPage />)
+    await screen.findByText('gorączka')
+    const li = row('gorączka')
+    const controls = within(li).getByRole('button', { name: t.makeCard }).parentElement!
+    expect(li.children.length).toBe(2)
+    expect(li.children[1]).toBe(controls)
+    expect(controls.className).toContain('justify-end')
+    expect(li.className).toContain('relative')
+  })
+
   it('makes a card of an item', async () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)

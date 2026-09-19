@@ -45,13 +45,16 @@ export function MoveToTopic({
     await onMove(topicId)
   }
 
+  // Not `relative` itself: on a narrow phone the panel needs the width of
+  // the whole row, not just this button, so it is positioned against the
+  // nearest ancestor the caller has made `relative` (the row) instead.
   return (
-    <div className="relative inline-block text-sm">
+    <div className="inline-block text-sm">
       <button type="button" onClick={() => void toggle()} className="rounded border px-2 py-1">
         {t.moveTo}: {currentName !== undefined ? (currentName ?? t.unnamedTopic) : '…'}
       </button>
       {open && topics && (
-        <div className="absolute z-10 mt-1 flex flex-col gap-1 rounded border bg-background p-1 shadow">
+        <div className="absolute inset-x-0 z-10 mt-1 flex max-h-64 flex-col gap-1 overflow-y-auto rounded border bg-background p-1 shadow">
           {topics
             .filter((tp) => tp.id !== currentTopicId)
             .map((tp) => (
@@ -59,7 +62,7 @@ export function MoveToTopic({
                 key={tp.id}
                 type="button"
                 onClick={() => void choose(tp.id)}
-                className="whitespace-nowrap px-2 py-1 text-left hover:bg-neutral-100"
+                className="w-full break-words px-2 py-1 text-left hover:bg-neutral-100"
               >
                 {tp.name ?? t.unnamedTopic}
               </button>

@@ -64,11 +64,14 @@ export default function TopicsPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
       <ul>
         {topics.map((x) => (
-          <li key={x.id} className="flex items-center justify-between gap-3 border-b py-3">
-            <Link href={`/tematy/${x.id}`} className={`text-lg ${x.suspendedAt !== null ? 'text-neutral-400' : ''}`}>
+          <li key={x.id} className="flex flex-col gap-1 border-b py-3">
+            <Link
+              href={`/tematy/${x.id}`}
+              className={`break-words text-lg ${x.suspendedAt !== null ? 'text-neutral-400' : ''}`}
+            >
               {x.name ?? t.unnamedTopic}
             </Link>
-            <span className="flex shrink-0 items-center gap-3 text-xs">
+            <span className="flex flex-wrap items-center gap-2 text-xs">
               <span>
                 {`${x.cardCount} ${t.tabCarded} · ${x.openCount} ${t.tabOpen} · ${x.discardedCount} ${t.tabDiscarded}`}
               </span>
@@ -76,7 +79,7 @@ export default function TopicsPage() {
               <button
                 type="button"
                 onClick={() => void toggle(x)}
-                className="rounded border px-2 py-1"
+                className="ml-auto rounded border px-2 py-1"
               >
                 {x.suspendedAt === null ? t.topicOn : t.topicOffToggle}
               </button>
