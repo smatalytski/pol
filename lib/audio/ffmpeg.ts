@@ -73,16 +73,44 @@ export function parseDurationMs(stderr: string): number | null {
   return Math.round(totalSeconds * 1000)
 }
 
-function defaultRun(cmd: string, args: string[]): Promise<{ code: number; stderr: string }> {
+/**
+ * Spawns `cmd`, collecting stderr and resolving with the exit code on
+ * `close`. A wedged child (ffmpeg hung on a corrupt input, or anything else
+ * that never exits) is killed with SIGKILL after `timeoutMs` so nothing
+ * awaiting `encode()` — including an HTTP request — hangs forever; the
+ * promise rejects instead of resolving in that case. Exported so a test can
+ * exercise the timeout directly against a real child process (e.g. `sleep`)
+ * without waiting on ffmpeg itself.
+ */
+export function defaultRun(
+  cmd: string,
+  args: string[],
+  timeoutMs = 30_000,
+): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args)
     let stderr = ''
+    let timedOut = false
+
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGKILL')
+    }, timeoutMs)
+
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString()
     })
-    child.on('error', reject)
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
     child.on('close', (code) => {
-      resolve({ code: code ?? 1, stderr })
+      clearTimeout(timer)
+      if (timedOut) {
+        reject(new Error(`ffmpeg timed out after ${timeoutMs}ms`))
+      } else {
+        resolve({ code: code ?? 1, stderr })
+      }
     })
   })
 }
@@ -92,8 +120,9 @@ function defaultRun(cmd: string, args: string[]): Promise<{ code: number; stderr
  * per call to join them (with synthesized silence between), and removes the
  * temp dir afterwards whether the run succeeded or not.
  */
-export function ffmpegEncoder(opts?: { run?: RunFn; tmpRoot?: string }): Encoder {
-  const run = opts?.run ?? defaultRun
+export function ffmpegEncoder(opts?: { run?: RunFn; tmpRoot?: string; timeoutMs?: number }): Encoder {
+  const timeoutMs = opts?.timeoutMs ?? 30_000
+  const run: RunFn = opts?.run ?? ((cmd, args) => defaultRun(cmd, args, timeoutMs))
   const tmpRoot = opts?.tmpRoot ?? tmpdir()
 
   return {
@@ -136,8 +165,12 @@ export function ffmpegEncoder(opts?: { run?: RunFn; tmpRoot?: string }): Encoder
           throw new Error(`ffmpeg exited with code ${result.code}: ${lastLine}`)
         }
 
+        const durationMs = parseDurationMs(result.stderr)
+        if (durationMs === null) {
+          throw new Error('ffmpeg reported no duration')
+        }
+
         const bytes = await readFile(outFile)
-        const durationMs = parseDurationMs(result.stderr) ?? 0
         return { bytes: new Uint8Array(bytes), durationMs }
       } finally {
         await rm(dir, { recursive: true, force: true })

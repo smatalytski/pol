@@ -7,6 +7,7 @@ import {
   ffmpegArgs,
   parseDurationMs,
   ffmpegEncoder,
+  defaultRun,
   FfmpegMissingError,
   type EncodePart,
 } from './ffmpeg'
@@ -146,6 +147,26 @@ describe('ffmpegEncoder with a fake run', () => {
     const encoder = ffmpegEncoder({ run, tmpRoot })
     await expect(encoder.encode(parts())).rejects.toBeInstanceOf(FfmpegMissingError)
   })
+
+  it('throws when ffmpeg exits 0 but reports no duration, so nothing caches a zero-length card', async () => {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'fiszki-listen-test-noduration-'))
+    const run = vi.fn(async (_cmd: string, args: string[]) => {
+      const outFile = args[args.length - 1]
+      await writeFile(outFile, Buffer.from([9]))
+      return { code: 0, stderr: 'no progress line with time= in it' }
+    })
+
+    const encoder = ffmpegEncoder({ run, tmpRoot })
+    await expect(encoder.encode(parts())).rejects.toThrow(/ffmpeg reported no duration/)
+  })
+})
+
+describe('defaultRun', () => {
+  it('kills the child and rejects when it exceeds timeoutMs', async () => {
+    const start = Date.now()
+    await expect(defaultRun('sleep', ['5'], 200)).rejects.toThrow(/timed out/i)
+    expect(Date.now() - start).toBeLessThan(1000)
+  }, 6000)
 })
 
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0
