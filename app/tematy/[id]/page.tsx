@@ -211,14 +211,16 @@ export default function TopicPage() {
           <BatchSettings value={params} onChange={setParams} />
           <div className="flex gap-3">
             {/* Was acceptAndMore/acceptAndFinish — those strings are removed
-                (spec 2026-09-19-topic-items §4.6). This page is rewritten in
-                Task 6/7 for the grouped view; this is a minimal compile fix. */}
+                (spec 2026-09-19-topic-items §4.5, §5.2: batches replace
+                rounds, and there is no longer anything to "accept"). This
+                page is rewritten in Task 6/7 for the grouped view; this is a
+                minimal compile fix. */}
             <button type="button" disabled={busy} onClick={() => accept(true)} className="rounded bg-black px-4 py-2 text-white disabled:opacity-40">
               {t.more}
             </button>
             {view.state === 'ready' && (
               <button type="button" disabled={busy} onClick={() => accept(false)} className="rounded border px-4 py-2 disabled:opacity-40">
-                {t.add}
+                {t.addItem}
               </button>
             )}
           </div>

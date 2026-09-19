@@ -8,9 +8,9 @@ import { t } from '@/i18n/pl'
  * spec 2026-09-18-topic-generation §4.4, "the same rows as /fiszki"): a
  * Polish title, linking to the card's detail screen, plus a status badge
  * where there is something to say. `actions` (spec 2026-09-19-topic-items
- * §4.6 — move/discard/restore row controls) renders in its own element
- * beside the link, never inside it, so a click on a button doesn't also
- * trigger the navigation.
+ * §4.1–§4.4, §5.2 — move/discard/restore row controls) renders in its own
+ * element beside the link, never inside it, so a click on a button doesn't
+ * also trigger the navigation.
  */
 export function CardListItem({
   card,

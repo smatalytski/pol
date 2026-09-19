@@ -15,7 +15,7 @@ describe('strings', () => {
       'topicsLoadFailed', 'topicSaveFailed',
       'levelAdvanced', 'levelIntermediate', 'levelBadge', 'tabCarded', 'tabOpen', 'tabDiscarded',
       'makeCard', 'discard', 'restore', 'cardBadge', 'moveTo', 'manualAdd', 'manualPlaceholder',
-      'add', 'cancel', 'moveToDiscarded',
+      'addItem', 'cancel', 'moveToDiscarded',
     ]
     for (const key of required) expect(t).toHaveProperty(key)
   })

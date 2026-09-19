@@ -39,7 +39,7 @@ describe('ManualAddBar', () => {
     render(<ManualAddBar onAdd={onAdd} />)
     const field = screen.getByLabelText(t.manualAdd) as HTMLInputElement
     fireEvent.change(field, { target: { value: '  kubek  ' } })
-    fireEvent.click(screen.getByRole('button', { name: t.add }))
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
     await waitFor(() => expect(onAdd).toHaveBeenCalledWith('kubek'))
     await waitFor(() => expect(field.value).toBe(''))
   })
@@ -49,14 +49,14 @@ describe('ManualAddBar', () => {
     render(<ManualAddBar onAdd={onAdd} />)
     const field = screen.getByLabelText(t.manualAdd) as HTMLInputElement
     fireEvent.change(field, { target: { value: 'kubek' } })
-    fireEvent.click(screen.getByRole('button', { name: t.add }))
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
     expect(await screen.findByText('już jest w tym temacie')).toBeTruthy()
     expect(field.value).toBe('kubek')
   })
 
   it('disables dodaj when the text is empty', () => {
     render(<ManualAddBar onAdd={vi.fn()} />)
-    expect((screen.getByRole('button', { name: t.add }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: t.addItem }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('anuluj clears the field and any message', async () => {
@@ -64,7 +64,7 @@ describe('ManualAddBar', () => {
     render(<ManualAddBar onAdd={onAdd} />)
     const field = screen.getByLabelText(t.manualAdd) as HTMLInputElement
     fireEvent.change(field, { target: { value: 'kubek' } })
-    fireEvent.click(screen.getByRole('button', { name: t.add }))
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
     await screen.findByText('już jest w tym temacie')
     fireEvent.click(screen.getByRole('button', { name: t.cancel }))
     expect(field.value).toBe('')

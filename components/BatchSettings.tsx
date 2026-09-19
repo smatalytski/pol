@@ -5,7 +5,7 @@ import { t } from '@/i18n/pl'
 const MIX_LABEL: Record<Mix, string> = { mieszane: t.mixMixed, slowa: t.mixWords, frazy: t.mixPhrases }
 const LEVEL_LABEL: Record<Level, string> = { zaawansowany: t.levelAdvanced, sredni: t.levelIntermediate }
 
-/** How big the next batch is, how it leans, and how hard it should be (spec 2026-09-19-topic-items §4.5, §4.6). */
+/** How big the next batch is, how it leans, and how hard it should be (spec 2026-09-19-topic-items §4.5). */
 export function BatchSettings({ value, onChange }: { value: BatchParams; onChange: (p: BatchParams) => void }) {
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">

@@ -111,7 +111,7 @@ export function ManualAddBar({ onAdd }: { onAdd: (text: string) => Promise<strin
           onClick={() => void add()}
           className="rounded bg-black px-3 py-1 text-white disabled:opacity-40"
         >
-          {t.add}
+          {t.addItem}
         </button>
         <button type="button" onClick={cancel} className="rounded border px-3 py-1">
           {t.cancel}

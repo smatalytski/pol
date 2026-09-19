@@ -5,7 +5,7 @@ import { t } from '@/i18n/pl'
 
 /**
  * Moving an open or discarded item's card to another topic (spec
- * 2026-09-19-topic-items §4.6). The list is fetched fresh on every open, so
+ * 2026-09-19-topic-items §4.4). The list is fetched fresh on every open, so
  * it can never show a topic that was renamed or deleted since the page
  * loaded.
  */

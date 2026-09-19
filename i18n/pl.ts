@@ -2,7 +2,7 @@ export const t = {
   appName: 'Fiszki',
 
   review: 'Powtórki',
-  add: 'dodaj',
+  add: 'Dodaj',
   cards: 'Fiszki',
   settings: 'Ustawienia',
 
@@ -103,6 +103,7 @@ export const t = {
   moveTo: 'temat',
   manualAdd: 'dodaj słowo lub frazę',
   manualPlaceholder: 'wpisz albo nagraj…',
+  addItem: 'dodaj',
   cancel: 'anuluj',
   moveToDiscarded: 'przenieś do odrzuconych',
 } as const
