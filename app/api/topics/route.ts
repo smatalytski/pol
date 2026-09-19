@@ -14,5 +14,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const body = Body.safeParse(await req.json())
   if (!body.success) return NextResponse.json({ error: 'bad topic' }, { status: 400 })
-  return NextResponse.json({ topicId: createTopic(db, body.data, new Date()) }, { status: 201 })
+  // The request body has no level yet — the UI doesn't offer one (spec §4.5,
+  // task 2 adds it). Temporary until that call site changes.
+  const topicId = createTopic(db, { ...body.data, level: 'zaawansowany' }, new Date())
+  return NextResponse.json({ topicId }, { status: 201 })
 }

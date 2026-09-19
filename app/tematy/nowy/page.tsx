@@ -3,7 +3,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { mediaRecorderFactory, useHoldToRecord } from '@/hooks/useHoldToRecord'
 import { RoundSettings } from '@/components/RoundSettings'
-import { DEFAULT_COUNT, type RoundParams } from '@/lib/topics/rounds'
+import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
 
@@ -15,7 +15,8 @@ import { t } from '@/i18n/pl'
 export default function NewTopicPage() {
   const router = useRouter()
   const [context, setContext] = useState('')
-  const [params, setParams] = useState<RoundParams>({ count: DEFAULT_COUNT, mix: 'mieszane' })
+  // level is not yet chosen here; a later task adds the control (spec §4.5).
+  const [params, setParams] = useState<BatchParams>({ count: DEFAULT_COUNT, mix: 'mieszane', level: 'zaawansowany' })
   const [lang, setLang] = useState<DictationLang>('ru')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

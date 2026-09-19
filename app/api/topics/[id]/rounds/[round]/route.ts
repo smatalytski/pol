@@ -12,6 +12,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const n = Number(round)
   const body = Body.safeParse(await req.json())
   if (!Number.isInteger(n) || n < 0 || !body.success) return NextResponse.json({ error: 'bad round' }, { status: 400 })
-  const result = acceptRound(db, id, n, body.data.rejected, body.data.next ?? null, new Date())
+  // The request body has no level yet — the UI doesn't offer one (spec §4.5,
+  // task 2 adds it). Temporary until that call site changes.
+  const next = body.data.next ? { ...body.data.next, level: 'zaawansowany' as const } : null
+  const result = acceptRound(db, id, n, body.data.rejected, next, new Date())
   return result ? NextResponse.json(result) : NextResponse.json({ error: 'not found' }, { status: 404 })
 }

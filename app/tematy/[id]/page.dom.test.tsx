@@ -80,7 +80,7 @@ describe('TopicPage', () => {
     fireEvent.click(screen.getByRole('button', { name: t.mixWords }))
     fireEvent.click(screen.getByRole('button', { name: t.acceptAndMore }))
     await waitFor(() => expect(posts(calls)).toHaveLength(1))
-    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: [], next: { count: 10, mix: 'slowa' } })
+    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: [], next: { count: 10, mix: 'slowa', level: 'zaawansowany' } })
   })
 
   it('offers only "more" once the round is decided', async () => {
@@ -89,7 +89,7 @@ describe('TopicPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: t.more }))
     expect(screen.queryByRole('button', { name: t.acceptAndFinish })).toBeNull()
     await waitFor(() => expect(posts(calls)).toHaveLength(1))
-    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: [], next: { count: 10, mix: 'mieszane' } })
+    expect(JSON.parse(String(posts(calls)[0].init!.body))).toEqual({ rejected: [], next: { count: 10, mix: 'mieszane', level: 'zaawansowany' } })
   })
 
   it('says it is searching while a round is in flight', async () => {

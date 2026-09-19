@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { CardListItem } from '@/components/CardListItem'
 import { RoundSettings } from '@/components/RoundSettings'
-import { DEFAULT_COUNT, type RoundParams } from '@/lib/topics/rounds'
+import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { TopicView } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
@@ -18,7 +18,8 @@ export default function TopicPage() {
   const [view, setView] = useState<TopicView | null>(null)
   const [missing, setMissing] = useState(false)
   const [struck, setStruck] = useState<ReadonlySet<string>>(() => new Set())
-  const [params, setParams] = useState<RoundParams>({ count: DEFAULT_COUNT, mix: 'mieszane' })
+  // level is not yet chosen here; a later task adds the control (spec §4.5).
+  const [params, setParams] = useState<BatchParams>({ count: DEFAULT_COUNT, mix: 'mieszane', level: 'zaawansowany' })
   const [busy, setBusy] = useState(false)
   const [saveError, setSaveError] = useState(false)
   const [loadError, setLoadError] = useState(false)

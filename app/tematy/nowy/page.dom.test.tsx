@@ -25,7 +25,7 @@ describe('NewTopicPage', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('/tematy/t9'))
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/topics')
-    expect(JSON.parse(init.body)).toEqual({ context: 'u mechanika, wymiana sprzęgła', count: 10, mix: 'frazy' })
+    expect(JSON.parse(init.body)).toEqual({ context: 'u mechanika, wymiana sprzęgła', count: 10, mix: 'frazy', level: 'zaawansowany' })
   })
 
   it('cannot propose with an empty context', () => {

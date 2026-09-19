@@ -312,7 +312,7 @@ const SUGGESTION = {
 
 describe('suggestMessage', () => {
   it('states the situation, the split and the exclusions', () => {
-    const m = suggestMessage({ context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: ['katar', 'kaszel'] })
+    const m = suggestMessage({ context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: ['katar', 'kaszel'], level: 'zaawansowany' })
     expect(m).toContain('«u lekarza»')
     expect(m).toContain('15')
     expect(m).toContain('8')
@@ -321,7 +321,7 @@ describe('suggestMessage', () => {
   })
 
   it('says so when there is nothing to exclude', () => {
-    expect(suggestMessage({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [] })).toContain('ничего')
+    expect(suggestMessage({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [], level: 'zaawansowany' })).toContain('ничего')
   })
 })
 
@@ -331,7 +331,7 @@ describe('geminiSuggester', () => {
 
   it('returns the parsed suggestion', async () => {
     const generate = ok(SUGGESTION)
-    const got = await suggester(generate).suggest({ context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: [] })
+    const got = await suggester(generate).suggest({ context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: [], level: 'zaawansowany' })
     expect(got).toEqual(SUGGESTION)
     expect(generate.mock.calls[0][0].config.responseSchema.properties.items.type).toBe('ARRAY')
   })
@@ -339,7 +339,7 @@ describe('geminiSuggester', () => {
   it('refuses an empty context without calling the model', async () => {
     const generate = ok(SUGGESTION)
     await expect(
-      suggester(generate).suggest({ context: '  ', count: 15, words: 8, phrases: 7, exclude: [] }),
+      suggester(generate).suggest({ context: '  ', count: 15, words: 8, phrases: 7, exclude: [], level: 'zaawansowany' }),
     ).rejects.toMatchObject({ name: 'GenerationError', retryable: false })
     expect(generate).not.toHaveBeenCalled()
   })
@@ -347,14 +347,54 @@ describe('geminiSuggester', () => {
   it('classifies a 429 as retryable, like card generation', async () => {
     const generate = vi.fn().mockRejectedValue(Object.assign(new Error('quota'), { status: 429 }))
     await expect(
-      suggester(generate as never).suggest({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [] }),
+      suggester(generate as never).suggest({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [], level: 'zaawansowany' }),
     ).rejects.toMatchObject({ retryable: true })
   })
 
   it('rejects a payload with an unknown kind', async () => {
     const generate = ok({ ...SUGGESTION, items: [{ answer_pl: 'a', gloss_ru: 'b', kind: 'rzeczownik' }] })
     await expect(
-      suggester(generate).suggest({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [] }),
+      suggester(generate).suggest({ context: 'x', count: 8, words: 4, phrases: 4, exclude: [], level: 'zaawansowany' }),
     ).rejects.toMatchObject({ retryable: false })
+  })
+})
+
+describe('level in the suggestion prompt', () => {
+  const base = { context: 'u lekarza', count: 15, words: 8, phrases: 7, exclude: [] as string[] }
+
+  it('asks an advanced batch to skip everyday basics', () => {
+    expect(suggestMessage({ ...base, level: 'zaawansowany' })).toContain('Уровень: продвинутый')
+  })
+
+  it('asks an intermediate batch for common situational vocabulary', () => {
+    const m = suggestMessage({ ...base, level: 'sredni' })
+    expect(m).toContain('Уровень: средний (B1)')
+    expect(m).not.toContain('продвинутый')
+  })
+
+  it('keeps the level out of the system prompt', async () => {
+    const generate = ok(SUGGESTION)
+    await geminiSuggester({ generate: generate as never, model: 'm' }).suggest({ ...base, level: 'sredni' })
+    expect(generate.mock.calls[0][0].config.systemInstruction).not.toContain('B1')
+  })
+})
+
+describe('dictationMessage with a partial meaning', () => {
+  it('names only the gloss when there is no situation', () => {
+    const m = dictationMessage('x', { glossRu: 'насморк', context: null })
+    expect(m).toContain('«насморк»')
+    expect(m).not.toContain('Ситуация')
+  })
+
+  it('names only the situation when there is no gloss', () => {
+    const m = dictationMessage('x', { glossRu: null, context: 'u mechanika' })
+    expect(m).toContain('«u mechanika»')
+    expect(m).not.toContain('Имеется в виду')
+  })
+
+  it('is byte-identical to before when both are present', () => {
+    expect(dictationMessage('x', { glossRu: 'a', context: 'b' })).toBe(
+      'Продиктовано: «x»\n\nИмеется в виду значение: «a». Ситуация, для которой нужна карточка: «b».\n\nСделай карточку.',
+    )
   })
 })

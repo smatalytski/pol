@@ -22,7 +22,7 @@ const suggester = getSuggester()
 for (const context of SITUATIONS) {
   const n = requestSize(count)
   const started = Date.now()
-  const s = await suggester.suggest({ context, count: n, ...mixTarget(n, mix), exclude: [] })
+  const s = await suggester.suggest({ context, count: n, ...mixTarget(n, mix), exclude: [], level: 'zaawansowany' })
   console.log(`\n=== ${s.topic_name}  (${Date.now() - started} ms)\n${context}`)
   for (const i of s.items) console.log(`  [${i.kind}] ${i.answer_pl} — ${i.gloss_ru}`)
 }

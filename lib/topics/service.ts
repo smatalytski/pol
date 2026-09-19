@@ -7,7 +7,7 @@ import { answerKey } from '../cards/answer-key'
 import type { CardRow } from '../cards/service'
 import type { Suggester } from '../generate'
 import { enqueueJob, type JobRow } from '../queue/jobs'
-import { MIXES, mixTarget, pickRound, requestSize, type RoundParams } from './rounds'
+import { LEVELS, MIXES, mixTarget, pickBatch, requestSize, type BatchParams } from './rounds'
 import type { SuggestionKind } from './rounds'
 
 /**
@@ -22,6 +22,9 @@ const RoundJob = z.object({
   round: z.number().int().positive(),
   count: z.number().int().positive(),
   mix: z.enum(MIXES),
+  // Optional: a job queued before levels existed has none. Callers that act
+  // on a parsed job default a missing level to 'zaawansowany' themselves.
+  level: z.enum(LEVELS).optional(),
 })
 
 export function parseRoundJob(paramsJson: string | null): z.infer<typeof RoundJob> {
@@ -54,7 +57,7 @@ export function latestRound(db: Db, topicId: string): number {
  * round left no items, so retrying it gets the same number. Returns null,
  * queueing nothing, while the topic already has a round in flight.
  */
-export function enqueueSuggest(db: Db, topicId: string, params: RoundParams, now: Date): string | null {
+export function enqueueSuggest(db: Db, topicId: string, params: BatchParams, now: Date): string | null {
   if (activeSuggestJob(db, topicId)) return null
   const round = latestRound(db, topicId) + 1
   return enqueueJob(db, { kind: 'suggest', topicId, paramsJson: JSON.stringify({ round, ...params }) }, now)
@@ -100,10 +103,17 @@ export async function runSuggest(deps: { db: Db; suggester: Suggester }, job: Jo
     .all()
     .map((r) => r.answerPl)
   const n = requestSize(params.count)
-  const result = await deps.suggester.suggest({ context: topic.context, count: n, ...mixTarget(n, params.mix), exclude: history })
+  const level = params.level ?? 'zaawansowany'
+  const result = await deps.suggester.suggest({
+    context: topic.context,
+    count: n,
+    ...mixTarget(n, params.mix),
+    exclude: history,
+    level,
+  })
 
   const taken = new Set([...history.map(answerKey), ...deckKeys(db)])
-  const picked = pickRound(result.items, taken, params.count)
+  const picked = pickBatch(result.items, taken, params.count, params.mix)
   const name = result.topic_name.trim()
   db.transaction((tx) => {
     if (roundExists(tx as unknown as Db, topic.id, params.round)) return
@@ -139,7 +149,7 @@ export function acceptRound(
   topicId: string,
   round: number,
   rejected: readonly string[],
-  next: RoundParams | null,
+  next: BatchParams | null,
   now: Date,
 ): { accepted: number; nextJobId: string | null } | null {
   return db.transaction((tx) => {
@@ -188,11 +198,11 @@ export function acceptRound(
   })
 }
 
-export function createTopic(db: Db, input: { context: string } & RoundParams, now: Date): string {
+export function createTopic(db: Db, input: { context: string } & BatchParams, now: Date): string {
   const id = randomUUID()
   db.transaction((tx) => {
     tx.insert(topics).values({ id, name: null, context: input.context.trim(), suspendedAt: null, createdAt: now.getTime() }).run()
-    enqueueSuggest(tx as unknown as Db, id, { count: input.count, mix: input.mix }, now)
+    enqueueSuggest(tx as unknown as Db, id, { count: input.count, mix: input.mix, level: input.level }, now)
   })
   return id
 }
@@ -338,10 +348,10 @@ export function updateTopic(
   return db.select().from(topics).where(eq(topics.id, id)).get()!
 }
 
-/** `spróbuj ponownie`: the failed round again, with its own count and mix. */
+/** `spróbuj ponownie`: the failed round again, with its own count, mix and level. */
 export function retrySuggest(db: Db, topicId: string, now: Date): string | null {
   const latest = latestSuggestJob(db, topicId)
   if (latest?.status !== 'failed') return null
-  const { count: n, mix } = parseRoundJob(latest.paramsJson)
-  return enqueueSuggest(db, topicId, { count: n, mix }, now)
+  const { count: n, mix, level } = parseRoundJob(latest.paramsJson)
+  return enqueueSuggest(db, topicId, { count: n, mix, level: level ?? 'zaawansowany' }, now)
 }

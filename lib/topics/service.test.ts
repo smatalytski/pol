@@ -56,9 +56,9 @@ describe('enqueueSuggest', () => {
   it('queues round 1 for a new topic', () => {
     const { db } = createTestDb()
     topic(db)
-    const id = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)!
+    const id = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)!
     expect(jobRow(db, id)).toMatchObject({ kind: 'suggest', topicId: 't1', status: 'queued' })
-    expect(parseRoundJob(jobRow(db, id).paramsJson)).toEqual({ round: 1, count: 10, mix: 'mieszane' })
+    expect(parseRoundJob(jobRow(db, id).paramsJson)).toEqual({ round: 1, count: 10, mix: 'mieszane', level: 'zaawansowany' })
   })
 
   it('queues the round after the highest one that exists', () => {
@@ -66,26 +66,26 @@ describe('enqueueSuggest', () => {
     topic(db)
     suggestion(db, 'katar', { round: 2 })
     expect(latestRound(db, 't1')).toBe(2)
-    const id = enqueueSuggest(db, 't1', { count: 5, mix: 'frazy' }, NOW)!
+    const id = enqueueSuggest(db, 't1', { count: 5, mix: 'frazy', level: 'zaawansowany' }, NOW)!
     expect(parseRoundJob(jobRow(db, id).paramsJson).round).toBe(3)
   })
 
   it('refuses a second round while one is queued or running', () => {
     const { db } = createTestDb()
     topic(db)
-    const first = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)!
-    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)).toBeNull()
+    const first = enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)!
+    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).toBeNull()
     db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, first)).run()
-    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)).toBeNull()
+    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).toBeNull()
     db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, first)).run()
     expect(activeSuggestJob(db, 't1')).toBeUndefined()
-    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane' }, NOW)).not.toBeNull()
+    expect(enqueueSuggest(db, 't1', { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).not.toBeNull()
   })
 })
 
 describe('runSuggest', () => {
   function queued(db: Db, count = 10, mix: 'mieszane' | 'slowa' | 'frazy' = 'mieszane') {
-    return jobRow(db, enqueueSuggest(db, 't1', { count, mix }, NOW)!)
+    return jobRow(db, enqueueSuggest(db, 't1', { count, mix, level: 'zaawansowany' }, NOW)!)
   }
 
   it('asks for count × 1.5 split by the mix, excluding the topic history', async () => {
@@ -96,7 +96,7 @@ describe('runSuggest', () => {
     const s = suggester([])
     await runSuggest({ db, suggester: s }, queued(db, 10, 'slowa'), NOW)
     expect(s.suggest).toHaveBeenCalledWith({
-      context: 'u lekarza z dzieckiem, grypa', count: 15, words: 12, phrases: 3, exclude: ['katar', 'kaszel'],
+      context: 'u lekarza z dzieckiem, grypa', count: 15, words: 15, phrases: 0, exclude: ['katar', 'kaszel'], level: 'zaawansowany',
     })
   })
 
@@ -166,6 +166,17 @@ describe('runSuggest', () => {
     await runSuggest({ db, suggester: s }, jobRow(db, jobId), NOW)
     expect(s.suggest).not.toHaveBeenCalled()
   })
+
+  // A job queued before levels existed has no level in its stored params;
+  // parseRoundJob leaves it optional, and this is where it is defaulted.
+  it('defaults a legacy job with no stored level to zaawansowany', async () => {
+    const { db } = createTestDb()
+    topic(db)
+    const jobId = enqueueJob(db, { kind: 'suggest', topicId: 't1', paramsJson: '{"round":1,"count":10,"mix":"mieszane"}' }, NOW)
+    const s = suggester([])
+    await runSuggest({ db, suggester: s }, jobRow(db, jobId), NOW)
+    expect(s.suggest).toHaveBeenCalledWith(expect.objectContaining({ level: 'zaawansowany' }))
+  })
 })
 
 describe('acceptRound', () => {
@@ -214,9 +225,9 @@ describe('acceptRound', () => {
   it('queues exactly one next round when asked', () => {
     const { db } = createTestDb()
     round1(db)
-    const { nextJobId } = acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy' }, NOW)!
-    expect(parseRoundJob(jobRow(db, nextJobId!).paramsJson)).toEqual({ round: 2, count: 5, mix: 'frazy' })
-    expect(acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy' }, NOW)!.nextJobId).toBeNull()
+    const { nextJobId } = acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy', level: 'zaawansowany' }, NOW)!
+    expect(parseRoundJob(jobRow(db, nextJobId!).paramsJson)).toEqual({ round: 2, count: 5, mix: 'frazy', level: 'zaawansowany' })
+    expect(acceptRound(db, 't1', 1, [], { count: 5, mix: 'frazy', level: 'zaawansowany' }, NOW)!.nextJobId).toBeNull()
     expect(db.select().from(generationJobs).where(eq(generationJobs.kind, 'suggest')).all()).toHaveLength(1)
   })
 
@@ -233,7 +244,7 @@ describe('acceptRound', () => {
     const { db } = createTestDb()
     topic(db)
     suggestion(db, 'gorączka', { round: 2 })
-    expect(acceptRound(db, 't1', 1, [], { count: 10, mix: 'mieszane' }, NOW)).toEqual({ accepted: 0, nextJobId: null })
+    expect(acceptRound(db, 't1', 1, [], { count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)).toEqual({ accepted: 0, nextJobId: null })
     expect(db.select().from(generationJobs).where(eq(generationJobs.kind, 'suggest')).all()).toHaveLength(0)
     expect(db.select().from(suggestions).where(eq(suggestions.round, 2)).get()!.status).toBe('proposed')
   })
@@ -242,22 +253,22 @@ describe('acceptRound', () => {
 describe('createTopic', () => {
   it('stores the trimmed context and queues round 1', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: '  u mechanika  ', count: 5, mix: 'slowa' }, NOW)
+    const id = createTopic(db, { context: '  u mechanika  ', count: 5, mix: 'slowa', level: 'zaawansowany' }, NOW)
     expect(db.select().from(topics).get()).toMatchObject({ id, name: null, context: 'u mechanika', suspendedAt: null })
-    expect(parseRoundJob(activeSuggestJob(db, id)!.paramsJson)).toEqual({ round: 1, count: 5, mix: 'slowa' })
+    expect(parseRoundJob(activeSuggestJob(db, id)!.paramsJson)).toEqual({ round: 1, count: 5, mix: 'slowa', level: 'zaawansowany' })
   })
 })
 
 describe('topicView', () => {
   it('is searching while a round is in flight', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)
     expect(topicView(db, id)).toMatchObject({ state: 'searching', round: 0, items: [] })
   })
 
   it('is failed, with the error, when the latest round gave up', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)
     db.update(generationJobs).set({ status: 'failed', lastError: 'unusable payload' }).run()
     expect(topicView(db, id)).toMatchObject({ state: 'failed', error: 'unusable payload' })
   })
@@ -317,7 +328,7 @@ describe('listTopics', () => {
   // "nowy temat…" until the page happens to reload.
   it('says a topic is searching while its suggest job is in flight, and not once it is decided', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane' }, NOW)
+    const id = createTopic(db, { context: 'x', count: 10, mix: 'mieszane', level: 'zaawansowany' }, NOW)
     expect(listTopics(db).map((t) => [t.id, t.searching])).toEqual([[id, true]])
     db.update(generationJobs).set({ status: 'done' }).run()
     expect(listTopics(db).map((t) => [t.id, t.searching])).toEqual([[id, false]])
@@ -339,11 +350,23 @@ describe('updateTopic', () => {
 describe('retrySuggest', () => {
   it('re-queues a failed round with the same params, and only then', () => {
     const { db } = createTestDb()
-    const id = createTopic(db, { context: 'x', count: 5, mix: 'frazy' }, NOW)
+    const id = createTopic(db, { context: 'x', count: 5, mix: 'frazy', level: 'zaawansowany' }, NOW)
     expect(retrySuggest(db, id, NOW)).toBeNull()
     db.update(generationJobs).set({ status: 'failed' }).run()
     const again = retrySuggest(db, id, NOW)!
-    expect(parseRoundJob(jobRow(db, again).paramsJson)).toEqual({ round: 1, count: 5, mix: 'frazy' })
+    expect(parseRoundJob(jobRow(db, again).paramsJson)).toEqual({ round: 1, count: 5, mix: 'frazy', level: 'zaawansowany' })
     expect(retrySuggest(db, id, NOW)).toBeNull()
+  })
+
+  // Same backward-compat case as runSuggest's: a job queued before levels
+  // existed has none stored, and retrying it must not throw or silently drop
+  // the level from the new job.
+  it('defaults a legacy failed job with no stored level to zaawansowany', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const jobId = enqueueJob(db, { kind: 'suggest', topicId: 't1', paramsJson: '{"round":1,"count":10,"mix":"mieszane"}' }, NOW)
+    db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, jobId)).run()
+    const again = retrySuggest(db, 't1', NOW)!
+    expect(parseRoundJob(jobRow(db, again).paramsJson)).toEqual({ round: 1, count: 10, mix: 'mieszane', level: 'zaawansowany' })
   })
 })
