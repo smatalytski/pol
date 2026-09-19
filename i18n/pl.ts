@@ -83,7 +83,6 @@ export const t = {
   kindWord: 'słowo',
   kindPhrase: 'fraza',
   topicOn: 'włączony',
-  topicOffToggle: 'wyłączony',
   topicNotFound: 'Nie ma takiego tematu',
   backToTopics: '‹ Tematy',
   transcribeFailed: 'nie udało się rozpoznać',

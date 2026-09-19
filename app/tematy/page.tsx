@@ -1,6 +1,11 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { Badge } from '@/components/ui/Badge'
+import { buttonClass } from '@/components/ui/Button'
+import { Icon } from '@/components/ui/Icon'
+import { Plus } from '@/components/ui/icons'
+import { Switch } from '@/components/ui/Switch'
 import type { TopicListRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
@@ -58,31 +63,25 @@ export default function TopicsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href="/tematy/nowy" className="self-start rounded bg-black px-4 py-2 text-white">
+      <Link href="/tematy/nowy" className={`${buttonClass('primary', 'md')} self-start`}>
+        <Icon icon={Plus} />
         {t.newTopic}
       </Link>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sub text-red-600">{error}</p>}
       <ul>
         {topics.map((x) => (
-          <li key={x.id} className="flex flex-col gap-1 border-b py-3">
-            <Link
-              href={`/tematy/${x.id}`}
-              className={`break-words text-lg ${x.suspendedAt !== null ? 'text-neutral-400' : ''}`}
-            >
+          <li key={x.id} className="flex flex-col gap-2 border-b py-3">
+            <Link href={`/tematy/${x.id}`} className={`break-words text-row ${x.suspendedAt !== null ? 'text-neutral-400' : ''}`}>
               {x.name ?? t.unnamedTopic}
             </Link>
-            <span className="flex flex-wrap items-center gap-2 text-xs">
-              <span>
+            <span className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+              <span className="tabular-nums">
                 {`${x.cardCount} ${t.tabCarded} · ${x.openCount} ${t.tabOpen} · ${x.discardedCount} ${t.tabDiscarded}`}
               </span>
-              {x.pendingCount > 0 && <span className="text-sky-700">{`+${x.pendingCount} ${t.queued}`}</span>}
-              <button
-                type="button"
-                onClick={() => void toggle(x)}
-                className="ml-auto rounded border px-2 py-1"
-              >
-                {x.suspendedAt === null ? t.topicOn : t.topicOffToggle}
-              </button>
+              {x.pendingCount > 0 && <Badge tone="sky">{`+${x.pendingCount} ${t.queued}`}</Badge>}
+              <span className="ml-auto">
+                <Switch checked={x.suspendedAt === null} label={t.topicOn} onChange={() => void toggle(x)} />
+              </span>
             </span>
           </li>
         ))}

@@ -44,7 +44,7 @@ describe('TopicsPage', () => {
     render(<TopicsPage />)
     const name = await screen.findByText('U lekarza')
     const li = name.closest('li')!
-    const toggle = screen.getByRole('button', { name: t.topicOn })
+    const toggle = screen.getByRole('switch', { name: t.topicOn })
     expect(name.parentElement).toBe(li)
     expect(toggle.parentElement).not.toBe(li)
   })
@@ -58,11 +58,19 @@ describe('TopicsPage', () => {
   it('switches a topic off', async () => {
     const calls = stubFetch([row()])
     render(<TopicsPage />)
-    fireEvent.click(await screen.findByRole('button', { name: t.topicOn }))
+    fireEvent.click(await screen.findByRole('switch', { name: t.topicOn }))
     await waitFor(() => expect(calls.some((c) => c.init?.method === 'PATCH')).toBe(true))
     const patch = calls.find((c) => c.init?.method === 'PATCH')!
     expect(patch.url).toBe('/api/topics/t1')
     expect(JSON.parse(String(patch.init!.body)).suspendedAt).toEqual(expect.any(Number))
+  })
+
+  it('shows a switch that is on for an active topic and off for a suspended one', async () => {
+    stubFetch([row(), row({ id: 't2', name: 'W sklepie', suspendedAt: 5 })])
+    render(<TopicsPage />)
+    await screen.findByText('W sklepie')
+    const switches = screen.getAllByRole('switch', { name: t.topicOn })
+    expect(switches.map((s) => s.getAttribute('aria-checked'))).toEqual(['true', 'false'])
   })
 
   it('shows an unnamed topic as such', async () => {
@@ -131,7 +139,7 @@ describe('TopicsPage', () => {
       }),
     )
     render(<TopicsPage />)
-    fireEvent.click(await screen.findByRole('button', { name: t.topicOn }))
+    fireEvent.click(await screen.findByRole('switch', { name: t.topicOn }))
     expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
   })
 })
