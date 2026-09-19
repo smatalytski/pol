@@ -112,7 +112,7 @@ export default function NewTopicPage() {
               type="button"
               aria-pressed={lang === l}
               onClick={() => setLang(l)}
-              className={`rounded-md px-2 py-1 ${lang === l ? 'bg-black text-white' : 'text-neutral-600'}`}
+              className={`min-h-8 rounded-md px-2 py-1 ${lang === l ? 'bg-black text-white' : 'text-neutral-600'}`}
             >
               {l === 'ru' ? t.asRussian : t.asPolish}
             </button>

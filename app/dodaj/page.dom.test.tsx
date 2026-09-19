@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AddPage from './page'
 import { clearOutbox, enqueue } from '@/lib/capture/outbox'
@@ -117,6 +117,9 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
 
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -179,6 +182,9 @@ describe('AddPage mic-denied screen', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -201,6 +207,9 @@ describe('AddPage mic-denied screen', () => {
 describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets its own chip)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -375,6 +384,9 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
 describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -435,6 +447,9 @@ describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
 describe('AddPage layout', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -510,6 +525,9 @@ describe('AddPage layout', () => {
 describe('AddPage recording language (PL/RU buttons, no on-screen language controls)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -584,6 +602,9 @@ describe('AddPage recording language (PL/RU buttons, no on-screen language contr
 describe('AddPage ponów', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -617,6 +638,9 @@ describe('AddPage ponów', () => {
 describe('AddPage review fade', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -636,6 +660,9 @@ describe('AddPage review fade', () => {
 describe('AddPage slow and failing chip controls', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 

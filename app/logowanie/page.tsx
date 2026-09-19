@@ -24,7 +24,7 @@ export default function LoginPage() {
         autoFocus
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="rounded-lg border-neutral-300 p-4 text-lg"
+        className="rounded-lg border border-neutral-300 p-4 text-lg"
         placeholder={t.passwordPlaceholder}
       />
       <button type="submit" className="rounded-lg bg-black p-4 text-lg text-white">

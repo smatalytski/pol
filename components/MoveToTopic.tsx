@@ -63,7 +63,8 @@ export function MoveToTopic({
         onClick={() => void toggle()}
       />
       {open && topics && (
-        <div className="absolute inset-x-0 z-10 mt-1 flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border border-neutral-300 bg-background p-1 shadow">
+        // z-30: above the fixed bottom tab bar (components/TabBar.tsx), which is z-20.
+        <div className="absolute inset-x-0 z-30 mt-1 flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border border-neutral-300 bg-background p-1 shadow">
           {topics
             .filter((tp) => tp.id !== currentTopicId)
             .map((tp) => (

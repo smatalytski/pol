@@ -138,8 +138,10 @@ export default function AddPage() {
 
   useEffect(() => {
     function poll() {
-      void fetchCaptures()
-      void drain()
+      // A failed poll (offline) is retried on the next tick; it must not
+      // surface as an unhandled rejection.
+      void fetchCaptures().catch(() => {})
+      void drain().catch(() => {})
     }
     // Always poll once on mount (or whenever pending work appears) so a
     // capture left mid-pipeline from a previous session is picked up even

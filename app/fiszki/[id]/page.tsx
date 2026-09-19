@@ -146,7 +146,7 @@ export default function CardDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link href="/fiszki" className="self-start text-sub text-neutral-500">
+      <Link href="/fiszki" className="inline-flex min-h-8 items-center self-start text-sub text-neutral-500">
         {t.backToCards}
       </Link>
 

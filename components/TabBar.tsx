@@ -36,7 +36,7 @@ export function TabBar() {
                 aria-label={tab.short ? tab.label : undefined}
                 className={`flex h-full flex-col items-center justify-center gap-0.5 text-xs ${current ? 'font-bold' : 'text-neutral-500'}`}
               >
-                <span className={`flex h-7 w-12 items-center justify-center rounded-full ${current ? 'bg-neutral-200' : ''}`}>
+                <span className={`flex h-7 w-12 items-center justify-center rounded-full ${current ? 'bg-neutral-200 text-neutral-900' : ''}`}>
                   <Icon icon={tab.icon} />
                 </span>
                 {tab.short ?? tab.label}
