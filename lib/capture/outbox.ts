@@ -1,4 +1,5 @@
 import { clear, createStore, del, entries, set } from 'idb-keyval'
+import type { DictationLang } from '../transcribe'
 
 export type OutboxItem = {
   id: string
@@ -6,12 +7,15 @@ export type OutboxItem = {
   mime: string
   createdAt: number
   attempts: number
+  // Absent on entries saved before the language existed; they upload as
+  // Polish.
+  lang?: DictationLang
 }
 
 const store = createStore('fiszki', 'outbox')
 let flushing = false
 
-export async function enqueue(item: Omit<OutboxItem, 'attempts'>): Promise<void> {
+export async function enqueue(item: Omit<OutboxItem, 'attempts' | 'lang'> & { lang: DictationLang }): Promise<void> {
   await set(item.id, { ...item, attempts: 0 }, store)
 }
 

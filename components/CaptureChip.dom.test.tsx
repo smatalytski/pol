@@ -28,7 +28,7 @@ describe('CaptureChip', () => {
 
   it('leaves an outbox chip exactly as before — no swipe/tap wiring', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={{ kind: 'outbox', id: 'o1', createdAt: 1 }} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
+    render(<CaptureChip item={{ kind: 'outbox', id: 'o1', createdAt: 1 }} onRetry={vi.fn()} onDelete={onDelete} />)
     const li = screen.getByRole('listitem')
     swipe(li, -100)
     expect(onDelete).not.toHaveBeenCalled()
@@ -37,14 +37,14 @@ describe('CaptureChip', () => {
   it('swiping left past the threshold calls onDelete with the item', () => {
     const onDelete = vi.fn()
     const item = captureItem()
-    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
+    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} />)
     swipe(screen.getByRole('listitem'), -100)
     expect(onDelete).toHaveBeenCalledWith(item)
   })
 
   it('a short swipe under the threshold does not delete', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} />)
     swipe(screen.getByRole('listitem'), -20)
     expect(onDelete).not.toHaveBeenCalled()
   })
@@ -55,29 +55,9 @@ describe('CaptureChip', () => {
         item={{ kind: 'outbox', id: 'o1', createdAt: 1 }}
         onRetry={vi.fn()}
         onDelete={vi.fn()}
-        onRelanguage={vi.fn()}
       />,
     )
     expect(screen.queryByText(t.asRussian)).toBeNull()
-  })
-
-  it('asks for Russian re-recognition of this capture', () => {
-    const onRelanguage = vi.fn()
-    render(
-      <CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={onRelanguage} />,
-    )
-    fireEvent.click(screen.getByText(t.asRussian))
-    expect(onRelanguage).toHaveBeenCalledWith('cap-1', 'ru')
-  })
-
-  // Every control on this chip has to stop its own pointer events: the <li>
-  // reads pointerdown+pointerup as a tap or a swipe, so without this, pressing
-  // the control would also delete the chip.
-  it('pressing a language control does not also swipe the chip away', () => {
-    const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
-    swipe(screen.getByText(t.asRussian), -100)
-    expect(onDelete).not.toHaveBeenCalled()
   })
 
   // Spec §7.1: swipe-left always deleted a chip, but nothing on screen said
@@ -86,7 +66,7 @@ describe('CaptureChip', () => {
   it('has a visible delete control', () => {
     const onDelete = vi.fn()
     const item = captureItem()
-    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
+    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} />)
     fireEvent.click(screen.getByText(t.deleteItem))
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onDelete).toHaveBeenCalledWith(item)
@@ -99,26 +79,28 @@ describe('CaptureChip', () => {
   // <li>'s own swipe handler and trigger a second, uncontrolled delete.
   it('swiping across the delete button does not also trigger the li swipe handler', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onRelanguage={vi.fn()} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} />)
     swipe(screen.getByText(t.deleteItem), -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
 
   it('shows no audio player — the chip is status only', () => {
-    const { container } = render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />)
+    const { container } = render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} />)
     expect(container.querySelector('audio')).toBeNull()
   })
 
-  it('offers re-recognition while under review', () => {
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />)
-    expect(screen.getByText(t.asRussian)).toBeTruthy()
+  it('shows t.deleteItem and no language controls on an under-review chip', () => {
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} />)
+    expect(screen.getByText(t.deleteItem)).toBeTruthy()
+    expect(screen.queryByText(t.asPolish)).toBeNull()
+    expect(screen.queryByText(t.asRussian)).toBeNull()
   })
 
-  it('offers ponów, not re-recognition, when recognition failed', () => {
+  it('offers ponów, not language controls, when recognition failed', () => {
     render(
       <CaptureChip
         item={captureItem({ status: 'failed', transcript: null, error: 'unintelligible', inReview: false, reviewRemainingMs: null })}
-        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()}
+        onRetry={vi.fn()} onDelete={vi.fn()}
       />,
     )
     expect(screen.getByText(t.retry)).toBeTruthy()
@@ -129,8 +111,17 @@ describe('CaptureChip', () => {
     expect(screen.queryByText(t.transcribing)).toBeNull()
   })
 
+  it('disables ponów while a retry is pending, and enables it otherwise', () => {
+    const failed = captureItem({ status: 'failed', transcript: null, error: 'unintelligible', inReview: false, reviewRemainingMs: null })
+    const { rerender } = render(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} pending />)
+    expect((screen.getByText(t.retry) as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} pending={false} />)
+    expect((screen.getByText(t.retry) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('says już masz for a word already in the deck', () => {
-    render(<CaptureChip item={captureItem({ duplicateOf: 'card-9' })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />)
+    render(<CaptureChip item={captureItem({ duplicateOf: 'card-9' })} onRetry={vi.fn()} onDelete={vi.fn()} />)
     expect(screen.getByText(t.alreadyHave)).toBeTruthy()
   })
 
@@ -138,7 +129,7 @@ describe('CaptureChip', () => {
   // server says is left, so the fade never looks like a glitch.
   it('draws the review bar from the server-computed remaining time', () => {
     const { container } = render(
-      <CaptureChip item={captureItem({ reviewRemainingMs: 2_500 })} onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()} />,
+      <CaptureChip item={captureItem({ reviewRemainingMs: 2_500 })} onRetry={vi.fn()} onDelete={vi.fn()} />,
     )
     const bar = container.querySelector('[data-review-bar]') as HTMLElement
     expect(bar.style.width).toBe('25%')
@@ -148,7 +139,7 @@ describe('CaptureChip', () => {
     render(
       <CaptureChip
         item={captureItem({ status: 'uploaded', transcript: null, inReview: false, reviewRemainingMs: null })}
-        onRetry={vi.fn()} onDelete={vi.fn()} onRelanguage={vi.fn()}
+        onRetry={vi.fn()} onDelete={vi.fn()}
       />,
     )
     expect(screen.getByText(t.transcribing)).toBeTruthy()

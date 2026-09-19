@@ -4,7 +4,7 @@ import { createTestDb } from '../db/testing'
 import { captures, generationJobs } from '../db/schema'
 import { GenerationError } from '../generate'
 import {
-  activeJobCardIds, enqueueJob, hasActiveJob, hasQueuedJobFor, promoteApproved, recoverRunning, runNextJob,
+  activeJobCardIds, enqueueJob, hasActiveJob, promoteApproved, recoverRunning, runNextJob,
   type JobHandlers,
 } from './jobs'
 
@@ -22,7 +22,7 @@ function capture(db: ReturnType<typeof createTestDb>['db'], id: string, over: Pa
 function fakeHandlers(run = vi.fn().mockResolvedValue(undefined)) {
   const giveUp = vi.fn()
   const h = { run, giveUp }
-  return { handlers: { new: h, regenerate: h, rerecognized: h, suggest: h } as JobHandlers, run, giveUp }
+  return { handlers: { new: h, regenerate: h, suggest: h } as JobHandlers, run, giveUp }
 }
 
 const job = (db: ReturnType<typeof createTestDb>['db'], id: string) =>
@@ -275,27 +275,5 @@ describe('active jobs', () => {
     expect(hasActiveJob(db, 'a')).toBe(true)
     expect(hasActiveJob(db, 'b')).toBe(false)
     expect(activeJobCardIds(db)).toEqual(['a'])
-  })
-
-  // Ruling 1: a pending `regenerate` on the same card works from answer_pl, so
-  // it must not stop a re-recognition from queueing its own `rerecognized`
-  // job — the check is per kind and per recording, not per card. And only a
-  // queued job counts: a running one has already read the old transcript.
-  it('finds a queued job of one kind for one recording only', () => {
-    const { db, sqlite } = createTestDb()
-    sqlite.prepare(`INSERT INTO cards (id, type, answer_pl, answer_key, status, created_at, updated_at, due) VALUES ('k', 'ru_to_pl', 'k', 'k', 'ready', 1, 1, 1)`).run()
-    capture(db, 'c1', { status: 'generated', cardId: 'k' })
-    capture(db, 'c2', { status: 'generated', cardId: 'k' })
-    enqueueJob(db, { kind: 'regenerate', cardId: 'k' }, at(0))
-    enqueueJob(db, { kind: 'new', captureId: 'c1' }, at(0))
-    const second = enqueueJob(db, { kind: 'rerecognized', captureId: 'c2', cardId: 'k' }, at(0))
-    expect(hasQueuedJobFor(db, 'rerecognized', 'c1')).toBe(false)
-    expect(hasQueuedJobFor(db, 'new', 'c1')).toBe(true)
-    expect(hasQueuedJobFor(db, 'rerecognized', 'c2')).toBe(true)
-    db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, second)).run()
-    expect(hasActiveJob(db, 'k')).toBe(true)
-    expect(hasQueuedJobFor(db, 'rerecognized', 'c2')).toBe(false)
-    db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, second)).run()
-    expect(hasQueuedJobFor(db, 'rerecognized', 'c2')).toBe(false)
   })
 })

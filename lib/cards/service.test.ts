@@ -322,7 +322,7 @@ describe('applyGeneratedFields and the card type', () => {
     const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
     const fields = { ...nounFields, wordKind: 'fraza' as const, formsJson: null }
-    const { card: after } = applyGeneratedFields(db, card, fields, NOW, { onClash: 'keepAnswer' })
+    const { card: after } = applyGeneratedFields(db, card, fields, NOW)
     expect(after.type).toBe('ru_to_pl')
   })
 
@@ -334,7 +334,7 @@ describe('applyGeneratedFields and the card type', () => {
     const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
     const fields = { ...nounFields, formsJson: null }
-    const { card: after } = applyGeneratedFields(db, card, fields, NOW, { onClash: 'keepAnswer' })
+    const { card: after } = applyGeneratedFields(db, card, fields, NOW)
     expect(after.type).toBe('ru_to_pl')
   })
 
@@ -344,7 +344,7 @@ describe('applyGeneratedFields and the card type', () => {
   // would fork the word into two ru_to_pl cards with one answer key, and
   // staying pl_to_pl is safe because the forms it keeps are the ones it was
   // already drilled on (a card only becomes or stays pl_to_pl with drillable
-  // forms). Under keepAnswer the prompt and examples are still written.
+  // forms). On a clash the prompt and examples are still written.
   it('keeps a pl_to_pl card whole when reverting it would clash with a ru_to_pl card', () => {
     const { db } = createTestDb()
     const ruCard = createCard(db, input({ ...nounFields }), NOW)
@@ -355,7 +355,6 @@ describe('applyGeneratedFields and the card type', () => {
       card,
       { ...nounFields, promptText: 'котик', wordKind: 'inne', formsJson: null },
       NOW,
-      { onClash: 'keepAnswer' },
     )
     expect(duplicateOf).toBe(ruCard.cardId)
     expect(after.type).toBe('pl_to_pl')
@@ -365,29 +364,11 @@ describe('applyGeneratedFields and the card type', () => {
     expect(after.promptText).toBe('котик')
   })
 
-  it('leaves the card exactly as it was on a clash under the untouched policy', () => {
-    const { db } = createTestDb()
-    const other = createCard(db, input({ answerPl: 'pies' }), NOW)
-    const { cardId } = createCard(db, input({ ...nounFields }), NOW)
-    const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const later = new Date(NOW.getTime() + 60_000)
-    const { card: after, duplicateOf } = applyGeneratedFields(
-      db,
-      card,
-      { ...nounFields, answerPl: 'pies', promptText: 'собака', wordKind: 'rzeczownik', formsJson: null },
-      later,
-      { onClash: 'untouched' },
-    )
-    expect(duplicateOf).toBe(other.cardId)
-    expect(after).toEqual(card)
-    expect(db.select().from(cards).where(eq(cards.id, cardId)).get()).toEqual(card)
-  })
-
   it('keeps a pl_to_pl card pl_to_pl when forms remain', () => {
     const { db } = createTestDb()
     const { cardId } = createCard(db, input({ ...nounFields, type: 'pl_to_pl' }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW, { onClash: 'keepAnswer' })
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW)
     expect(after.type).toBe('pl_to_pl')
     expect(after.formsJson).toBe(nounFields.formsJson)
   })
@@ -396,7 +377,7 @@ describe('applyGeneratedFields and the card type', () => {
     const { db } = createTestDb()
     const { cardId } = createCard(db, input({ answerPl: 'kot', wordKind: null, formsJson: null }), NOW)
     const card = db.select().from(cards).where(eq(cards.id, cardId)).get()!
-    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW, { onClash: 'keepAnswer' })
+    const { card: after } = applyGeneratedFields(db, card, nounFields, NOW)
     expect(after.wordKind).toBe('rzeczownik')
     expect(after.formsJson).toBe(nounFields.formsJson)
   })

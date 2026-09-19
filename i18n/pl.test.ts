@@ -7,7 +7,7 @@ describe('strings', () => {
       'appName', 'review', 'add', 'cards', 'settings',
       'show', 'again', 'hard', 'good', 'easy', 'undo',
       'doneForToday', 'noCards', 'sessionReviewed', 'nextReviewAt', 'rateFailed',
-      'holdToRecord', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
+      'holdToRecord', 'recordPolish', 'recordRussian', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
       'suspend', 'unsuspend', 'needsInput', 'queued', 'generating',
       'saveFailed',
       'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',

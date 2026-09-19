@@ -8,8 +8,8 @@ import { gcpProject, speechLocation } from '../gcp/clients'
  * came back "sklep", "час" came back "czas", "бешенство" came back
  * "wściekłość"), in both code orders, while a single code was correct on every
  * word in both languages. Polish and Russian share too many near-homophones
- * for detection to be safe, and a wrong guess is not recoverable from the
- * transcript afterwards — only by re-recognising the stored audio.
+ * for detection to be safe, so the caller names the language instead — the
+ * button held on /dodaj (spec 2026-09-18-recording-language §2).
  */
 export type DictationLang = 'pl' | 'ru'
 
@@ -53,9 +53,10 @@ export function speechTranscriber(opts: {
             autoDecodingConfig: {},
             model,
             // Exactly one code, chosen by the caller — see DictationLang for
-            // the measurements behind that. Polish is the default because it
-            // is what nearly every dictation is; a Russian recording is
-            // re-recognised on request from the audio that is kept anyway.
+            // the measurements behind that. Recognition always gets an
+            // explicit language from the recording (the button held on
+            // /dodaj); `lang = 'pl'` below only covers a caller that passes
+            // none, such as a recording made before that language was stored.
             languageCodes: [LANGUAGE_CODES[lang]],
             features: { enableAutomaticPunctuation: true },
           },

@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CaptureChip, chipCreatedAt, chipKey, type ChipItem } from '@/components/CaptureChip'
 import { useHoldToRecord, mediaRecorderFactory } from '@/hooks/useHoldToRecord'
 import { useWakeLock } from '@/hooks/useWakeLock'
@@ -8,10 +8,9 @@ import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
 
-type Notice = 'languageFailed' | 'deleteFailed'
+type Notice = 'deleteFailed'
 
 const NOTICE_TEXT: Record<Notice, string> = {
-  languageFailed: t.languageFailed,
   deleteFailed: t.deleteFailed,
 }
 
@@ -22,12 +21,11 @@ export default function AddPage() {
   // One notice line for the chip controls' outcomes. A failed or refused
   // request would otherwise look exactly like a dead button.
   const [notice, setNotice] = useState<Notice | null>(null)
-  // Captures whose recognition (ponów or a re-recognition) is in flight.
-  // Every recording on this screen has no card yet (§7.1: uploaded, failed,
-  // or still under review), so either is Speech-to-Text only — a
-  // re-recognition just restarts the review window — but it is still a
-  // network round trip, so without this the user taps again and starts a
-  // second one on the same recording.
+  // Captures whose recognition (ponów) is in flight. Every recording on this
+  // screen has no card yet (§7.1: uploaded, failed, or still under review),
+  // so ponów is Speech-to-Text only, but it is still a network round trip, so
+  // without this the user taps again and starts a second one on the same
+  // recording.
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
@@ -72,6 +70,9 @@ export default function AddPage() {
     const { sent } = await flush(async (item) => {
       const form = new FormData()
       form.set('audio', new Blob([item.bytes], { type: item.mime }), 'capture.webm')
+      // An older entry saved before the language existed has no `lang`, so no
+      // field is sent and the server stores it as Polish.
+      if (item.lang) form.set('lang', item.lang)
       const res = await fetch('/api/captures', { method: 'POST', body: form })
       if (!res.ok) throw new Error(`upload failed: ${res.status}`)
     })
@@ -97,8 +98,8 @@ export default function AddPage() {
   }, [fetchCapturesData])
 
   const onRecorded = useCallback(
-    async (bytes: ArrayBuffer, mime: string) => {
-      await enqueue({ id: crypto.randomUUID(), bytes, mime, createdAt: Date.now() })
+    async (bytes: ArrayBuffer, mime: string, lang: DictationLang) => {
+      await enqueue({ id: crypto.randomUUID(), bytes, mime, createdAt: Date.now(), lang })
       navigator.vibrate?.(20)
       // Reflect the just-enqueued recording immediately, as its own chip,
       // rather than waiting for `drain` to attempt (and possibly finish) the
@@ -112,10 +113,14 @@ export default function AddPage() {
     [drain],
   )
 
-  const { recording, start, stop } = useHoldToRecord({
-    factory: mediaRecorderFactory(getStream),
-    onRecorded,
-  })
+  // One factory (one getUserMedia stream) shared by both buttons, since only
+  // one can ever be recording at a time — the language is only which button
+  // the hold started on, not a property of the recorder itself.
+  const factory = useMemo(() => mediaRecorderFactory(getStream), [getStream])
+  const onRecordedPl = useCallback((b: ArrayBuffer, m: string) => void onRecorded(b, m, 'pl'), [onRecorded])
+  const onRecordedRu = useCallback((b: ArrayBuffer, m: string) => void onRecorded(b, m, 'ru'), [onRecorded])
+  const pl = useHoldToRecord({ factory, onRecorded: onRecordedPl })
+  const ru = useHoldToRecord({ factory, onRecorded: onRecordedRu })
 
   useWakeLock(true)
 
@@ -180,40 +185,13 @@ export default function AddPage() {
     [whilePending],
   )
 
-  // Recognition is Polish by default, because that is what nearly all
-  // dictation is and because a two-language recognizer demonstrably swallows
-  // Russian (spoken "склеп" came back "sklep"). This re-runs recognition on
-  // the stored audio in the language the user names, then refreshes so the
-  // corrected transcript appears on the chip without a reload. A provider
-  // failure comes back as a 200 with the error recorded on the capture, which
-  // the refreshed chip shows; a refused or unreachable request gets the
-  // notice instead.
-  const relanguage = useCallback(
-    (id: string, lang: DictationLang) => {
-      void whilePending(id, async () => {
-        try {
-          const res = await fetch(`/api/captures/${id}/jezyk`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ lang }),
-          })
-          if (mountedRef.current) setNotice(res.ok ? null : 'languageFailed')
-        } catch {
-          if (mountedRef.current) setNotice('languageFailed')
-        }
-      })
-    },
-    [whilePending],
-  )
-
-  // Spec §4's "swipe to delete", wired once Task 17 added the routes it
-  // needs, and the visible `usuń` button (Task 9: swipe alone was invisible)
-  // calls the same handler. An outbox chip never calls this (CaptureChip
-  // doesn't attach either control to it — see its own comment), so this only
-  // ever sees a `capture` item. An on-screen recording never has a card (it
-  // is uploaded, failed or under review — see `listOnScreen`), so rejecting
-  // it always deletes the recording itself, never a card. A refused or
-  // unreachable delete leaves the chip on screen, so the notice says the
+  // Spec §4's "swipe to delete", and the visible `usuń` button (swipe alone
+  // was invisible) calls the same handler. An outbox chip never calls this
+  // (CaptureChip doesn't attach either control to it — see its own comment),
+  // so this only ever sees a `capture` item. An on-screen recording never has
+  // a card (it is uploaded, failed or under review — see `listOnScreen`), so
+  // rejecting it always deletes the recording itself, never a card. A refused
+  // or unreachable delete leaves the chip on screen, so the notice says the
   // delete did not happen.
   const deleteChip = useCallback(
     (item: ChipItem) => {
@@ -254,14 +232,13 @@ export default function AddPage() {
       {/* Bottom padding reserves the height of the fixed bar below, so the
           last chip can still be read and swiped instead of sitting under the
           button. */}
-      <ul className="w-full pb-52">
+      <ul className="w-full pb-60">
         {chips.map((item) => (
           <CaptureChip
             key={chipKey(item)}
             item={item}
             onRetry={retry}
             onDelete={deleteChip}
-            onRelanguage={relanguage}
             pending={item.kind === 'capture' && pending.has(item.capture.id)}
           />
         ))}
@@ -270,7 +247,7 @@ export default function AddPage() {
       {/* One-handed use: a thumb reaches the bottom of a phone screen, not the
           top, and this list grows downward — so a button above it drifts
           further out of reach the longer a session runs.
-          
+
           Fixed, not sticky. `sticky bottom-0` shipped first and did not work:
           sticky only pins an element once its container overflows the
           viewport, and nothing in the shell constrains height, so with a few
@@ -278,23 +255,50 @@ export default function AddPage() {
           under them — near the top, exactly where it started. Fixed anchors it
           to the viewport whatever the list is doing; `left-0 right-0` plus the
           inner max-w-xl re-centres it, because a fixed element ignores the
-          shell's `mx-auto max-w-xl`. The inset padding keeps it clear of the
+          shell's `mx-auto max-w-xl`. `px-4` keeps the buttons off the screen
+          edges on a narrow phone. The inset padding keeps it clear of the
           home indicator / gesture bar, and the opaque background stops chips
           showing through as they scroll underneath. Nav is at the top of the
-          shell (components/Nav.tsx), so nothing collides down here. */}
+          shell (components/Nav.tsx), so nothing collides down here.
+
+          Two buttons, not one with a language toggle: the choice has to be
+          made before the hold, since a hold is Polish or Russian, never both
+          — a modal or a separate toggle tap would slow down the exact moment
+          a two-handed toggle-then-hold gesture is trying to avoid. Both
+          buttons share one getStream/factory (`pl`/`ru` below) since only one
+          can ever be recording at a time. This is a single flex container,
+          not a caption plus a nested row for the buttons: `flex-wrap` plus
+          the caption's `w-full` puts the caption on its own row above the
+          two buttons with no wrapper div needed. `gap-x-6` separates the two
+          buttons; `gap-y-2` is the (smaller) gap between the caption's row
+          and the buttons' row, so the bar stays short enough for the list's
+          bottom padding above to cover it. */}
       <div
-        className="fixed bottom-0 left-0 right-0 flex justify-center bg-background pt-4"
+        className="fixed bottom-0 left-0 right-0 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 bg-background px-4 pt-4"
         style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
       >
+        <p className="w-full text-center text-sm text-neutral-500">{t.holdToRecord}</p>
         <button
-          onPointerDown={() => { navigator.vibrate?.(10); start() }}
-          onPointerUp={stop}
-          onPointerCancel={stop}
+          onPointerDown={() => { navigator.vibrate?.(10); pl.start() }}
+          onPointerUp={pl.stop}
+          onPointerCancel={pl.stop}
           onContextMenu={(e) => e.preventDefault()}
-          className={`h-40 w-40 select-none rounded-full text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
+          aria-label={t.recordPolish}
+          className={`h-36 w-36 select-none rounded-full text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
-          {t.holdToRecord}
+          PL
+        </button>
+        <button
+          onPointerDown={() => { navigator.vibrate?.(10); ru.start() }}
+          onPointerUp={ru.stop}
+          onPointerCancel={ru.stop}
+          onContextMenu={(e) => e.preventDefault()}
+          aria-label={t.recordRussian}
+          className={`h-36 w-36 select-none rounded-full text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
+          style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
+        >
+          RU
         </button>
       </div>
     </div>

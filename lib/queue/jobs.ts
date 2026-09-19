@@ -13,7 +13,7 @@ import { approvedIds, type ReviewRow } from './review'
  * cards or Gemini, and every rule here is testable with fakes.
  */
 
-export type JobKind = 'new' | 'regenerate' | 'rerecognized' | 'suggest'
+export type JobKind = 'new' | 'regenerate' | 'suggest'
 export type JobRow = typeof generationJobs.$inferSelect
 
 /**
@@ -62,27 +62,6 @@ export function hasActiveJob(db: Db, cardId: string): boolean {
     .select({ id: generationJobs.id })
     .from(generationJobs)
     .where(and(eq(generationJobs.cardId, cardId), inArray(generationJobs.status, ACTIVE)))
-    .get()
-}
-
-/**
- * Whether a job of this kind for this recording is waiting to run. Per kind
- * and per recording, not per card: a pending `regenerate` on the same card
- * works from answer_pl and would never see a new transcript, so it must not
- * stop a re-recognition from queueing its own `rerecognized` job. Queued
- * only, not running: a running job has already read its inputs.
- */
-export function hasQueuedJobFor(db: Db, kind: JobKind, captureId: string): boolean {
-  return !!db
-    .select({ id: generationJobs.id })
-    .from(generationJobs)
-    .where(
-      and(
-        eq(generationJobs.kind, kind),
-        eq(generationJobs.captureId, captureId),
-        eq(generationJobs.status, 'queued'),
-      ),
-    )
     .get()
 }
 

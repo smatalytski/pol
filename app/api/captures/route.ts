@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
-import { getTranscriber } from '@/lib/transcribe'
+import { getTranscriber, type DictationLang } from '@/lib/transcribe'
 import { createCapture, listOnScreen, recognizeCapture } from '@/lib/capture/pipeline'
 
 export async function POST(req: Request) {
@@ -9,8 +9,15 @@ export async function POST(req: Request) {
   if (!(file instanceof Blob)) {
     return NextResponse.json({ error: 'audio is required' }, { status: 400 })
   }
+  // Chosen by the button held on /dodaj. Absent from an outbox entry saved
+  // before the language existed, which was a Polish recording.
+  const langField = form.get('lang')
+  if (langField !== null && langField !== 'pl' && langField !== 'ru') {
+    return NextResponse.json({ error: 'lang must be pl or ru' }, { status: 400 })
+  }
+  const lang: DictationLang = langField ?? 'pl'
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const id = createCapture(db, { bytes, mime: file.type || 'audio/webm' }, new Date())
+  const id = createCapture(db, { bytes, mime: file.type || 'audio/webm' }, new Date(), lang)
 
   // Deliberately not awaited: the phone is told "stored" the moment the bytes
   // are durable, and recognition happens behind it. Generation is not started

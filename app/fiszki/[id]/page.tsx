@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import type { CardRow, CardType } from '@/lib/cards/service'
-import type { DictationLang } from '@/lib/transcribe'
 import { hasForms, parseForms } from '@/lib/cards/forms'
 import { CardTypeSwitch } from '@/components/CardTypeSwitch'
 import { FormsView } from '@/components/FormsView'
@@ -23,25 +22,15 @@ export default function CardDetailPage() {
   const [missing, setMissing] = useState(false)
   const [saveError, setSaveError] = useState(false)
   const [regenError, setRegenError] = useState(false)
-  // The recording this card came from, when there is one. Supplied by the GET
-  // so the re-recognition controls are offered only where they can work: a
-  // hand-typed card has no audio behind it.
-  const [captureId, setCaptureId] = useState<string | null>(null)
   // The topic this card belongs to, if any, so the detail screen can link
   // back to it. A named topic shows its name; one still awaiting its first
   // round shows the placeholder instead.
   const [topic, setTopic] = useState<{ id: string; name: string | null } | null>(null)
-  const [langError, setLangError] = useState(false)
-  // The re-recognition request runs Speech-to-Text before it answers (the
-  // Gemini half is queued), a round trip of a few seconds: without a visible
-  // pending state the user taps again and starts a second one on the same
-  // capture.
-  const [langPending, setLangPending] = useState(false)
   const [typeError, setTypeError] = useState(false)
   const [typeDuplicate, setTypeDuplicate] = useState(false)
-  // A queued job (from wygeneruj ponownie or a re-recognition) rewrites this
-  // card asynchronously; the GET tells us one is in flight so the page can
-  // show that instead of the card looking silently unchanged.
+  // A queued job (from wygeneruj ponownie) rewrites this card asynchronously;
+  // the GET tells us one is in flight so the page can show that instead of
+  // the card looking silently unchanged.
   const [generating, setGenerating] = useState(false)
 
   const load = useCallback(async () => {
@@ -52,12 +41,10 @@ export default function CardDetailPage() {
     }
     const body = (await res.json()) as {
       card: CardRow
-      captureId?: string | null
       generating?: boolean
       topic?: { id: string; name: string | null } | null
     }
     setCard(body.card)
-    setCaptureId(body.captureId ?? null)
     setGenerating(body.generating ?? false)
     setTopic(body.topic ?? null)
   }, [id])
@@ -123,43 +110,6 @@ export default function CardDetailPage() {
     setTypeDuplicate(body.duplicateOf !== null)
   }
 
-  // Dictation is recognised as Polish, because that is what nearly all of it
-  // is: measured on the real API, a two-language recognizer swallows Russian
-  // whole (spoken "склеп" came back "sklep", "бешенство" came back
-  // "wściekłość"). So a Russian recording is repaired from the stored audio
-  // instead — and it has to be the audio, because a wrong-language transcript
-  // keeps no trace of what was said, which is why `wygeneruj ponownie` (which
-  // re-generates from the stored answer) could never fix it.
-  //
-  // The route answers 200 with a Speech-to-Text failure in `error`, and with
-  // `queued: true` when the card's rebuild is now waiting in the generation
-  // queue rather than already done — so checking `res.ok` alone would show
-  // nothing when re-recognition fails, and reloading unconditionally would
-  // show the pre-rebuild card as if the job had already finished.
-  async function relanguage(lang: DictationLang) {
-    if (!captureId) return
-    setLangPending(true)
-    try {
-      const res = await fetch(`/api/captures/${captureId}/jezyk`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lang }),
-      })
-      if (!res.ok) {
-        setLangError(true)
-        return
-      }
-      const body = (await res.json()) as { queued: boolean; error: string | null }
-      setLangError(body.error !== null)
-      if (body.queued) setGenerating(true)
-      else await load()
-    } catch {
-      setLangError(true)
-    } finally {
-      setLangPending(false)
-    }
-  }
-
   // Deleting the card this screen is showing would otherwise leave it
   // displaying something that no longer exists.
   async function remove() {
@@ -187,11 +137,11 @@ export default function CardDetailPage() {
       )}
 
       {/* Keyed on the value the server holds, so a card rebuilt underneath
-          this screen — by re-recognition or regeneration — remounts the input
-          with the new text. `defaultValue` is only read on mount, so without
-          this the field would keep displaying the old answer and the next
-          blur would PATCH that stale value straight back over the repair.
-          Typing does not change card state, so this never remounts mid-edit. */}
+          this screen — by wygeneruj ponownie — remounts the input with the
+          new text. `defaultValue` is only read on mount, so without this the
+          field would keep displaying the old answer and the next blur would
+          PATCH that stale value straight back over the rebuild. Typing does
+          not change card state, so this never remounts mid-edit. */}
       <input
         key={`answer:${card.answerPl}`}
         defaultValue={card.answerPl}
@@ -243,7 +193,7 @@ export default function CardDetailPage() {
         {card.status === 'needs_input' && (
           <button
             onClick={() => void regenerate()}
-            disabled={generating || langPending}
+            disabled={generating}
             className="underline disabled:text-neutral-400"
           >
             {t.regenerate}
@@ -258,36 +208,15 @@ export default function CardDetailPage() {
         <button onClick={() => void remove()} className="underline text-red-600">
           {t.deleteItem}
         </button>
-        {/* A queued job (wygeneruj ponownie or a re-recognition) rewrites this
-            card asynchronously, so this can show regardless of whether the
-            card has a recording behind it — unlike the language controls
-            below, this is not gated on captureId. */}
+        {/* wygeneruj ponownie is the only thing that queues a rebuild here
+            now that re-recognition is gone, so this shows while a queued or
+            running job for this card exists — not only during the request
+            that queues it. */}
         {generating && <span className="text-neutral-500">{t.generating}</span>}
       </div>
 
-      {captureId && (
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-xs uppercase text-neutral-500">{t.recognizeAs}</span>
-          {([
-            ['pl', t.asPolish],
-            ['ru', t.asRussian],
-          ] as const).map(([lang, label]) => (
-            <button
-              key={lang}
-              onClick={() => void relanguage(lang)}
-              disabled={langPending || generating}
-              className="underline disabled:text-neutral-400"
-            >
-              {label}
-            </button>
-          ))}
-          {langPending && <span className="text-neutral-500">{t.transcribing}</span>}
-        </div>
-      )}
-
       {saveError && <p className="text-sm text-red-600">{t.saveFailed}</p>}
       {regenError && <p className="text-sm text-red-600">{t.regenerateFailed}</p>}
-      {langError && <p className="text-sm text-red-600">{t.languageFailed}</p>}
       {typeError && <p className="text-sm text-red-600">{t.typeFailed}</p>}
       {typeDuplicate && <p className="text-sm text-amber-600">{t.typeDuplicate}</p>}
     </div>

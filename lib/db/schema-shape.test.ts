@@ -18,7 +18,43 @@ describe('schema after migrations', () => {
   it('applies the squashed base and then the appended migrations, in order', () => {
     const { sqlite } = createTestDb()
     const names = (sqlite.prepare('SELECT name FROM _migrations ORDER BY name').all() as { name: string }[]).map((r) => r.name)
-    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql'])
+    expect(names).toEqual(['001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql'])
+  })
+
+  it('gives captures a recognition language', () => {
+    const { sqlite } = createTestDb()
+    const cols = (sqlite.prepare('PRAGMA table_info(captures)').all() as { name: string }[]).map((c) => c.name)
+    expect(cols).toContain('lang')
+  })
+
+  // Re-recognition is removed (spec 2026-09-18-recording-language §4): a
+  // `rerecognized` job still waiting at upgrade time would reach a worker with
+  // no handler for it. Finished ones stay as history.
+  it('fails queued and running rerecognized jobs on upgrade, leaving the rest', () => {
+    const sqlite = new Database(':memory:')
+    sqlite.pragma('foreign_keys = ON')
+    for (const f of ['001-init.sql', '002-generation-queue.sql', '003-topics.sql']) {
+      sqlite.exec(readFileSync(join(process.cwd(), 'migrations', f), 'utf8'))
+    }
+    sqlite.exec(`CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`)
+    sqlite.prepare(`INSERT INTO _migrations VALUES ('001-init.sql', 1), ('002-generation-queue.sql', 1), ('003-topics.sql', 1)`).run()
+    const job = sqlite.prepare(`INSERT INTO generation_jobs (id, kind, status, next_attempt_at, created_at) VALUES (?, ?, ?, 1, 1)`)
+    job.run('q', 'rerecognized', 'queued')
+    job.run('r', 'rerecognized', 'running')
+    job.run('d', 'rerecognized', 'done')
+    job.run('n', 'new', 'queued')
+    sqlite.prepare(`INSERT INTO captures (id, status, created_at) VALUES ('c1', 'generated', 1)`).run()
+
+    migrate(sqlite)
+
+    const rows = sqlite.prepare(`SELECT id, status, last_error, finished_at IS NOT NULL AS finished FROM generation_jobs ORDER BY id`).all()
+    expect(rows).toEqual([
+      { id: 'd', status: 'done', last_error: null, finished: 0 },
+      { id: 'n', status: 'queued', last_error: null, finished: 0 },
+      { id: 'q', status: 'failed', last_error: 're-recognition removed', finished: 1 },
+      { id: 'r', status: 'failed', last_error: 're-recognition removed', finished: 1 },
+    ])
+    expect(sqlite.prepare(`SELECT lang FROM captures`).get()).toEqual({ lang: null })
   })
 
   it('gives captures a review timestamp and a recognition-time duplicate', () => {
