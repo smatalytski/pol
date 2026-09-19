@@ -418,12 +418,31 @@ describe('CardDetailPage', () => {
       }),
     )
     render(<CardPage />)
-    fireEvent.click(await screen.findByText(`${t.moveTo}: …`))
+    fireEvent.click(await screen.findByText(`${t.moveTo}: U lekarza`))
     fireEvent.click(await screen.findByText('U mechanika'))
     await waitFor(() => expect(calls.some((c) => c.url === '/api/cards/c1' && c.method === 'PATCH')).toBe(true))
     const patch = calls.find((c) => c.url === '/api/cards/c1' && c.method === 'PATCH')!
     expect(patch.body).toEqual({ topicId: 't2' })
     // A reload follows the move: a fresh GET for the card picks up the new topic.
     await waitFor(() => expect(calls.filter((c) => c.url === `/api/cards/c1` && c.method === 'GET').length).toBeGreaterThan(1))
+  })
+
+  // The card page dropped its topic name entirely (whole-branch review
+  // finding): the button always read `temat: …`, even for a card sitting
+  // in Ogólne.
+  it('shows the topic name — temat: Ogólne — for a card filed under Ogólne', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({ card: cardRow({ topicId: 'default' }), generating: false, topic: { id: 'default', name: 'Ogólne' } }),
+          }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<CardPage />)
+    expect(await screen.findByText(`${t.moveTo}: Ogólne`)).toBeTruthy()
   })
 })

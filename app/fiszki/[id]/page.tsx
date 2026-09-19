@@ -147,7 +147,7 @@ export default function CardDetailPage() {
         {t.backToCards}
       </Link>
 
-      {topic && <MoveToTopic currentTopicId={topic.id} onMove={moveTopic} />}
+      {topic && <MoveToTopic currentTopicId={topic.id} currentName={topic.name} onMove={moveTopic} />}
 
       {/* Keyed on the value the server holds, so a card rebuilt underneath
           this screen — by wygeneruj ponownie — remounts the input with the

@@ -20,6 +20,15 @@ function topicsResponse() {
 }
 
 describe('MoveToTopic', () => {
+  it('shows the current topic name in the button when given, and … otherwise', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(topicsResponse()) }))
+    const { rerender } = render(<MoveToTopic currentTopicId="t1" currentName="Ogólne" onMove={vi.fn()} />)
+    expect(screen.getByRole('button', { name: `${t.moveTo}: Ogólne` })).toBeTruthy()
+
+    rerender(<MoveToTopic currentTopicId="t1" onMove={vi.fn()} />)
+    expect(screen.getByRole('button', { name: `${t.moveTo}: …` })).toBeTruthy()
+  })
+
   it('lists every topic except the current one and moves on a choice', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(topicsResponse()) })
     vi.stubGlobal('fetch', fetchMock)

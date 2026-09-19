@@ -4,16 +4,19 @@ import type { TopicListRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
 /**
- * Moving an open or discarded item's card to another topic (spec
+ * Moving a card or an open/discarded item to another topic (spec
  * 2026-09-19-topic-items §4.4). The list is fetched fresh on every open, so
- * it can never show a topic that was renamed or deleted since the page
- * loaded.
+ * it can never show a topic that was renamed since the page loaded — topics
+ * are never deleted. `currentName` is the caller's already-known name for
+ * `currentTopicId`; the button reads `…` until a caller has one to show.
  */
 export function MoveToTopic({
   currentTopicId,
+  currentName,
   onMove,
 }: {
   currentTopicId: string
+  currentName?: string | null
   onMove: (topicId: string) => Promise<void> | void
 }) {
   const [open, setOpen] = useState(false)
@@ -45,7 +48,7 @@ export function MoveToTopic({
   return (
     <div className="relative inline-block text-sm">
       <button type="button" onClick={() => void toggle()} className="rounded border px-2 py-1">
-        {t.moveTo}: …
+        {t.moveTo}: {currentName !== undefined ? (currentName ?? t.unnamedTopic) : '…'}
       </button>
       {open && topics && (
         <div className="absolute z-10 mt-1 flex flex-col gap-1 rounded border bg-background p-1 shadow">

@@ -7,6 +7,7 @@ import { answerKey } from './answer-key'
 import { toCardFields, type Generator } from '../generate'
 import { canDrillForms, type WordKind } from './forms'
 import { DEFAULT_TOPIC_ID } from '../topics/default'
+import { t } from '../../i18n/pl'
 
 export type CardType = 'ru_to_pl' | 'pl_to_pl'
 
@@ -400,11 +401,17 @@ export function knownCardFor(db: Db, transcript: string): string | null {
   return match?.id ?? null
 }
 
-/** The topic name of a card, `''` for one whose topic was somehow removed (never happens: topics are never hard-deleted). */
+/**
+ * The topic name of a card, for the `już masz — w temacie <name>` texts.
+ * `''` only for a card whose topic was somehow removed (never happens:
+ * topics are never hard-deleted); a topic that exists but has no name yet
+ * (still awaiting its first batch) falls back to `t.unnamedTopic`, or the
+ * message would otherwise end with a bare `temacie `.
+ */
 export function cardTopicName(db: Db, cardId: string): string {
   const topicId = db.select({ topicId: cards.topicId }).from(cards).where(eq(cards.id, cardId)).get()?.topicId
   if (!topicId) return ''
-  return db.select({ name: topics.name }).from(topics).where(eq(topics.id, topicId)).get()?.name ?? ''
+  return db.select({ name: topics.name }).from(topics).where(eq(topics.id, topicId)).get()?.name ?? t.unnamedTopic
 }
 
 /**

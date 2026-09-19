@@ -35,9 +35,7 @@ describe('TopicsPage', () => {
     render(<TopicsPage />)
     const name = await screen.findByText('U lekarza')
     expect(name.closest('a')?.getAttribute('href')).toBe('/tematy/t1')
-    const counts = screen.getByText('23 · 5 · 3')
-    expect(counts).toBeTruthy()
-    expect(counts.getAttribute('title')).toBe(`${t.tabCarded} · ${t.tabOpen} · ${t.tabDiscarded}`)
+    expect(screen.getByText(`23 ${t.tabCarded} · 5 ${t.tabOpen} · 3 ${t.tabDiscarded}`)).toBeTruthy()
     expect(screen.getByText(`+4 ${t.queued}`)).toBeTruthy()
   })
 

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import type { TopicListRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
-/** Every topic, with its card count, what is still generating, and its on/off switch (spec §4.2). */
+/** Every topic, with its card count, what is still generating, and its on/off switch (spec §5.1). */
 export default function TopicsPage() {
   const [topics, setTopics] = useState<TopicListRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +32,7 @@ export default function TopicsPage() {
   }, [load])
 
   // A brand-new topic has no pending captures yet — it is still searching for
-  // its first round — so it must keep the page polling too, or it sits at
+  // its first batch — so it must keep the page polling too, or it sits at
   // "nowy temat…" until the page happens to reload.
   const pending = topics.some((x) => x.pendingCount > 0 || x.searching)
   useEffect(() => {
@@ -69,8 +69,8 @@ export default function TopicsPage() {
               {x.name ?? t.unnamedTopic}
             </Link>
             <span className="flex shrink-0 items-center gap-3 text-xs">
-              <span title={`${t.tabCarded} · ${t.tabOpen} · ${t.tabDiscarded}`}>
-                {`${x.cardCount} · ${x.openCount} · ${x.discardedCount}`}
+              <span>
+                {`${x.cardCount} ${t.tabCarded} · ${x.openCount} ${t.tabOpen} · ${x.discardedCount} ${t.tabDiscarded}`}
               </span>
               {x.pendingCount > 0 && <span className="text-sky-700">{`+${x.pendingCount} ${t.queued}`}</span>}
               <button

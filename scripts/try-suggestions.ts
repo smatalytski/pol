@@ -1,5 +1,5 @@
 // Live check of the suggestion prompt (spec 2026-09-18-topic-generation §7):
-// one round for each of the three example situations, printed for a human to
+// one batch for each of the three example situations, printed for a human to
 // judge. Not a test — the question is whether the words are good.
 //
 // Usage: npx tsx --env-file=.env.local scripts/try-suggestions.ts [count] [mix] [level]

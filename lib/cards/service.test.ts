@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
+import { t } from '../../i18n/pl'
 import { createTestDb } from '../db/testing'
 import { cards, reviews, topics } from '../db/schema'
 import { DEFAULT_TOPIC_ID } from '../topics/default'
@@ -583,6 +584,16 @@ describe('restoreCard', () => {
     deleteCard(db, cardId, NOW)
     createCard(db, input(), NOW) // a fresh one, filed under Ogólne
     expect(restoreCard(db, cardId, NOW)).toEqual({ ok: false, reason: 'conflict', topicName: 'Ogólne' })
+  })
+
+  it('falls back to a placeholder name when the conflicting card sits in a not-yet-named topic', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    deleteCard(db, cardId, NOW)
+    db.insert(topics).values({ id: 't-unnamed', name: null, context: '', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    const { cardId: freshId } = createCard(db, input(), NOW)
+    moveCard(db, freshId, 't-unnamed', NOW)
+    expect(restoreCard(db, cardId, NOW)).toEqual({ ok: false, reason: 'conflict', topicName: t.unnamedTopic })
   })
 })
 

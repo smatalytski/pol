@@ -34,8 +34,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .get()
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
-  // The topic this card belongs to, for the detail screen's link back to it —
-  // null without one; its name is null while still pending its first batch.
+  // The topic this card belongs to, for the detail screen's move picker (every
+  // card has one — the default topic, Ogólne, catches anything without a more
+  // specific one); its name is null while still pending its first batch.
   const topic = card.topicId
     ? (db.select({ id: topics.id, name: topics.name }).from(topics).where(eq(topics.id, card.topicId)).get() ?? null)
     : null
