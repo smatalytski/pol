@@ -4,6 +4,9 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { BatchSettings } from '@/components/BatchSettings'
 import { ManualAddBar } from '@/components/ManualAddBar'
+import { Button } from '@/components/ui/Button'
+import { Switch } from '@/components/ui/Switch'
+import { RefreshCw, Sparkles } from '@/components/ui/icons'
 import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { TopicView } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
@@ -139,7 +142,7 @@ export default function TopicPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href="/tematy" className="text-sm underline">{t.backToTopics}</Link>
+      <Link href="/tematy" className="self-start text-sub text-neutral-500">{t.backToTopics}</Link>
 
       <div className="flex items-center justify-between gap-3">
         <input
@@ -151,15 +154,13 @@ export default function TopicPage() {
             const name = e.target.value.trim()
             if (name && name !== topic.name) patchTopic({ name })
           }}
-          className="min-w-0 flex-1 text-xl disabled:bg-transparent"
+          className="min-w-0 flex-1 bg-transparent text-xl font-bold disabled:bg-transparent"
         />
-        <button
-          type="button"
-          onClick={() => patchTopic({ suspendedAt: topic.suspendedAt === null ? Date.now() : null })}
-          className="shrink-0 rounded border px-2 py-1 text-xs"
-        >
-          {topic.suspendedAt === null ? t.topicOn : t.topicOffToggle}
-        </button>
+        <Switch
+          checked={topic.suspendedAt === null}
+          label={t.topicOn}
+          onChange={() => patchTopic({ suspendedAt: topic.suspendedAt === null ? Date.now() : null })}
+        />
       </div>
 
       {!topic.isDefault && (
@@ -173,26 +174,24 @@ export default function TopicPage() {
               const context = e.target.value.trim()
               if (context && context !== topic.context) patchTopic({ context })
             }}
-            className="mt-2 w-full rounded border p-2"
+            className="mt-2 w-full rounded-lg border border-neutral-300 p-2"
           />
         </details>
       )}
 
       {loadError && <p className="text-sm text-red-600">{t.topicsLoadFailed}</p>}
 
-      <div className="flex flex-wrap gap-x-2 text-sm">
-        {TABS.map((key, i) => (
-          <span key={key} className="flex gap-2">
-            {i > 0 && <span className="text-neutral-400">·</span>}
-            <button
-              type="button"
-              aria-pressed={tab === key}
-              onClick={() => choose(key)}
-              className={tab === key ? 'font-semibold underline' : 'text-neutral-500'}
-            >
-              {`${labels[key]} (${counts[key]})`}
-            </button>
-          </span>
+      <div className="flex rounded-lg border border-neutral-300 p-0.5 text-sm">
+        {TABS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={tab === key}
+            onClick={() => choose(key)}
+            className={`flex-1 rounded-md px-2 py-1.5 tabular-nums ${tab === key ? 'bg-black font-semibold text-white' : 'text-neutral-600'}`}
+          >
+            {`${labels[key]} (${counts[key]})`}
+          </button>
         ))}
       </div>
 
@@ -208,29 +207,24 @@ export default function TopicPage() {
           <OpenTab topicId={id} items={groups.open} busy={busy} act={act} />
           {!topic.isDefault && (
             <div className="flex flex-col gap-3">
-              {batch.state === 'searching' && <p className="text-neutral-500">{t.searching}</p>}
+              {batch.state === 'searching' && <p className="text-sub text-neutral-500">{t.searching}</p>}
               {batch.state === 'failed' && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm text-red-600">{batch.error}</p>
-                  <button
-                    type="button"
-                    disabled={busy.has('batch')}
-                    onClick={() => void act('batch', `/api/topics/${id}/retry`, 'POST')}
-                    className="self-start underline disabled:opacity-40"
-                  >
-                    {t.tryAgain}
-                  </button>
+                <div className="flex flex-col items-start gap-2">
+                  <p className="text-sub text-red-600">{batch.error}</p>
+                  <Button variant="secondary" icon={RefreshCw} label={t.tryAgain} busy={busy.has('batch')} onClick={() => void act('batch', `/api/topics/${id}/retry`, 'POST')} />
                 </div>
               )}
               <BatchSettings value={params} onChange={setParams} />
-              <button
-                type="button"
-                disabled={busy.has('batch') || batch.state === 'searching'}
+              <Button
+                variant="primary"
+                size="md"
+                icon={Sparkles}
+                label={t.more}
+                busy={busy.has('batch')}
+                disabled={batch.state === 'searching'}
                 onClick={() => void act('batch', `/api/topics/${id}/batches`, 'POST', params)}
-                className="self-start rounded bg-black px-4 py-2 text-white disabled:opacity-40"
-              >
-                {t.more}
-              </button>
+                className="self-start"
+              />
             </div>
           )}
         </div>

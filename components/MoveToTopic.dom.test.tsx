@@ -62,6 +62,15 @@ describe('MoveToTopic', () => {
     expect(panelButton.className).toContain('break-words')
   })
 
+  it('shows an icon-only trigger named "temat" when compact', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(topicsResponse()) }))
+    render(<MoveToTopic currentTopicId="t1" compact onMove={vi.fn()} />)
+    const trigger = screen.getByRole('button', { name: t.moveTo })
+    expect(trigger.textContent).toBe('')
+    fireEvent.click(trigger)
+    expect(await screen.findByRole('button', { name: 'Ogólne' })).toBeTruthy()
+  })
+
   it('shows an error when the topics fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) }))
     render(<MoveToTopic currentTopicId="t1" onMove={vi.fn()} />)

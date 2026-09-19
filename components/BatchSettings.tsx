@@ -14,34 +14,34 @@ export function BatchSettings({ value, onChange }: { value: BatchParams; onChang
         <select
           value={value.count}
           onChange={(e) => onChange({ ...value, count: Number(e.target.value) })}
-          className="rounded border p-1"
+          className="rounded-lg border border-neutral-300 px-2 py-1"
         >
           {COUNTS.map((n) => (
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
       </label>
-      <div className="flex overflow-hidden rounded border">
+      <div className="flex rounded-lg border border-neutral-300 p-0.5">
         {MIXES.map((m) => (
           <button
             key={m}
             type="button"
             aria-pressed={value.mix === m}
             onClick={() => onChange({ ...value, mix: m })}
-            className={`px-2 py-1 ${value.mix === m ? 'bg-black text-white' : ''}`}
+            className={`rounded-md px-2 py-1 ${value.mix === m ? 'bg-black text-white' : 'text-neutral-600'}`}
           >
             {MIX_LABEL[m]}
           </button>
         ))}
       </div>
-      <div className="flex overflow-hidden rounded border">
+      <div className="flex rounded-lg border border-neutral-300 p-0.5">
         {LEVELS.map((l) => (
           <button
             key={l}
             type="button"
             aria-pressed={value.level === l}
             onClick={() => onChange({ ...value, level: l })}
-            className={`px-2 py-1 ${value.level === l ? 'bg-black text-white' : ''}`}
+            className={`rounded-md px-2 py-1 ${value.level === l ? 'bg-black text-white' : 'text-neutral-600'}`}
           >
             {LEVEL_LABEL[l]}
           </button>

@@ -97,7 +97,7 @@ export const t = {
   tabCarded: 'z kartą',
   tabOpen: 'bez karty',
   tabDiscarded: 'odrzucone',
-  makeCard: '+ karta',
+  makeCard: 'karta',
   discard: 'odrzuć',
   restore: 'przywróć',
   cardBadge: 'karta',
