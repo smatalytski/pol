@@ -148,7 +148,7 @@ export default function CardDetailPage() {
       </Link>
 
       {/* `relative` so the move panel spans this full-width block, not just
-          the button (spec 2026-09-19-topic-items layout fix §4). */}
+          the button. */}
       {topic && (
         <div className="relative">
           <MoveToTopic currentTopicId={topic.id} currentName={topic.name} onMove={moveTopic} />

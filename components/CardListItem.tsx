@@ -25,10 +25,10 @@ export function CardListItem({
   generating?: boolean
   actions?: ReactNode
 }) {
-  // Badges shared by both layouts below: unread on their own line only when
-  // `actions` turns this into the two-line phone layout (spec
-  // 2026-09-19-topic-items §5.2's row pattern); otherwise they sit beside
-  // the title exactly as they always have.
+  // Badges shared by both layouts below. Without `actions` (the /fiszki list)
+  // they sit at the right end of the single line, as they always have; with
+  // `actions` (the topic page) they follow the title inline, and the actions
+  // take the second line.
   const badges = (
     <>
       {topicName && <span className="text-neutral-400">{topicName}</span>}

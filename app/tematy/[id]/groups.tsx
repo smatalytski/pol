@@ -131,7 +131,7 @@ export function DiscardedTab({ topicId, entries, busy, act }: Common & { entries
 }
 
 // Two lines: the title (wrapping, full width) above its right-aligned
-// controls (spec 2026-09-19-topic-items layout fix §2). `relative` anchors a
+// controls. `relative` anchors a
 // row's MoveToTopic panel to that row rather than the whole page — only rows
 // that actually carry one need it.
 function Row({ children, relative }: { children: ReactNode; relative?: boolean }) {
