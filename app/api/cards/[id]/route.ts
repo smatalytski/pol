@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
 import { cards, topics } from '@/lib/db/schema'
-import { deleteCard, updateCard } from '@/lib/cards/service'
+import { deleteCard, moveCard, updateCard } from '@/lib/cards/service'
 import { hasActiveJob } from '@/lib/queue/jobs'
 
 const Patch = z.object({
@@ -14,6 +14,9 @@ const Patch = z.object({
   exampleRu: z.string().nullable().optional(),
   grammarNote: z.string().nullable().optional(),
   suspendedAt: z.number().int().nullable().optional(),
+  // `temat: …` on a card (spec 2026-09-19-topic-items §4.4): a move, handled
+  // by moveCard alone rather than merged into the field patch below.
+  topicId: z.string().min(1).optional(),
 })
 
 /**
@@ -46,6 +49,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params
   const patch = Patch.safeParse(await req.json())
   if (!patch.success) return NextResponse.json({ error: 'bad patch' }, { status: 400 })
+  if (patch.data.topicId !== undefined) {
+    const card = moveCard(db, id, patch.data.topicId, new Date())
+    return card ? NextResponse.json({ card }) : NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   return NextResponse.json({ card: updateCard(db, id, patch.data, new Date()) })
 }
 

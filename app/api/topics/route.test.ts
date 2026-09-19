@@ -130,6 +130,21 @@ describe('GET and PATCH /api/topics/:id', () => {
     const id = await created()
     expect((await topicRoute.PATCH(json({ name: ' ' }, 'PATCH'), params({ id }))).status).toBe(400)
   })
+
+  it('refuses renaming the default topic', async () => {
+    const res = await topicRoute.PATCH(json({ name: 'Nowa nazwa' }, 'PATCH'), params({ id: DEFAULT_TOPIC_ID }))
+    expect(res.status).toBe(400)
+  })
+
+  it('refuses giving the default topic a context', async () => {
+    const res = await topicRoute.PATCH(json({ context: 'nowy kontekst' }, 'PATCH'), params({ id: DEFAULT_TOPIC_ID }))
+    expect(res.status).toBe(400)
+  })
+
+  it('still allows switching the default topic off', async () => {
+    const res = await topicRoute.PATCH(json({ suspendedAt: 123 }, 'PATCH'), params({ id: DEFAULT_TOPIC_ID }))
+    expect(res.status).toBe(200)
+  })
 })
 
 describe('POST /api/topics/:id/retry', () => {

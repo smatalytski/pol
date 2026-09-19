@@ -10,6 +10,7 @@ process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
 afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const { GET, PATCH, DELETE } = await import('./route')
+const { POST: restore } = await import('./restore/route')
 const { db } = await import('@/lib/db/client')
 const { captures, cards, generationJobs, media, reviews, topics } = await import('@/lib/db/schema')
 const { eq } = await import('drizzle-orm')
@@ -56,6 +57,10 @@ function patch(id: string, body: unknown) {
 
 function del(id: string) {
   return DELETE(new Request(`http://test/api/cards/${id}`, { method: 'DELETE' }), { params: Promise.resolve({ id }) })
+}
+
+function restoreCard(id: string) {
+  return restore(new Request(`http://test/api/cards/${id}/restore`, { method: 'POST' }), { params: Promise.resolve({ id }) })
 }
 
 beforeEach(() => {
@@ -161,6 +166,47 @@ describe('PATCH /api/cards/:id', () => {
     seedCard({ id: 'c7' })
     await del('c7')
     await expect(patch('c7', { answerPl: 'x' })).rejects.toThrow(/no such card/)
+  })
+
+  it('moves a card to another topic via topicId', async () => {
+    db.insert(topics).values({ id: 't1', name: 'U lekarza', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    seedCard({ id: 'c10' })
+    const res = await patch('c10', { topicId: 't1' })
+    expect(res.status).toBe(200)
+    expect((await res.json()).card).toMatchObject({ topicId: 't1' })
+  })
+
+  it('is 404 when moving to an unknown topic', async () => {
+    seedCard({ id: 'c11' })
+    const res = await patch('c11', { topicId: 'nope' })
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('POST /api/cards/:id/restore', () => {
+  it('undeletes a card', async () => {
+    seedCard({ id: 'c12' })
+    await del('c12')
+    const res = await restoreCard('c12')
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.card).toMatchObject({ id: 'c12', deletedAt: null })
+  })
+
+  it('is 404 for an unknown or non-deleted card', async () => {
+    seedCard({ id: 'c13' })
+    expect((await restoreCard('c13')).status).toBe(404)
+    expect((await restoreCard('ghost')).status).toBe(404)
+  })
+
+  it('refuses with 409 when a live card now owns the same answer key and type', async () => {
+    seedCard({ id: 'c14', answerPl: 'złośliwy', answerKey: 'złośliwy' })
+    await del('c14')
+    db.insert(topics).values({ id: 't2', name: 'U mechanika', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    seedCard({ id: 'c15', answerPl: 'złośliwy', answerKey: 'złośliwy', topicId: 't2' })
+    const res = await restoreCard('c14')
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'już masz — w temacie U mechanika' })
   })
 })
 
