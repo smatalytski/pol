@@ -93,7 +93,7 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
 ### 4.1 Planning — `POST /api/listen/session`
 
 - **Body:** `{ minutes: 10|20|30|45, topicIds?: string[], excludeIds?: string[] }`.
-- **Returns:** `{ cards: { id, promptText, topicName, estimatedMs }[] }`.
+- **Returns:** `{ cards: { id, promptText, topicName, estimatedMs, audioKey }[] }`. `audioKey` is the card's current audio cache key (§3.3) at planning time — the client passes it back to §4.2's `?k=` so that route can tell whether its own answer is still current.
 - **Which cards:**
   - Eligible cards (§3.1), limited to `topicIds` when given; any switched-off topic in the list is ignored.
   - Minus `excludeIds`.
@@ -106,9 +106,11 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
   - Otherwise it is estimated as 60 ms per character of spoken text, plus the silences.
 - **Top-ups:** the client asks again with `excludeIds` (every card of the session so far) and `minutes` (what's left), and gets the next cards in the same order.
 
-### 4.2 Audio — `GET /api/listen/cards/:id/audio`
+### 4.2 Audio — `GET /api/listen/cards/:id/audio?k=<audioKey>`
 
-- **On success:** builds the file if needed (§3.3) and returns the MP3 (`audio/mpeg`) with `Cache-Control: private, max-age=31536000, immutable` and an `ETag` of the key.
+- **On success:** always builds (or reuses) and returns the card's CURRENT audio (§3.3), as `audio/mpeg`. The bytes change whenever the card is edited or a listening setting changes, so the URL alone is never a stable cache key — `?k=` states which key the caller expects (normally the `audioKey` from its §4.1 plan):
+  - `k` equals the key just built: the URL and that key genuinely name the same bytes right now, so the response is `Cache-Control: private, max-age=31536000, immutable` with `ETag: "<key>"`.
+  - `k` is missing or differs (the card or a setting changed since the plan was made): the current audio is still served, but `Cache-Control: no-store`, so a client holding a stale URL never caches the new bytes under it.
 - **Errors:**
   - 404 for a card that is unknown or not eligible;
   - 503 when ffmpeg is missing;
@@ -133,8 +135,8 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
 ### 5.2 Playing
 
 - **Playback:**
-  - One `<audio>` element plays the current card's file.
-  - The next card's file is prefetched (`fetch` into a blob URL) while the current one plays.
+  - One `<audio>` element plays the current card's file, fetched as `/api/listen/cards/:id/audio?k=<audioKey>` (the card's own `audioKey` from the plan — §4.2's cache headers turn on only when this matches).
+  - The next card's file is prefetched the same way (`fetch` into a blob URL) while the current one plays.
   - On `ended`: post `heard`, then play the next file. When fewer than three cards remain, top up (§4.1).
   - The session ends when the played time reaches the chosen minutes or the list runs out.
 - **Visible:** the Russian prompt and topic of the current card, `n / N`, minutes left, and the buttons `⏸`/`▶`, `⏭` (skip) and `Stop`.

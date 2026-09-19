@@ -9,12 +9,20 @@ import { getSettings } from '@/lib/settings'
 import { getSynthesizer } from '@/lib/tts'
 
 /**
- * A card's listening MP3 (spec 2026-09-19-hands-free-audio §4.2). Builds (or
- * reuses the cache for) the card+settings' audio and serves it as
- * `audio/mpeg`, content-addressed by its cache key so the response can be
- * cached forever.
+ * A card's listening MP3 (spec 2026-09-19-hands-free-audio §4.2). Always
+ * builds (or reuses the cache for) the card's CURRENT audio — the bytes
+ * change whenever the card is edited or a listening setting changes, so
+ * "current" is a moving target, not a fixed one this URL alone can promise.
+ * `?k=` is how the caller states which key it expects (normally the
+ * `audioKey` a `POST /api/listen/session` plan handed it): when it matches
+ * the key just built, this URL and that key really do name the same bytes
+ * right now, so the response is safe to cache forever
+ * (`private, max-age=31536000, immutable`, `ETag: "<key>"`). When `k` is
+ * missing or stale (the card or a setting changed since the plan was made),
+ * the current audio is still served, but as `Cache-Control: no-store` — so a
+ * client that kept the old URL around never caches the new bytes under it.
  */
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const card = eligibleCard(db, id)
   if (!card) return NextResponse.json({ error: 'not found' }, { status: 404 })
@@ -31,11 +39,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const clip = getMedia(db, built.mediaId)
   if (!clip) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
+  const requestedKey = new URL(req.url).searchParams.get('k')
+  const fresh = requestedKey === built.key
+
   return new Response(new Uint8Array(clip.bytes), {
-    headers: {
-      'content-type': 'audio/mpeg',
-      'cache-control': 'private, max-age=31536000, immutable',
-      etag: `"${built.key}"`,
-    },
+    headers: fresh
+      ? {
+          'content-type': 'audio/mpeg',
+          'cache-control': 'private, max-age=31536000, immutable',
+          etag: `"${built.key}"`,
+        }
+      : {
+          'content-type': 'audio/mpeg',
+          'cache-control': 'no-store',
+        },
   })
 }

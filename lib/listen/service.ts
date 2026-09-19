@@ -4,10 +4,25 @@ import { cards, listens, topics } from '../db/schema'
 import { REVIEWABLE, startOfLocalDay } from '../review/queue'
 import { getSettings } from '../settings'
 import { cachedAudio } from '../audio/card-audio'
-import { estimateMs, sequenceFor, settingsToSequence, type ListenCard } from '../audio/sequence'
+import { audioKey, estimateMs, sequenceFor, settingsToSequence, type ListenCard } from '../audio/sequence'
 import type { CardRow } from '../cards/service'
 
-export type PlannedCard = { id: string; promptText: string; topicName: string | null; estimatedMs: number }
+export type PlannedCard = {
+  id: string
+  promptText: string
+  topicName: string | null
+  estimatedMs: number
+  /**
+   * The card's CURRENT audio cache key (`audioKey(listenCardOf(card), ...)`,
+   * with today's sequence settings). Passed back to `GET
+   * /api/listen/cards/:id/audio?k=`: matching it against the audio the route
+   * builds right now is what tells the client whether that URL's bytes are
+   * still the card's current ones — safe to cache forever — or the card (or
+   * a setting) changed since planning, in which case the URL must not be
+   * cached at all (see that route's own comment).
+   */
+  audioKey: string
+}
 
 /** The `ListenCard` a row's fields feed into `sequenceFor`/`audioKey`. */
 export function listenCardOf(card: CardRow): ListenCard {
@@ -102,6 +117,7 @@ export function planSession(
       promptText: listenCard.promptText,
       topicName: card.topicId ? (topicNameById.get(card.topicId) ?? null) : null,
       estimatedMs,
+      audioKey: audioKey(listenCard, seqSettings),
     })
     sum += estimatedMs
     if (sum >= budgetMs) break

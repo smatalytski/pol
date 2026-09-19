@@ -164,6 +164,18 @@ describe('time budget', () => {
   })
 })
 
+describe('audioKey', () => {
+  it("is each planned card's current audio cache key", () => {
+    const { db } = createTestDb()
+    const id = mkCard(db, { answerPl: 'key-word' })
+    const card = db.select().from(cards).where(eq(cards.id, id)).get()!
+    const expectedKey = audioKey(listenCardOf(card), settingsToSequence(getSettings(db)))
+
+    const [planned] = planSession(db, { minutes: 45 }, NOW)
+    expect(planned.audioKey).toBe(expectedKey)
+  })
+})
+
 describe('markHeard', () => {
   it('inserts a listens row and leaves the review schedule untouched', () => {
     const { db } = createTestDb()

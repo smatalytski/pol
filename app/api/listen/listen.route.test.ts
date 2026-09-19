@@ -37,10 +37,18 @@ const { db } = await import('@/lib/db/client')
 const { cardAudio, cards, listens, media, topics, ttsClips } = await import('@/lib/db/schema')
 const { createCard } = await import('@/lib/cards/service')
 const { FfmpegMissingError } = await import('@/lib/audio/ffmpeg')
+const { audioKey, settingsToSequence } = await import('@/lib/audio/sequence')
+const { listenCardOf } = await import('@/lib/listen/service')
+const { getSettings } = await import('@/lib/settings')
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) })
 const json = (body: unknown) =>
   new Request('http://test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+function currentKey(id: string): string {
+  const card = db.select().from(cards).where(eq(cards.id, id)).get()!
+  return audioKey(listenCardOf(card), settingsToSequence(getSettings(db)))
+}
 
 function mkCard(over: Partial<CreateCardInput> = {}): string {
   const { cardId } = createCard(
@@ -82,12 +90,12 @@ beforeEach(() => {
 })
 
 describe('POST /api/listen/session', () => {
-  it('plans a session and returns its cards', async () => {
+  it('plans a session and returns its cards, each with its current audioKey', async () => {
     const id = mkCard()
     const res = await sessionRoute.POST(json({ minutes: 10 }))
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { cards: { id: string }[] }
-    expect(body.cards).toEqual([expect.objectContaining({ id })])
+    const body = (await res.json()) as { cards: { id: string; audioKey: string }[] }
+    expect(body.cards).toEqual([expect.objectContaining({ id, audioKey: currentKey(id) })])
   })
 
   it.each([
@@ -101,18 +109,39 @@ describe('POST /api/listen/session', () => {
 })
 
 describe('GET /api/listen/cards/:id/audio', () => {
-  it('builds and returns the mp3 with cache headers and an ETag of the key', async () => {
+  it('builds and returns the mp3', async () => {
     const id = mkCard()
     const res = await audioRoute.GET(new Request('http://test'), params(id))
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('audio/mpeg')
-    expect(res.headers.get('cache-control')).toBe('private, max-age=31536000, immutable')
-    const etag = res.headers.get('etag')
-    expect(etag).toMatch(/^".+"$/)
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
+  })
+
+  it('is immutable, with an ETag of the key, when ?k= matches the card’s current audio key', async () => {
+    const id = mkCard()
+    const key = currentKey(id)
+    const res = await audioRoute.GET(new Request(`http://test?k=${key}`), params(id))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('private, max-age=31536000, immutable')
+    expect(res.headers.get('etag')).toBe(`"${key}"`)
 
     const row = db.select().from(cardAudio).get()!
-    expect(etag).toBe(`"${row.key}"`)
+    expect(key).toBe(row.key)
+  })
+
+  it('is no-store when ?k= is missing', async () => {
+    const id = mkCard()
+    const res = await audioRoute.GET(new Request('http://test'), params(id))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('is no-store, but still serves the current audio, when ?k= is stale (the card or a setting changed since planning)', async () => {
+    const id = mkCard()
+    const res = await audioRoute.GET(new Request('http://test?k=stale-key-from-an-earlier-plan'), params(id))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]))
   })
 
   it('is 404 for an unknown card', async () => {
