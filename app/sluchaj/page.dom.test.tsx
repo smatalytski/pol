@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { t } from '@/i18n/pl'
@@ -45,7 +45,7 @@ function stubFetch(topics: unknown[], settings: Record<string, unknown>) {
   )
 }
 
-const card = (over: Partial<{ id: string; promptText: string; topicName: string; estimatedMs: number; audioKey: string }> = {}) => ({
+const card = (over: Partial<{ id: string; promptText: string; topicName: string | null; estimatedMs: number; audioKey: string }> = {}) => ({
   id: 'c1',
   promptText: 'привет',
   topicName: 'U lekarza',
@@ -91,7 +91,13 @@ describe('ListenPage — idle', () => {
       { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 },
     )
     render(<ListenPage />)
-    expect(screen.getByRole('button', { name: '45' }).getAttribute('aria-pressed')).toBe('true')
+    // The page is statically prerendered, so the first render always shows
+    // the default (20) — the stored choice (45) is applied in an effect
+    // after mount, not read in a lazy initializer, or hydration would see
+    // the server's 20 and the client's 45 disagree.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '45' }).getAttribute('aria-pressed')).toBe('true')
+    })
     // Only the switched-on topic is offered — the suspended one is not.
     const chip = await screen.findByRole('button', { name: 'U lekarza' })
     expect(screen.queryByRole('button', { name: 'Zawieszony' })).toBeNull()
@@ -149,6 +155,22 @@ describe('ListenPage — playing / paused', () => {
     render(<ListenPage />)
     fireEvent.click(screen.getByRole('button', { name: t.listenResume }))
     expect(resume).toHaveBeenCalled()
+  })
+
+  it('shows the minutes left, computed from the chosen length and playedMs', () => {
+    // No stored length, so the session was started at the 20-minute default;
+    // 5 played minutes should leave 15.
+    mockState = { phase: 'playing', index: 0, cards: [card()], playedMs: 5 * 60_000, heard: 0 }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    expect(screen.getByText(`${t.listenMinutesLeft} 15`)).toBeTruthy()
+  })
+
+  it('falls back to the unnamed-topic label when the card has no topic name', () => {
+    mockState = { phase: 'playing', index: 0, cards: [card({ topicName: null })], playedMs: 0, heard: 0 }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    expect(screen.getByText(t.unnamedTopic)).toBeTruthy()
   })
 })
 

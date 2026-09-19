@@ -43,7 +43,12 @@ function summaryLine(s: ListenSettings): string {
 export default function ListenPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const player = useListenPlayer({ audio: () => audioRef.current! })
-  const [minutes, setMinutes] = useState<number>(() => storedMinutes())
+  // Starts at the default and picks up the stored choice after mount, in an
+  // effect rather than a lazy initializer: /sluchaj is statically
+  // prerendered, so a lazy initializer reading localStorage would make the
+  // server-rendered markup (always the default) disagree with the first
+  // client render (whatever's stored) — a hydration mismatch.
+  const [minutes, setMinutes] = useState<number>(20)
   const [topics, setTopics] = useState<Topic[]>([])
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
   const [settings, setSettings] = useState<ListenSettings | null>(null)
@@ -52,6 +57,10 @@ export default function ListenPage() {
   // again locally, with the same length and topics still selected, until the
   // next `start()` puts the hook back in charge of the phase.
   const [backAtIdle, setBackAtIdle] = useState(false)
+
+  useEffect(() => {
+    setMinutes(storedMinutes())
+  }, [])
 
   useEffect(() => {
     void fetch('/api/topics')
@@ -145,7 +154,7 @@ export default function ListenPage() {
     content = (
       <div className="flex flex-col gap-4">
         <p className="text-2xl">{card.promptText}</p>
-        <p className="text-sm text-neutral-500">{card.topicName}</p>
+        <p className="text-sm text-neutral-500">{card.topicName ?? t.unnamedTopic}</p>
         <p className="text-sm text-neutral-500">{`${state.index + 1} / ${state.cards.length}`}</p>
         <p className="text-sm text-neutral-500">{`${t.listenMinutesLeft} ${minutesLeft}`}</p>
         <div className="flex gap-4">
