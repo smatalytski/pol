@@ -140,6 +140,22 @@ describe('buildCardAudio', () => {
     expect(cachedAudio(db, CARD, changed)).toEqual(second)
   })
 
+  it('deduplicates two concurrent builds of the same card+settings into one encode', async () => {
+    const { db } = createTestDb()
+    const synth = fakeSynth()
+    const encoder = fakeEncoder()
+
+    const [a, b] = await Promise.all([
+      buildCardAudio({ db, synth, encoder }, CARD, SETTINGS, NOW),
+      buildCardAudio({ db, synth, encoder }, CARD, SETTINGS, NOW),
+    ])
+
+    expect(a).toEqual(b)
+    expect(encoder.calls()).toBe(1)
+    expect(db.select().from(cardAudio).all()).toHaveLength(1)
+    expect(db.select().from(media).where(eq(media.kind, 'listen')).all()).toHaveLength(1)
+  })
+
   it('propagates FfmpegMissingError from the encoder and caches nothing', async () => {
     const { db } = createTestDb()
     const synth = fakeSynth()
