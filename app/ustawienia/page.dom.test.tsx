@@ -22,6 +22,8 @@ describe('SettingsPage', () => {
               audioGapSeconds: 5,
               audioRepeatAnswer: 1,
               audioExample: 0,
+              audioHint: 1,
+              audioRepeatExample: 0,
             }),
         }) as unknown as Promise<Response>,
       ),
@@ -32,6 +34,8 @@ describe('SettingsPage', () => {
     expect(screen.getByDisplayValue('5')).toBeTruthy()
     expect((screen.getByLabelText(t.listenRepeat) as HTMLInputElement).checked).toBe(true)
     expect((screen.getByLabelText(t.listenExample) as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByLabelText(t.listenHint) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText(t.listenRepeatExample) as HTMLInputElement).checked).toBe(false)
     expect(screen.getByText(t.listenSection)).toBeTruthy()
   })
 
@@ -121,6 +125,57 @@ describe('SettingsPage', () => {
       fireEvent.click(example)
     })
     expect(calls).toEqual([{ body: { audioRepeatAnswer: 0 } }, { body: { audioExample: 0 } }])
+  })
+
+  it('PUTs the hint and repeat-example checkboxes immediately as 0/1 on change', async () => {
+    const calls: Array<{ body: unknown }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') {
+          const body = JSON.parse(init.body as string)
+          calls.push({ body })
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                newPerDay: 10,
+                requestRetention: 0.9,
+                audioGapSeconds: 5,
+                audioRepeatAnswer: 1,
+                audioExample: 1,
+                audioHint: 'audioHint' in body ? body.audioHint : 0,
+                audioRepeatExample: 'audioRepeatExample' in body ? body.audioRepeatExample : 1,
+              }),
+          }) as unknown as Promise<Response>
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              newPerDay: 10,
+              requestRetention: 0.9,
+              audioGapSeconds: 5,
+              audioRepeatAnswer: 1,
+              audioExample: 1,
+              audioHint: 0,
+              audioRepeatExample: 1,
+            }),
+        }) as unknown as Promise<Response>
+      }),
+    )
+    render(<SettingsPage />)
+    const hint = (await screen.findByLabelText(t.listenHint)) as HTMLInputElement
+    const repeatExample = screen.getByLabelText(t.listenRepeatExample) as HTMLInputElement
+    expect(hint.checked).toBe(false)
+    expect(repeatExample.checked).toBe(true)
+    await act(async () => {
+      fireEvent.click(hint)
+    })
+    await act(async () => {
+      fireEvent.click(repeatExample)
+    })
+    expect(calls).toEqual([{ body: { audioHint: 1 } }, { body: { audioRepeatExample: 0 } }])
   })
 
   it('shows the error and reverts the listening controls when a save is rejected', async () => {

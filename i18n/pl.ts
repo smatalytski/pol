@@ -124,9 +124,13 @@ export const t = {
   listenGap: 'Przerwa na zastanowienie (s)',
   listenRepeat: 'Powtórz odpowiedź',
   listenExample: 'Czytaj przykład',
+  listenHint: 'Czytaj podpowiedź',
+  listenRepeatExample: 'Powtórz przykład',
   listenSummaryGap: 'przerwa',
   listenSummaryRepeat: 'odpowiedź ×2',
   listenSummaryExample: 'przykład',
+  listenSummaryHint: 'podpowiedź',
+  listenSummaryExampleTwice: 'przykład ×2',
 } as const
 
 export type Strings = typeof t

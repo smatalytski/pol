@@ -28,7 +28,15 @@ function put(body: unknown) {
 describe('GET /api/settings', () => {
   it('returns the defaults on an empty table', async () => {
     const body = await (await GET()).json()
-    expect(body).toEqual({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    expect(body).toEqual({
+      newPerDay: 10,
+      requestRetention: 0.9,
+      audioGapSeconds: 5,
+      audioRepeatAnswer: 1,
+      audioExample: 1,
+      audioHint: 0,
+      audioRepeatExample: 1,
+    })
   })
 })
 
@@ -68,6 +76,28 @@ describe('PUT /api/settings', () => {
 
   it('rejects audioExample of 2', async () => {
     const res = await put({ audioExample: 2 })
+    expect(res.status).toBe(400)
+  })
+
+  it('persists audioHint of 1', async () => {
+    const res = await put({ audioHint: 1 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioHint).toBe(1)
+  })
+
+  it('rejects audioHint of 2', async () => {
+    const res = await put({ audioHint: 2 })
+    expect(res.status).toBe(400)
+  })
+
+  it('persists audioRepeatExample of 0', async () => {
+    const res = await put({ audioRepeatExample: 0 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioRepeatExample).toBe(0)
+  })
+
+  it('rejects audioRepeatExample of 2', async () => {
+    const res = await put({ audioRepeatExample: 2 })
     expect(res.status).toBe(400)
   })
 })

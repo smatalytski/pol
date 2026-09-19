@@ -48,11 +48,12 @@ This is the review queue's `REVIEWABLE` rule plus the non-empty prompt, so a swi
 ### 3.2 The sequence
 
 ```
-RU: prompt_text [+ ". " + prompt_hint when present]
+RU: prompt_text [+ ". " + prompt_hint when audioHint and prompt_hint is non-blank]
 silence: audioGapSeconds            (setting, 1–30 s, default 5)
 PL: answer_pl
 [if audioRepeatAnswer]  silence 1 s, PL: answer_pl          (default on)
 [if audioExample and example_pl]  silence 1 s, PL: example_pl  (default on)
+  [if also audioRepeatExample]  silence 1 s, PL: example_pl     (default on)
 silence 2 s
 ```
 
@@ -68,7 +69,7 @@ silence 2 s
   - The production encoder runs ffmpeg once per card, writing the clips to a temp dir. It makes the silences with `anullsrc`, concatenates the parts, and encodes mono, 24 kHz, 64 kbps.
   - The temp dir is removed afterwards, whether the build succeeded or not.
 - **Cache:** the result is stored as a `media` row (kind `listen`), in a new table `card_audio (key PRIMARY KEY, media_id, duration_ms, created_at)`.
-  - `key` is a SHA-256 of the spoken texts, the voices, the three settings and an assembly version number.
+  - `key` is a SHA-256 of the spoken texts, the voices, the five settings and an assembly version number.
   - Editing a card or changing a setting produces a new key, and the next play builds a fresh file.
   - Old entries are never looked up again. Cleaning them up is out of scope.
 - **Duration** is read from ffmpeg's output and stored. It feeds the session planning.
@@ -84,6 +85,8 @@ silence 2 s
 
 - `audioGapSeconds` already exists (1–30). It is now the thinking pause.
 - New: `audioRepeatAnswer` and `audioExample`, stored as `1` / `0`, both defaulting to `1`.
+- New: `audioHint`, stored as `1` / `0`, defaulting to `0` — the Russian prompt is spoken alone unless turned on.
+- New: `audioRepeatExample`, stored as `1` / `0`, defaulting to `1` — has no effect when `audioExample` is off or the card has no example.
 - `PUT /api/settings` accepts them.
 
 Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. Settings need no schema change: they are key/value rows.
@@ -158,14 +161,16 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
 `/ustawienia` gains a **Słuchanie** section:
 - `Przerwa na zastanowienie` (seconds, the existing setting);
 - `Powtórz odpowiedź` (on/off);
-- `Czytaj przykład` (on/off).
+- `Czytaj przykład` (on/off);
+- `Czytaj podpowiedź` (on/off, default off);
+- `Powtórz przykład` (on/off, default on).
 
 ## 6. Verification
 
 Test-first. TTS and ffmpeg are faked in unit tests.
 
 - **Assembly:**
-  - The part order for every combination of the three settings.
+  - The part order for every combination of the five settings.
   - A card with no example.
   - A card with a hint.
   - The key changes with each setting and each spoken text, and stays stable otherwise.

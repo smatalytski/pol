@@ -5,7 +5,15 @@ import { getSettings, setSetting } from './settings'
 describe('settings', () => {
   it('returns defaults on an empty table', () => {
     const { db } = createTestDb()
-    expect(getSettings(db)).toEqual({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    expect(getSettings(db)).toEqual({
+      newPerDay: 10,
+      requestRetention: 0.9,
+      audioGapSeconds: 5,
+      audioRepeatAnswer: 1,
+      audioExample: 1,
+      audioHint: 0,
+      audioRepeatExample: 1,
+    })
   })
 
   it('reads back an override, coerced to a number', () => {
@@ -77,5 +85,29 @@ describe('settings', () => {
     const { db } = createTestDb()
     setSetting(db, 'audioExample', '2')
     expect(getSettings(db).audioExample).toBe(1)
+  })
+
+  it('reads back a stored audioHint of 1 as 1', () => {
+    const { db } = createTestDb()
+    setSetting(db, 'audioHint', '1')
+    expect(getSettings(db).audioHint).toBe(1)
+  })
+
+  it('falls back to the default (0) when audioHint is 2', () => {
+    const { db } = createTestDb()
+    setSetting(db, 'audioHint', '2')
+    expect(getSettings(db).audioHint).toBe(0)
+  })
+
+  it('reads back a stored audioRepeatExample of 0 as 0', () => {
+    const { db } = createTestDb()
+    setSetting(db, 'audioRepeatExample', '0')
+    expect(getSettings(db).audioRepeatExample).toBe(0)
+  })
+
+  it('falls back to the default (1) when audioRepeatExample is 2', () => {
+    const { db } = createTestDb()
+    setSetting(db, 'audioRepeatExample', '2')
+    expect(getSettings(db).audioRepeatExample).toBe(1)
   })
 })

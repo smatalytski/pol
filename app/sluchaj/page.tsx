@@ -9,7 +9,13 @@ const LENGTHS = [10, 20, 30, 45] as const
 const STORAGE_KEY = 'fiszki:listen:minutes'
 
 type Topic = { id: string; name: string | null; suspendedAt: number | null }
-type ListenSettings = { audioGapSeconds: number; audioRepeatAnswer: number; audioExample: number }
+type ListenSettings = {
+  audioGapSeconds: number
+  audioRepeatAnswer: number
+  audioExample: number
+  audioHint: number
+  audioRepeatExample: number
+}
 
 /** The last chosen length, if the browser kept it and it's still one of the offered values. */
 function storedMinutes(): number {
@@ -33,8 +39,9 @@ function rememberMinutes(n: number) {
 function summaryLine(s: ListenSettings): string {
   return [
     s.audioGapSeconds > 0 ? `${t.listenSummaryGap} ${s.audioGapSeconds} s` : null,
+    s.audioHint === 1 ? t.listenSummaryHint : null,
     s.audioRepeatAnswer === 1 ? t.listenSummaryRepeat : null,
-    s.audioExample === 1 ? t.listenSummaryExample : null,
+    s.audioExample === 1 ? (s.audioRepeatExample === 1 ? t.listenSummaryExampleTwice : t.listenSummaryExample) : null,
   ]
     .filter((x): x is string => x !== null)
     .join(' · ')

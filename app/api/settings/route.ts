@@ -13,6 +13,8 @@ const Body = z.object({
   audioGapSeconds: z.number().int().min(1).max(30).optional(),
   audioRepeatAnswer: z.union([z.literal(0), z.literal(1)]).optional(),
   audioExample: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioHint: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioRepeatExample: z.union([z.literal(0), z.literal(1)]).optional(),
 })
 
 export async function PUT(req: Request) {

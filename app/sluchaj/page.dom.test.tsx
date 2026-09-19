@@ -120,16 +120,34 @@ describe('ListenPage — idle', () => {
   })
 
   it('shows a summary line built from settings, linking to /ustawienia', async () => {
-    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1, audioHint: 0, audioRepeatExample: 0 })
     render(<ListenPage />)
     const link = await screen.findByText('przerwa 5 s · odpowiedź ×2 · przykład')
     expect(link.closest('a')?.getAttribute('href')).toBe('/ustawienia')
   })
 
   it('omits disabled parts from the summary line', async () => {
-    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 0 })
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 0, audioHint: 0, audioRepeatExample: 0 })
     render(<ListenPage />)
     expect(await screen.findByText('przerwa 5 s')).toBeTruthy()
+  })
+
+  it('adds "podpowiedź" to the summary line when audioHint is on', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 0, audioHint: 1, audioRepeatExample: 0 })
+    render(<ListenPage />)
+    expect(await screen.findByText('przerwa 5 s · podpowiedź')).toBeTruthy()
+  })
+
+  it('shows "przykład ×2" instead of "przykład" when audioExample and audioRepeatExample are both on', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 1, audioHint: 0, audioRepeatExample: 1 })
+    render(<ListenPage />)
+    expect(await screen.findByText('przerwa 5 s · przykład ×2')).toBeTruthy()
+  })
+
+  it('shows plain "przykład" when audioExample is on but audioRepeatExample is off', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 1, audioHint: 0, audioRepeatExample: 0 })
+    render(<ListenPage />)
+    expect(await screen.findByText('przerwa 5 s · przykład')).toBeTruthy()
   })
 })
 

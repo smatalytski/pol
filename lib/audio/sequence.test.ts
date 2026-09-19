@@ -10,7 +10,8 @@ describe('sequence', () => {
     const sourceCode = readFileSync(resolve(__dirname, './sequence.ts'), 'utf-8')
     expect(sourceCode).not.toContain(`from '../tts'`)
   })
-  const defaultSettings: SequenceSettings = { gapSeconds: 5, repeatAnswer: true, example: true }
+  // All features on: hint spoken, answer repeated, example spoken and repeated.
+  const defaultSettings: SequenceSettings = { gapSeconds: 5, repeatAnswer: true, example: true, hint: true, repeatExample: true }
 
   const cardWithHintAndExample: ListenCard = {
     promptText: 'кот',
@@ -19,7 +20,7 @@ describe('sequence', () => {
     examplePl: 'Mam kota.',
   }
 
-  it('produces the full sequence with default settings and hint/example', () => {
+  it('produces the full sequence with every setting on', () => {
     const parts = sequenceFor(cardWithHintAndExample, defaultSettings)
     expect(parts).toEqual([
       { kind: 'speech', lang: 'ru', text: 'кот. животное' },
@@ -29,12 +30,14 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'kot' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
+      { kind: 'silence', ms: 1000 },
+      { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
       { kind: 'silence', ms: 2000 },
     ])
   })
 
   it('drops the second answer when repeatAnswer is false', () => {
-    const settings = { gapSeconds: 5, repeatAnswer: false, example: true }
+    const settings = { ...defaultSettings, repeatAnswer: false }
     const parts = sequenceFor(cardWithHintAndExample, settings)
     expect(parts).toEqual([
       { kind: 'speech', lang: 'ru', text: 'кот. животное' },
@@ -42,12 +45,14 @@ describe('sequence', () => {
       { kind: 'speech', lang: 'pl', text: 'kot' },
       { kind: 'silence', ms: 1000 },
       { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
+      { kind: 'silence', ms: 1000 },
+      { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
       { kind: 'silence', ms: 2000 },
     ])
   })
 
-  it('drops the example when example is false', () => {
-    const settings = { gapSeconds: 5, repeatAnswer: true, example: false }
+  it('drops the example (and its repeat) when example is false', () => {
+    const settings = { ...defaultSettings, example: false }
     const parts = sequenceFor(cardWithHintAndExample, settings)
     expect(parts).toEqual([
       { kind: 'speech', lang: 'ru', text: 'кот. животное' },
@@ -85,20 +90,59 @@ describe('sequence', () => {
     ])
   })
 
-  it('gives the prompt alone when hint is null', () => {
+  it('reads the example only once when repeatExample is false', () => {
+    const settings = { ...defaultSettings, repeatExample: false }
+    const parts = sequenceFor(cardWithHintAndExample, settings)
+    expect(parts).toEqual([
+      { kind: 'speech', lang: 'ru', text: 'кот. животное' },
+      { kind: 'silence', ms: 5000 },
+      { kind: 'speech', lang: 'pl', text: 'kot' },
+      { kind: 'silence', ms: 1000 },
+      { kind: 'speech', lang: 'pl', text: 'kot' },
+      { kind: 'silence', ms: 1000 },
+      { kind: 'speech', lang: 'pl', text: 'Mam kota.' },
+      { kind: 'silence', ms: 2000 },
+    ])
+  })
+
+  it('repeatExample has no effect when example is false (no example spoken at all)', () => {
+    const withRepeat = sequenceFor(cardWithHintAndExample, { ...defaultSettings, example: false, repeatExample: true })
+    const withoutRepeat = sequenceFor(cardWithHintAndExample, { ...defaultSettings, example: false, repeatExample: false })
+    expect(withRepeat).toEqual(withoutRepeat)
+  })
+
+  it('repeatExample has no effect when the card has no example', () => {
+    const card: ListenCard = { ...cardWithHintAndExample, examplePl: null }
+    const withRepeat = sequenceFor(card, { ...defaultSettings, repeatExample: true })
+    const withoutRepeat = sequenceFor(card, { ...defaultSettings, repeatExample: false })
+    expect(withRepeat).toEqual(withoutRepeat)
+  })
+
+  it('gives the prompt alone when hint is on but promptHint is null', () => {
     const card: ListenCard = { ...cardWithHintAndExample, promptHint: null }
     const parts = sequenceFor(card, defaultSettings)
     expect(parts[0]).toEqual({ kind: 'speech', lang: 'ru', text: 'кот' })
   })
 
-  it('gives the prompt alone when hint is blank', () => {
+  it('gives the prompt alone when hint is on but promptHint is blank', () => {
     const card: ListenCard = { ...cardWithHintAndExample, promptHint: '   ' }
     const parts = sequenceFor(card, defaultSettings)
     expect(parts[0]).toEqual({ kind: 'speech', lang: 'ru', text: 'кот' })
   })
 
+  it('gives the prompt alone when hint is off (the default), even though the card has a hint', () => {
+    const settings = { ...defaultSettings, hint: false }
+    const parts = sequenceFor(cardWithHintAndExample, settings)
+    expect(parts[0]).toEqual({ kind: 'speech', lang: 'ru', text: 'кот' })
+  })
+
+  it('speaks the hint when hint is on and the hint is non-blank', () => {
+    const parts = sequenceFor(cardWithHintAndExample, defaultSettings)
+    expect(parts[0]).toEqual({ kind: 'speech', lang: 'ru', text: 'кот. животное' })
+  })
+
   it('respects gapSeconds in the silence duration', () => {
-    const settings = { gapSeconds: 12, repeatAnswer: true, example: true }
+    const settings = { ...defaultSettings, gapSeconds: 12 }
     const parts = sequenceFor(cardWithHintAndExample, settings)
     expect(parts[1]).toEqual({ kind: 'silence', ms: 12000 })
   })
@@ -139,21 +183,35 @@ describe('sequence', () => {
 
   it('audioKey changes when gapSeconds changes', () => {
     const key1 = audioKey(cardWithHintAndExample, defaultSettings)
-    const settings2 = { gapSeconds: 10, repeatAnswer: true, example: true }
+    const settings2 = { ...defaultSettings, gapSeconds: 10 }
     const key2 = audioKey(cardWithHintAndExample, settings2)
     expect(key1).not.toBe(key2)
   })
 
   it('audioKey changes when repeatAnswer changes', () => {
     const key1 = audioKey(cardWithHintAndExample, defaultSettings)
-    const settings2 = { gapSeconds: 5, repeatAnswer: false, example: true }
+    const settings2 = { ...defaultSettings, repeatAnswer: false }
     const key2 = audioKey(cardWithHintAndExample, settings2)
     expect(key1).not.toBe(key2)
   })
 
   it('audioKey changes when example changes', () => {
     const key1 = audioKey(cardWithHintAndExample, defaultSettings)
-    const settings2 = { gapSeconds: 5, repeatAnswer: true, example: false }
+    const settings2 = { ...defaultSettings, example: false }
+    const key2 = audioKey(cardWithHintAndExample, settings2)
+    expect(key1).not.toBe(key2)
+  })
+
+  it('audioKey changes when hint changes', () => {
+    const key1 = audioKey(cardWithHintAndExample, defaultSettings)
+    const settings2 = { ...defaultSettings, hint: false }
+    const key2 = audioKey(cardWithHintAndExample, settings2)
+    expect(key1).not.toBe(key2)
+  })
+
+  it('audioKey changes when repeatExample changes', () => {
+    const key1 = audioKey(cardWithHintAndExample, defaultSettings)
+    const settings2 = { ...defaultSettings, repeatExample: false }
     const key2 = audioKey(cardWithHintAndExample, settings2)
     expect(key1).not.toBe(key2)
   })
@@ -180,9 +238,9 @@ describe('sequence', () => {
   it('estimateMs calculates correctly for the full sequence', () => {
     const parts = sequenceFor(cardWithHintAndExample, defaultSettings)
     const estimated = estimateMs(parts)
-    // (13 + 3 + 3 + 9) * 60 + 5000 + 1000 + 1000 + 2000
-    // 28 * 60 + 9000 = 1680 + 9000 = 10680
-    const expected = (13 + 3 + 3 + 9) * 60 + 5000 + 1000 + 1000 + 2000
+    // (13 + 3 + 3 + 9 + 9) * 60 + 5000 + 1000 + 1000 + 1000 + 2000
+    // 37 * 60 + 10000 = 2220 + 10000 = 12220
+    const expected = (13 + 3 + 3 + 9 + 9) * 60 + 5000 + 1000 + 1000 + 1000 + 2000
     expect(estimated).toBe(expected)
   })
 
@@ -196,17 +254,17 @@ describe('sequence', () => {
   })
 
   it('settingsToSequence converts 0/1 to boolean', () => {
-    const settings = settingsToSequence({ audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
-    expect(settings).toEqual({ gapSeconds: 5, repeatAnswer: true, example: true })
+    const settings = settingsToSequence({ audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1, audioHint: 1, audioRepeatExample: 1 })
+    expect(settings).toEqual({ gapSeconds: 5, repeatAnswer: true, example: true, hint: true, repeatExample: true })
   })
 
   it('settingsToSequence converts 0 to false', () => {
-    const settings = settingsToSequence({ audioGapSeconds: 10, audioRepeatAnswer: 0, audioExample: 0 })
-    expect(settings).toEqual({ gapSeconds: 10, repeatAnswer: false, example: false })
+    const settings = settingsToSequence({ audioGapSeconds: 10, audioRepeatAnswer: 0, audioExample: 0, audioHint: 0, audioRepeatExample: 0 })
+    expect(settings).toEqual({ gapSeconds: 10, repeatAnswer: false, example: false, hint: false, repeatExample: false })
   })
 
   it('settingsToSequence handles mixed 0/1', () => {
-    const settings = settingsToSequence({ audioGapSeconds: 3, audioRepeatAnswer: 1, audioExample: 0 })
-    expect(settings).toEqual({ gapSeconds: 3, repeatAnswer: true, example: false })
+    const settings = settingsToSequence({ audioGapSeconds: 3, audioRepeatAnswer: 1, audioExample: 0, audioHint: 0, audioRepeatExample: 1 })
+    expect(settings).toEqual({ gapSeconds: 3, repeatAnswer: true, example: false, hint: false, repeatExample: true })
   })
 })

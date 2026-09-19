@@ -3,7 +3,7 @@ import { VOICES } from '../tts/voices'
 
 export const ASSEMBLY_VERSION = 1
 
-export type SequenceSettings = { gapSeconds: number; repeatAnswer: boolean; example: boolean }
+export type SequenceSettings = { gapSeconds: number; repeatAnswer: boolean; example: boolean; hint: boolean; repeatExample: boolean }
 
 export type SpokenPart =
   | { kind: 'speech'; lang: 'pl' | 'ru'; text: string }
@@ -20,19 +20,20 @@ export type ListenCard = {
  * Builds the sequence of spoken parts and silences for a card.
  *
  * Sequence:
- * 1. RU prompt_text (+ ". " + prompt_hint when present)
+ * 1. RU prompt_text (+ ". " + prompt_hint when hint is on and the hint is non-blank)
  * 2. silence: gapSeconds
  * 3. PL answer_pl
  * 4. if repeatAnswer: 1000 ms silence + PL answer_pl
  * 5. if example and example_pl: 1000 ms silence + PL example_pl
+ *    if also repeatExample: 1000 ms silence + PL example_pl again
  * 6. 2000 ms trailing silence
  */
 export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[] {
   const parts: SpokenPart[] = []
 
-  // 1. RU prompt (+ hint if present)
+  // 1. RU prompt (+ hint, only when the setting is on and the hint is non-blank)
   const promptText = card.promptText.trim()
-  const hintText = card.promptHint?.trim()
+  const hintText = s.hint ? card.promptHint?.trim() : undefined
   const ruText = hintText ? `${promptText}. ${hintText}` : promptText
   parts.push({ kind: 'speech', lang: 'ru', text: ruText })
 
@@ -49,11 +50,15 @@ export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[]
     parts.push({ kind: 'speech', lang: 'pl', text: answerText })
   }
 
-  // 5. Example if enabled and present
+  // 5. Example if enabled and present, optionally repeated
   const exampleText = card.examplePl?.trim()
   if (s.example && exampleText) {
     parts.push({ kind: 'silence', ms: 1000 })
     parts.push({ kind: 'speech', lang: 'pl', text: exampleText })
+    if (s.repeatExample) {
+      parts.push({ kind: 'silence', ms: 1000 })
+      parts.push({ kind: 'speech', lang: 'pl', text: exampleText })
+    }
   }
 
   // 6. Trailing silence
@@ -97,10 +102,14 @@ export function settingsToSequence(settings: {
   audioGapSeconds: number
   audioRepeatAnswer: number
   audioExample: number
+  audioHint: number
+  audioRepeatExample: number
 }): SequenceSettings {
   return {
     gapSeconds: settings.audioGapSeconds,
     repeatAnswer: settings.audioRepeatAnswer !== 0,
     example: settings.audioExample !== 0,
+    hint: settings.audioHint !== 0,
+    repeatExample: settings.audioRepeatExample !== 0,
   }
 }

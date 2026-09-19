@@ -8,6 +8,8 @@ type Settings = {
   audioGapSeconds: number
   audioRepeatAnswer: number
   audioExample: number
+  audioHint: number
+  audioRepeatExample: number
 }
 
 export default function SettingsPage() {
@@ -26,6 +28,8 @@ export default function SettingsPage() {
   const [gapDraft, setGapDraft] = useState('')
   const [repeatDraft, setRepeatDraft] = useState(false)
   const [exampleDraft, setExampleDraft] = useState(false)
+  const [hintDraft, setHintDraft] = useState(false)
+  const [repeatExampleDraft, setRepeatExampleDraft] = useState(false)
   const [error, setError] = useState(false)
 
   useEffect(() => {
@@ -38,6 +42,8 @@ export default function SettingsPage() {
         setGapDraft(String(s.audioGapSeconds))
         setRepeatDraft(s.audioRepeatAnswer === 1)
         setExampleDraft(s.audioExample === 1)
+        setHintDraft(s.audioHint === 1)
+        setRepeatExampleDraft(s.audioRepeatExample === 1)
       })
   }, [])
 
@@ -65,6 +71,8 @@ export default function SettingsPage() {
         if ('audioGapSeconds' in patch) setGapDraft(String(settings.audioGapSeconds))
         if ('audioRepeatAnswer' in patch) setRepeatDraft(settings.audioRepeatAnswer === 1)
         if ('audioExample' in patch) setExampleDraft(settings.audioExample === 1)
+        if ('audioHint' in patch) setHintDraft(settings.audioHint === 1)
+        if ('audioRepeatExample' in patch) setRepeatExampleDraft(settings.audioRepeatExample === 1)
       }
       return
     }
@@ -76,6 +84,8 @@ export default function SettingsPage() {
     if ('audioGapSeconds' in patch) setGapDraft(String(s.audioGapSeconds))
     if ('audioRepeatAnswer' in patch) setRepeatDraft(s.audioRepeatAnswer === 1)
     if ('audioExample' in patch) setExampleDraft(s.audioExample === 1)
+    if ('audioHint' in patch) setHintDraft(s.audioHint === 1)
+    if ('audioRepeatExample' in patch) setRepeatExampleDraft(s.audioRepeatExample === 1)
   }
 
   if (!settings) return null
@@ -144,6 +154,28 @@ export default function SettingsPage() {
             }}
           />
           {t.listenExample}
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={hintDraft}
+            onChange={(e) => {
+              setHintDraft(e.target.checked)
+              void save({ audioHint: e.target.checked ? 1 : 0 })
+            }}
+          />
+          {t.listenHint}
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={repeatExampleDraft}
+            onChange={(e) => {
+              setRepeatExampleDraft(e.target.checked)
+              void save({ audioRepeatExample: e.target.checked ? 1 : 0 })
+            }}
+          />
+          {t.listenRepeatExample}
         </label>
       </div>
     </div>
