@@ -587,11 +587,14 @@ describe('restoreCard', () => {
 })
 
 describe('moveCard', () => {
-  it('moves a card to another topic, refusing an unknown one', () => {
+  it('moves a card to another topic with an injected clock, refusing an unknown one', () => {
     const { db } = createTestDb()
     db.insert(topics).values({ id: 't2', name: 'B', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
     const { cardId } = createCard(db, input(), NOW)
-    expect(moveCard(db, cardId, 't2')!.topicId).toBe('t2')
-    expect(moveCard(db, cardId, 'nope')).toBeNull()
+    const LATER = new Date(NOW.getTime() + 1000)
+    const moved = moveCard(db, cardId, 't2', LATER)!
+    expect(moved.topicId).toBe('t2')
+    expect(moved.updatedAt).toBe(LATER.getTime())
+    expect(moveCard(db, cardId, 'nope', LATER)).toBeNull()
   })
 })

@@ -478,4 +478,10 @@ describe('moving (§4.4)', () => {
     expect(db.select().from(topicItems).get()).toMatchObject({ topicId: 't2', status: 'discarded' })
     expect(moveItem(db, id, 'nope')).toBe(false)
   })
+
+  it('is false for an unknown item, even into a real topic', () => {
+    const { db } = createTestDb()
+    topic(db, 't2')
+    expect(moveItem(db, 'ghost', 't2')).toBe(false)
+  })
 })

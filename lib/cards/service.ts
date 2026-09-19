@@ -431,17 +431,12 @@ export function restoreCard(
  * `temat: …` on a card (spec 2026-09-19-topic-items §4.4): sets its topic
  * without touching its group. Null for an unknown or soft-deleted card, or an
  * unknown topic — the caller (the API route) turns that into a 404.
- *
- * No `now` parameter (unlike this file's other writes): the task interface
- * this implements takes only `(db, id, topicId)`. `updated_at` is bookkeeping
- * here, not a value any test or spec rule depends on, so the wall clock is
- * used directly rather than widening the signature.
  */
-export function moveCard(db: Db, id: string, topicId: string): CardRow | null {
+export function moveCard(db: Db, id: string, topicId: string, now: Date): CardRow | null {
   const card = db.select({ id: cards.id }).from(cards).where(and(eq(cards.id, id), isNull(cards.deletedAt))).get()
   if (!card) return null
   const topic = db.select({ id: topics.id }).from(topics).where(eq(topics.id, topicId)).get()
   if (!topic) return null
-  db.update(cards).set({ topicId, updatedAt: Date.now() }).where(eq(cards.id, id)).run()
+  db.update(cards).set({ topicId, updatedAt: now.getTime() }).where(eq(cards.id, id)).run()
   return db.select().from(cards).where(eq(cards.id, id)).get()!
 }
