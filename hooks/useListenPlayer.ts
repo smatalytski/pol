@@ -43,6 +43,8 @@ type Session = {
   paused: boolean
   /** Bumped on every card change, so a slower, older load knows it lost. */
   loadSeq: number
+  /** The `loadSeq` whose card last started playing — equal to `loadSeq` once the current card is under way. */
+  playingSeq: number
   /** Audio fetches by card id — the current card's and the prefetched next one's. */
   loads: Map<string, Promise<Loaded>>
   /** Blob URLs this session created and has not revoked yet, by card id. */
@@ -235,7 +237,10 @@ function createPlayer(env: {
       if (e instanceof DOMException && e.name === 'AbortError') return
       return failed(s, i, messageOf(e))
     }
-    if (alive(s) && seq === s.loadSeq) s.failures = 0
+    if (alive(s) && seq === s.loadSeq) {
+      s.failures = 0
+      s.playingSeq = seq
+    }
   }
 
   function failed(s: Session, i: number, error: string): Promise<void> | void {
@@ -286,6 +291,7 @@ function createPlayer(env: {
       failures: 0,
       paused: false,
       loadSeq: 0,
+      playingSeq: -1,
       loads: new Map(),
       urls: new Map(),
       topUp: null,
@@ -305,21 +311,51 @@ function createPlayer(env: {
 
   function resume() {
     const s = session
-    if (!s || !s.paused) return
+    const audio = env.audio()
+    // Decide on the element too: had a system pause slipped past onPause,
+    // `s.paused` would still say playing while the element is silent.
+    if (!s || (!s.paused && !audio.paused)) return
     s.paused = false
     sync(s)
     // Not loaded yet: the pending load plays it when it lands.
     if (!s.urls.has(s.cards[s.index].id)) return
     const seq = s.loadSeq
     const i = s.index
-    env
-      .audio()
+    audio
       .play()
+      .then(() => {
+        if (alive(s) && seq === s.loadSeq) s.playingSeq = seq
+      })
       .catch((e: unknown) => {
         if (!alive(s) || seq !== s.loadSeq) return
         if (e instanceof DOMException && e.name === 'AbortError') return
         void failed(s, i, messageOf(e))
       })
+  }
+
+  /**
+   * The element paused. Android Chrome does this on its own — audio focus lost
+   * to a call or another app, headphones unplugged — and the player must then
+   * read as paused, or the lock-screen/headset Play would do nothing. Ignored:
+   * the pause that precedes `ended` at the end of the stream, and any pause
+   * while a card change is under way (skip's own pause, a src swap).
+   */
+  function onPause() {
+    const s = session
+    if (!s || s.paused) return
+    if (env.audio().ended) return
+    if (s.playingSeq !== s.loadSeq) return
+    s.paused = true
+    sync(s)
+  }
+
+  /** The element started playing on its own (the system gave audio focus back). */
+  function onPlay() {
+    const s = session
+    if (!s || !s.paused) return
+    if (s.playingSeq !== s.loadSeq) return
+    s.paused = false
+    sync(s)
   }
 
   function skip() {
@@ -346,7 +382,7 @@ function createPlayer(env: {
     if (session) end(session)
   }
 
-  return { start, pause, resume, skip, replay, stop, onEnded, dispose }
+  return { start, pause, resume, skip, replay, stop, onEnded, onPause, onPlay, dispose }
 }
 
 export function useListenPlayer(opts: Options): ListenPlayer {
@@ -376,9 +412,15 @@ export function useListenPlayer(opts: Options): ListenPlayer {
   useEffect(() => {
     const audio = (audioRef.current ??= optsRef.current.audio())
     const onEnded = () => player.onEnded()
+    const onPause = () => player.onPause()
+    const onPlay = () => player.onPlay()
     audio.addEventListener('ended', onEnded)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('play', onPlay)
     return () => {
       audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('play', onPlay)
       player.dispose()
     }
   }, [player])

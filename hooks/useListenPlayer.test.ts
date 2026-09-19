@@ -5,14 +5,42 @@ import type { PlannedCard } from '@/lib/listen/service'
 import { useListenPlayer } from './useListenPlayer'
 
 class FakeAudio extends EventTarget {
-  src = ''
+  private _src = ''
   currentTime = 0
   duration = NaN
-  play = vi.fn(async () => {})
-  pause = vi.fn()
+  paused = true
+  ended = false
+  get src() {
+    return this._src
+  }
+  set src(v: string) {
+    this._src = v
+    this.ended = false
+  }
+  play = vi.fn(async () => {
+    this.paused = false
+    this.ended = false
+  })
+  pause = vi.fn(() => {
+    this.paused = true
+  })
+  /** End of stream, as a browser reports it: `pause` first, then `ended`. */
   end(durationSeconds = NaN) {
     this.duration = durationSeconds
+    this.paused = true
+    this.ended = true
+    this.dispatchEvent(new Event('pause'))
     this.dispatchEvent(new Event('ended'))
+  }
+  /** The system pauses the element on its own (audio focus lost, headphones unplugged). */
+  systemPause() {
+    this.paused = true
+    this.dispatchEvent(new Event('pause'))
+  }
+  /** The system resumes the element on its own. */
+  systemPlay() {
+    this.paused = false
+    this.dispatchEvent(new Event('play'))
   }
 }
 
@@ -64,16 +92,24 @@ const audioUrlOf = (c: PlannedCard) => `/api/listen/cards/${c.id}/audio?k=${enco
 
 function fakeMediaSession() {
   const handlers = new Map<string, MediaSessionActionHandler | null>()
+  const playbackStates: MediaSessionPlaybackState[] = []
+  let playbackState: MediaSessionPlaybackState = 'none'
   const ms = {
     metadata: null as MediaMetadata | null,
-    playbackState: 'none' as MediaSessionPlaybackState,
+    get playbackState() {
+      return playbackState
+    },
+    set playbackState(v: MediaSessionPlaybackState) {
+      playbackState = v
+      playbackStates.push(v)
+    },
     setActionHandler: vi.fn((action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
       handlers.set(action, handler)
     }),
     setPositionState: vi.fn(),
   }
   const fire = (action: MediaSessionAction) => handlers.get(action)?.({ action })
-  return { ms: ms as unknown as MediaSession, raw: ms, handlers, fire }
+  return { ms: ms as unknown as MediaSession, raw: ms, handlers, fire, playbackStates }
 }
 
 let blobN = 0
@@ -336,6 +372,96 @@ describe('useListenPlayer', () => {
       fire('stop')
     })
     expect(hook.result.current.state).toEqual({ phase: 'done', heard: 0 })
+  })
+
+  it('a pause the system makes is mirrored, and the Media Session play resumes it', async () => {
+    const cards = [0, 1, 2, 3, 4].map((i) => card(i))
+    const { ms, raw, fire } = fakeMediaSession()
+    const { audio, hook } = setup({ cards }, ms)
+    await act(async () => {
+      await hook.result.current.start({ minutes: 10 })
+    })
+    expect(raw.playbackState).toBe('playing')
+
+    await act(async () => {
+      audio.systemPause()
+    })
+    expect(hook.result.current.state.phase).toBe('paused')
+    expect(raw.playbackState).toBe('paused')
+
+    await act(async () => {
+      fire('play')
+    })
+    expect(audio.play).toHaveBeenCalledTimes(2)
+    expect(hook.result.current.state.phase).toBe('playing')
+    expect(raw.playbackState).toBe('playing')
+  })
+
+  it('resume plays when the element is paused even if no pause event arrived', async () => {
+    const cards = [0, 1, 2, 3, 4].map((i) => card(i))
+    const { ms, fire } = fakeMediaSession()
+    const { audio, hook } = setup({ cards }, ms)
+    await act(async () => {
+      await hook.result.current.start({ minutes: 10 })
+    })
+    audio.paused = true
+    await act(async () => {
+      fire('play')
+    })
+    expect(audio.play).toHaveBeenCalledTimes(2)
+    expect(hook.result.current.state.phase).toBe('playing')
+  })
+
+  it('a play the system makes is mirrored too', async () => {
+    const cards = [0, 1, 2, 3, 4].map((i) => card(i))
+    const { ms, raw } = fakeMediaSession()
+    const { audio, hook } = setup({ cards }, ms)
+    await act(async () => {
+      await hook.result.current.start({ minutes: 10 })
+    })
+    await act(async () => {
+      audio.systemPause()
+    })
+    await act(async () => {
+      audio.systemPlay()
+    })
+    expect(hook.result.current.state.phase).toBe('playing')
+    expect(raw.playbackState).toBe('playing')
+  })
+
+  it('the pause that comes with ended is not read as a user pause', async () => {
+    const cards = [0, 1, 2, 3, 4].map((i) => card(i))
+    const { ms, raw, playbackStates } = fakeMediaSession()
+    const { audio, heardIds, hook } = setup({ cards }, ms)
+    await act(async () => {
+      await hook.result.current.start({ minutes: 10 })
+    })
+    playbackStates.length = 0
+    await act(async () => {
+      audio.end(10)
+    })
+    await waitFor(() => expect(playing(hook.result.current.state).index).toBe(1))
+    expect(hook.result.current.state.phase).toBe('playing')
+    expect(raw.playbackState).toBe('playing')
+    expect(playbackStates).not.toContain('paused')
+    expect(heardIds()).toEqual(['c0'])
+    expect(audio.play).toHaveBeenCalledTimes(2)
+  })
+
+  it('the pause from a skip is not read as a user pause', async () => {
+    const cards = [0, 1, 2, 3, 4].map((i) => card(i))
+    const { audio, hook } = setup({ cards })
+    await act(async () => {
+      await hook.result.current.start({ minutes: 10 })
+    })
+    await act(async () => {
+      hook.result.current.skip()
+      // a browser reports the pause skip() makes as an event, later
+      audio.dispatchEvent(new Event('pause'))
+    })
+    await waitFor(() => expect(playing(hook.result.current.state).index).toBe(1))
+    expect(hook.result.current.state.phase).toBe('playing')
+    expect(audio.play).toHaveBeenCalledTimes(2)
   })
 
   it('clears the Media Session handlers on unmount', async () => {
