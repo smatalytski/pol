@@ -148,7 +148,7 @@ describe('TopicPage', () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)
     await screen.findByText('katar')
-    fireEvent.click(within(row('katar')).getByRole('button', { name: `${t.moveTo}: …` }))
+    fireEvent.click(within(row('katar')).getByRole('button', { name: t.moveTo }))
     fireEvent.click(await screen.findByRole('button', { name: 'W sklepie' }))
     await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/cards/k1', method: 'PATCH', body: { topicId: 't2' } }]))
   })
@@ -197,7 +197,7 @@ describe('TopicPage', () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)
     await screen.findByText('gorączka')
-    fireEvent.click(within(row('gorączka')).getByRole('button', { name: `${t.moveTo}: …` }))
+    fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.moveTo }))
     fireEvent.click(await screen.findByRole('button', { name: 'W sklepie' }))
     await waitFor(() =>
       expect(writes(calls)).toEqual([{ url: '/api/topics/t1/items/i1', method: 'PATCH', body: { topicId: 't2' } }]),
@@ -312,7 +312,7 @@ describe('TopicPage', () => {
     expect(screen.queryByRole('button', { name: t.mixWords })).toBeNull()
     expect((screen.getByDisplayValue('Ogólne') as HTMLInputElement).disabled).toBe(true)
     expect(screen.queryByText(t.topicContext)).toBeNull()
-    expect(screen.getByRole('button', { name: t.topicOn })).toBeTruthy()
+    expect(screen.getByRole('switch', { name: t.topicOn })).toBeTruthy()
   })
 
   it('says it is searching while a batch runs', async () => {
@@ -332,7 +332,9 @@ describe('TopicPage', () => {
   it('switches the topic off', async () => {
     const calls = stubFetch(() => view())
     render(<TopicPage />)
-    fireEvent.click(await screen.findByRole('button', { name: t.topicOn }))
+    const toggle = await screen.findByRole('switch', { name: t.topicOn })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(toggle)
     await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['PATCH /api/topics/t1']))
   })
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AddPage from './page'
 import { clearOutbox, enqueue } from '@/lib/capture/outbox'
@@ -117,6 +117,9 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
 
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -179,6 +182,9 @@ describe('AddPage mic-denied screen', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -201,6 +207,9 @@ describe('AddPage mic-denied screen', () => {
 describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets its own chip)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -375,6 +384,9 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
 describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -435,6 +447,9 @@ describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
 describe('AddPage layout', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -461,7 +476,7 @@ describe('AddPage layout', () => {
     )
   })
 
-  // DOM order was not enough. `sticky bottom-0` shipped first, and sticky only
+  // DOM order was not enough. `sticky` shipped first, and sticky only
   // pins an element once its container overflows the viewport — nothing in the
   // shell constrains height, so with a few chips the page is shorter than the
   // screen and the button rendered right under the chips, near the top, which
@@ -484,7 +499,8 @@ describe('AddPage layout', () => {
     render(<AddPage />)
     const bar = (await screen.findByRole('button', { name: t.recordPolish })).closest('div')!
     expect(bar.className).toContain('fixed')
-    expect(bar.className).toContain('bottom-0')
+    // Sits on top of the bottom tab bar rather than at the screen's edge.
+    expect(bar.className).toContain('above-tabbar')
     expect(bar.className).not.toContain('sticky')
   })
 
@@ -509,6 +525,9 @@ describe('AddPage layout', () => {
 describe('AddPage recording language (PL/RU buttons, no on-screen language controls)', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -583,6 +602,9 @@ describe('AddPage recording language (PL/RU buttons, no on-screen language contr
 describe('AddPage ponów', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -616,6 +638,9 @@ describe('AddPage ponów', () => {
 describe('AddPage review fade', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -635,6 +660,9 @@ describe('AddPage review fade', () => {
 describe('AddPage slow and failing chip controls', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    // Unmount before the fetch stub is removed, so the page's 1s poll stops
+    // before it would otherwise try to call the now-real (missing) fetch.
+    cleanup()
     vi.unstubAllGlobals()
   })
 
@@ -660,7 +688,7 @@ describe('AddPage slow and failing chip controls', () => {
     stubMic()
     stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
     render(<AddPage />)
-    const control = await screen.findByText(t.deleteItem)
+    const control = await screen.findByRole('button', { name: t.deleteItem })
     await act(async () => {
       fireEvent.click(control)
     })
@@ -671,7 +699,7 @@ describe('AddPage slow and failing chip controls', () => {
     stubMic()
     stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
     render(<AddPage />)
-    const control = await screen.findByText(t.deleteItem)
+    const control = await screen.findByRole('button', { name: t.deleteItem })
     await act(async () => {
       fireEvent.click(control)
     })

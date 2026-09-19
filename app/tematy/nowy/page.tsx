@@ -3,6 +3,9 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { mediaRecorderFactory, useHoldToRecord } from '@/hooks/useHoldToRecord'
 import { BatchSettings } from '@/components/BatchSettings'
+import { Button } from '@/components/ui/Button'
+import { Icon } from '@/components/ui/Icon'
+import { Mic, Sparkles } from '@/components/ui/icons'
 import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
@@ -79,51 +82,56 @@ export default function NewTopicPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-sub text-neutral-500">
         {t.topicContext}
         <textarea
           value={context}
           onChange={(e) => setContext(e.target.value)}
           placeholder={t.topicContextPlaceholder}
           rows={4}
-          className="rounded border p-3"
+          className="w-full rounded-lg border border-neutral-300 p-3 text-base text-foreground"
         />
       </label>
-      <div className="flex items-center gap-3 text-sm">
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onPointerDown={start}
           onPointerUp={stop}
           onPointerCancel={stop}
           onContextMenu={(e) => e.preventDefault()}
-          className={`select-none rounded-full px-4 py-3 text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`inline-flex select-none items-center gap-2 rounded-full px-4 py-3 text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
+          <Icon icon={Mic} />
           {t.holdToDictate}
         </button>
-        {(['ru', 'pl'] as const).map((l) => (
-          <button
-            key={l}
-            type="button"
-            aria-pressed={lang === l}
-            onClick={() => setLang(l)}
-            className={lang === l ? 'underline' : 'text-neutral-500'}
-          >
-            {l === 'ru' ? t.asRussian : t.asPolish}
-          </button>
-        ))}
+        <div className="flex rounded-lg border border-neutral-300 p-0.5 text-sm">
+          {(['ru', 'pl'] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              aria-pressed={lang === l}
+              onClick={() => setLang(l)}
+              className={`min-h-8 rounded-md px-2 py-1 ${lang === l ? 'bg-black text-white' : 'text-neutral-600'}`}
+            >
+              {l === 'ru' ? t.asRussian : t.asPolish}
+            </button>
+          ))}
+        </div>
       </div>
-      {micDenied && <p className="text-sm text-red-600">{t.micDenied}</p>}
+      {micDenied && <p className="text-sub text-red-600">{t.micDenied}</p>}
       <BatchSettings value={params} onChange={setParams} />
-      <button
-        type="button"
-        disabled={busy || context.trim() === ''}
+      <Button
+        variant="primary"
+        size="md"
+        icon={Sparkles}
+        label={t.propose}
+        disabled={context.trim() === ''}
+        busy={busy}
         onClick={() => void propose()}
-        className="self-start rounded bg-black px-4 py-2 text-white disabled:opacity-40"
-      >
-        {t.propose}
-      </button>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+        className="self-start"
+      />
+      {error && <p className="text-sub text-red-600">{error}</p>}
     </div>
   )
 }

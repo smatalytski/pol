@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { t } from '@/i18n/pl'
+import { Switch } from '@/components/ui/Switch'
 
 type Settings = {
   newPerDay: number
@@ -21,8 +22,8 @@ export default function SettingsPage() {
   // the server rejected (e.g. requestRetention outside 0.7-0.98) stayed on
   // screen looking accepted. Making them controlled from `settings` and only
   // ever advancing the draft on a successful PUT means a rejected value
-  // reverts to the last confirmed one instead of lingering. The two
-  // checkboxes save on change rather than on blur, but follow the same
+  // reverts to the last confirmed one instead of lingering. The four
+  // switches save on change rather than on blur, but follow the same
   // draft/revert shape.
   const [newPerDayDraft, setNewPerDayDraft] = useState('')
   const [retentionDraft, setRetentionDraft] = useState('')
@@ -96,9 +97,9 @@ export default function SettingsPage() {
   if (!settings) return null
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {error && <p className="text-sm text-red-600">{t.settingsSaveFailed}</p>}
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-sub">
         {t.newPerDay}
         <input
           type="number"
@@ -107,10 +108,10 @@ export default function SettingsPage() {
           value={newPerDayDraft}
           onChange={(e) => setNewPerDayDraft(e.target.value)}
           onBlur={() => void save({ newPerDay: Number(newPerDayDraft) })}
-          className="rounded border p-3"
+          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
         />
       </label>
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-sub">
         {t.targetRetention}
         <input
           type="number"
@@ -120,13 +121,13 @@ export default function SettingsPage() {
           value={retentionDraft}
           onChange={(e) => setRetentionDraft(e.target.value)}
           onBlur={() => void save({ requestRetention: Number(retentionDraft) })}
-          className="rounded border p-3"
+          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
         />
       </label>
 
       <div className="flex flex-col gap-4">
-        <h2 className="text-lg">{t.listenSection}</h2>
-        <label className="flex flex-col gap-1">
+        <h2 className="mt-2 text-xl font-bold">{t.listenSection}</h2>
+        <label className="flex flex-col gap-1 text-sub">
           {t.listenGap}
           <input
             type="number"
@@ -135,10 +136,10 @@ export default function SettingsPage() {
             value={gapDraft}
             onChange={(e) => setGapDraft(e.target.value)}
             onBlur={() => void save({ audioGapSeconds: Number(gapDraft) })}
-            className="rounded border p-3"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1 text-sub">
           {t.listenNext}
           <input
             type="number"
@@ -147,53 +148,45 @@ export default function SettingsPage() {
             value={nextDraft}
             onChange={(e) => setNextDraft(e.target.value)}
             onBlur={() => void save({ audioNextSeconds: Number(nextDraft) })}
-            className="rounded border p-3"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
           />
         </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={repeatDraft}
-            onChange={(e) => {
-              setRepeatDraft(e.target.checked)
-              void save({ audioRepeatAnswer: e.target.checked ? 1 : 0 })
-            }}
-          />
-          {t.listenRepeat}
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={exampleDraft}
-            onChange={(e) => {
-              setExampleDraft(e.target.checked)
-              void save({ audioExample: e.target.checked ? 1 : 0 })
-            }}
-          />
-          {t.listenExample}
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={hintDraft}
-            onChange={(e) => {
-              setHintDraft(e.target.checked)
-              void save({ audioHint: e.target.checked ? 1 : 0 })
-            }}
-          />
-          {t.listenHint}
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={repeatExampleDraft}
-            onChange={(e) => {
-              setRepeatExampleDraft(e.target.checked)
-              void save({ audioRepeatExample: e.target.checked ? 1 : 0 })
-            }}
-          />
-          {t.listenRepeatExample}
-        </label>
+        <Switch
+          showLabel
+          checked={repeatDraft}
+          label={t.listenRepeat}
+          onChange={(on) => {
+            setRepeatDraft(on)
+            void save({ audioRepeatAnswer: on ? 1 : 0 })
+          }}
+        />
+        <Switch
+          showLabel
+          checked={exampleDraft}
+          label={t.listenExample}
+          onChange={(on) => {
+            setExampleDraft(on)
+            void save({ audioExample: on ? 1 : 0 })
+          }}
+        />
+        <Switch
+          showLabel
+          checked={hintDraft}
+          label={t.listenHint}
+          onChange={(on) => {
+            setHintDraft(on)
+            void save({ audioHint: on ? 1 : 0 })
+          }}
+        />
+        <Switch
+          showLabel
+          checked={repeatExampleDraft}
+          label={t.listenRepeatExample}
+          onChange={(on) => {
+            setRepeatExampleDraft(on)
+            void save({ audioRepeatExample: on ? 1 : 0 })
+          }}
+        />
       </div>
     </div>
   )

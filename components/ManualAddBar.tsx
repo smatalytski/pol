@@ -1,5 +1,8 @@
 'use client'
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { Button } from '@/components/ui/Button'
+import { Icon } from '@/components/ui/Icon'
+import { Mic, Plus, X } from '@/components/ui/icons'
 import { mediaRecorderFactory, useHoldToRecord } from '@/hooks/useHoldToRecord'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
@@ -78,9 +81,9 @@ export function ManualAddBar({ onAdd }: { onAdd: (text: string) => Promise<strin
         placeholder={t.manualPlaceholder}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        className="rounded border p-2"
+        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
       />
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onPointerDown={pl.start}
@@ -88,9 +91,10 @@ export function ManualAddBar({ onAdd }: { onAdd: (text: string) => Promise<strin
           onPointerCancel={pl.stop}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={t.recordPolish}
-          className={`select-none rounded-full px-3 py-2 text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`inline-flex h-9 select-none items-center gap-1 rounded-full px-3 text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
+          <Icon icon={Mic} size={16} />
           PL
         </button>
         <button
@@ -100,25 +104,19 @@ export function ManualAddBar({ onAdd }: { onAdd: (text: string) => Promise<strin
           onPointerCancel={ru.stop}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={t.recordRussian}
-          className={`select-none rounded-full px-3 py-2 text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`inline-flex h-9 select-none items-center gap-1 rounded-full px-3 text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
+          <Icon icon={Mic} size={16} />
           RU
         </button>
-        <button
-          type="button"
-          disabled={busy || text.trim() === ''}
-          onClick={() => void add()}
-          className="rounded bg-black px-3 py-1 text-white disabled:opacity-40"
-        >
-          {t.addItem}
-        </button>
-        <button type="button" onClick={cancel} className="rounded border px-3 py-1">
-          {t.cancel}
-        </button>
+        <span className="ml-auto flex gap-2">
+          <Button variant="primary" icon={Plus} label={t.addItem} disabled={text.trim() === ''} busy={busy} onClick={() => void add()} />
+          <Button variant="icon" icon={X} label={t.cancel} onClick={cancel} />
+        </span>
       </div>
-      {micDenied && <p className="text-red-600">{t.micDenied}</p>}
-      {message && <p className="text-red-600">{message}</p>}
+      {micDenied && <p className="text-sub text-red-600">{t.micDenied}</p>}
+      {message && <p className="text-sub text-red-600">{message}</p>}
     </div>
   )
 }

@@ -4,6 +4,8 @@ import { ReviewCard } from '@/components/ReviewCard'
 import { currentCard, initialReviewState, reviewReducer } from '@/hooks/useReviewSession'
 import type { RatingValue } from '@/lib/scheduler'
 import { t } from '@/i18n/pl'
+import { Button } from '@/components/ui/Button'
+import { Undo2 } from '@/components/ui/icons'
 
 export default function ReviewPage() {
   const [state, dispatch] = useReducer(reviewReducer, initialReviewState)
@@ -145,7 +147,7 @@ export default function ReviewPage() {
       <div className="p-8 text-center">
         {rateError && <p className="text-sm text-red-600">{t.rateFailed}</p>}
         <p className="text-xl">{t.doneForToday}</p>
-        <p className="mt-2 text-sm text-neutral-500">
+        <p className="mt-2 text-sm text-neutral-500 tabular-nums">
           {t.sessionReviewed}: {reviewedCount}
         </p>
         {nextDue != null && (
@@ -153,11 +155,7 @@ export default function ReviewPage() {
             {t.nextReviewAt}: {new Date(nextDue).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })}
           </p>
         )}
-        {state.lastRated && (
-          <button onClick={undo} className="mt-4 text-sm underline">
-            {t.undo}
-          </button>
-        )}
+        {state.lastRated && <Button variant="icon" icon={Undo2} label={t.undo} onClick={undo} className="mt-4" />}
       </div>
     )
   }

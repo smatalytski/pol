@@ -1,6 +1,9 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { CardListItem } from '@/components/CardListItem'
+import { Badge } from '@/components/ui/Badge'
+import { Icon } from '@/components/ui/Icon'
+import { Search } from '@/components/ui/icons'
 import type { CardRow } from '@/lib/cards/service'
 import { t } from '@/i18n/pl'
 
@@ -57,20 +60,25 @@ export default function CardsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        className="rounded border p-3"
-        placeholder={t.cards}
-      />
+      <div className="relative">
+        <Icon icon={Search} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          className="w-full rounded-lg border border-neutral-300 py-3 pl-10 pr-3"
+          placeholder={t.cards}
+        />
+      </div>
       <ul>
         {visiblePending.map((p) => (
           <li
             key={`pending:${p.id}`}
             className="flex items-baseline justify-between gap-3 border-b py-3 text-neutral-500"
           >
-            <span className="text-lg">{p.transcript}</span>
-            <span className="shrink-0 text-xs">{p.status === 'generating' ? t.generating : t.queued}</span>
+            <span className="text-row">{p.transcript}</span>
+            <Badge tone={p.status === 'generating' ? 'sky' : 'neutral'}>
+              {p.status === 'generating' ? t.generating : t.queued}
+            </Badge>
           </li>
         ))}
         {rows.map((c) => (

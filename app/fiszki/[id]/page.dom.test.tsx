@@ -334,6 +334,17 @@ describe('CardDetailPage', () => {
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ suspendedAt: null })
   })
 
+  it('offers suspend and discard as icon + word buttons', async () => {
+    // same fetch stub as the suspend test above
+    stubFetch(() => cardRow({ suspendedAt: null }))
+    render(<CardPage />)
+    const suspend = await screen.findByRole('button', { name: t.suspend })
+    expect(suspend.querySelector('svg')).not.toBeNull()
+    const discard = screen.getByRole('button', { name: t.moveToDiscarded })
+    expect(discard.querySelector('svg')).not.toBeNull()
+    expect(discard.className).toContain('text-red-600')
+  })
+
   // Moving the card you are looking at to its topic's odrzucone would
   // otherwise leave this screen showing a card no longer in view.
   it('moves the card to odrzucone (DELETE) and returns to the list', async () => {

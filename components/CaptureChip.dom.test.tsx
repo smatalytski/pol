@@ -67,7 +67,7 @@ describe('CaptureChip', () => {
     const onDelete = vi.fn()
     const item = captureItem()
     render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} />)
-    fireEvent.click(screen.getByText(t.deleteItem))
+    fireEvent.click(screen.getByRole('button', { name: t.deleteItem }))
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onDelete).toHaveBeenCalledWith(item)
   })
@@ -80,7 +80,7 @@ describe('CaptureChip', () => {
   it('swiping across the delete button does not also trigger the li swipe handler', () => {
     const onDelete = vi.fn()
     render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} />)
-    swipe(screen.getByText(t.deleteItem), -100)
+    swipe(screen.getByRole('button', { name: t.deleteItem }), -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
 
@@ -91,7 +91,7 @@ describe('CaptureChip', () => {
 
   it('shows t.deleteItem and no language controls on an under-review chip', () => {
     render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} />)
-    expect(screen.getByText(t.deleteItem)).toBeTruthy()
+    expect(screen.getByRole('button', { name: t.deleteItem })).toBeTruthy()
     expect(screen.queryByText(t.asPolish)).toBeNull()
     expect(screen.queryByText(t.asRussian)).toBeNull()
   })
@@ -143,5 +143,19 @@ describe('CaptureChip', () => {
       />,
     )
     expect(screen.getByText(t.transcribing)).toBeTruthy()
+  })
+
+  it('puts ponów and usuń together on the row’s second line, right-aligned', () => {
+    render(
+      <CaptureChip
+        item={captureItem({ status: 'failed', error: 'x', inReview: false, reviewRemainingMs: null })}
+        onRetry={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+    const retry = screen.getByRole('button', { name: t.retry })
+    const del = screen.getByRole('button', { name: t.deleteItem })
+    expect(retry.parentElement).toBe(del.parentElement)
+    expect(del.parentElement!.className).toContain('justify-end')
   })
 })

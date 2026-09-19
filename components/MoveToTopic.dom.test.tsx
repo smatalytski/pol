@@ -62,6 +62,24 @@ describe('MoveToTopic', () => {
     expect(panelButton.className).toContain('break-words')
   })
 
+  it('paints the open panel above the fixed bottom tab bar (z-20)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(topicsResponse()) }))
+    render(<MoveToTopic currentTopicId="t1" onMove={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: `${t.moveTo}: …` }))
+    const panelButton = await screen.findByRole('button', { name: 'Ogólne' })
+    const panel = panelButton.parentElement!
+    expect(panel.className).toContain('z-30')
+  })
+
+  it('shows an icon-only trigger named "temat" when compact', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(topicsResponse()) }))
+    render(<MoveToTopic currentTopicId="t1" compact onMove={vi.fn()} />)
+    const trigger = screen.getByRole('button', { name: t.moveTo })
+    expect(trigger.textContent).toBe('')
+    fireEvent.click(trigger)
+    expect(await screen.findByRole('button', { name: 'Ogólne' })).toBeTruthy()
+  })
+
   it('shows an error when the topics fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({}) }))
     render(<MoveToTopic currentTopicId="t1" onMove={vi.fn()} />)

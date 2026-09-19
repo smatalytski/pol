@@ -1,5 +1,7 @@
 'use client'
 import { useState } from 'react'
+import { Button } from '@/components/ui/Button'
+import { FolderInput } from '@/components/ui/icons'
 import type { TopicListRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
@@ -9,15 +11,19 @@ import { t } from '@/i18n/pl'
  * it can never show a topic that was renamed since the page loaded — topics
  * are never deleted. `currentName` is the caller's already-known name for
  * `currentTopicId`; the button reads `…` until a caller has one to show.
+ * `compact` (topic-page rows) draws the trigger as an icon button named
+ * `temat`; without it (the card page) the trigger reads `temat: <name>`.
  */
 export function MoveToTopic({
   currentTopicId,
   currentName,
   onMove,
+  compact,
 }: {
   currentTopicId: string
   currentName?: string | null
   onMove: (topicId: string) => Promise<void> | void
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [topics, setTopics] = useState<TopicListRow[] | null>(null)
@@ -50,11 +56,15 @@ export function MoveToTopic({
   // nearest ancestor the caller has made `relative` (the row) instead.
   return (
     <div className="inline-block text-sm">
-      <button type="button" onClick={() => void toggle()} className="rounded border px-2 py-1">
-        {t.moveTo}: {currentName !== undefined ? (currentName ?? t.unnamedTopic) : '…'}
-      </button>
+      <Button
+        variant={compact ? 'icon' : 'secondary'}
+        icon={FolderInput}
+        label={compact ? t.moveTo : `${t.moveTo}: ${currentName !== undefined ? (currentName ?? t.unnamedTopic) : '…'}`}
+        onClick={() => void toggle()}
+      />
       {open && topics && (
-        <div className="absolute inset-x-0 z-10 mt-1 flex max-h-64 flex-col gap-1 overflow-y-auto rounded border bg-background p-1 shadow">
+        // z-30: above the fixed bottom tab bar (components/TabBar.tsx), which is z-20.
+        <div className="absolute inset-x-0 z-30 mt-1 flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border border-neutral-300 bg-background p-1 shadow">
           {topics
             .filter((tp) => tp.id !== currentTopicId)
             .map((tp) => (

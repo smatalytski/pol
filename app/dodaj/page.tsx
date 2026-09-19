@@ -7,6 +7,8 @@ import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbo
 import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
+import { Icon } from '@/components/ui/Icon'
+import { Mic } from '@/components/ui/icons'
 
 type Notice = 'deleteFailed'
 
@@ -136,8 +138,10 @@ export default function AddPage() {
 
   useEffect(() => {
     function poll() {
-      void fetchCaptures()
-      void drain()
+      // A failed poll (offline) is retried on the next tick; it must not
+      // surface as an unhandled rejection.
+      void fetchCaptures().catch(() => {})
+      void drain().catch(() => {})
     }
     // Always poll once on mount (or whenever pending work appears) so a
     // capture left mid-pipeline from a previous session is picked up even
@@ -256,10 +260,10 @@ export default function AddPage() {
           to the viewport whatever the list is doing; `left-0 right-0` plus the
           inner max-w-xl re-centres it, because a fixed element ignores the
           shell's `mx-auto max-w-xl`. `px-4` keeps the buttons off the screen
-          edges on a narrow phone. The inset padding keeps it clear of the
-          home indicator / gesture bar, and the opaque background stops chips
-          showing through as they scroll underneath. Nav is at the top of the
-          shell (components/Nav.tsx), so nothing collides down here.
+          edges on a narrow phone. `above-tabbar` stacks it directly on top of
+          the bottom tab bar (components/TabBar.tsx), which owns the
+          safe-area inset, and the opaque background stops chips showing
+          through as they scroll underneath.
 
           Two buttons, not one with a language toggle: the choice has to be
           made before the hold, since a hold is Polish or Russian, never both
@@ -273,10 +277,7 @@ export default function AddPage() {
           buttons; `gap-y-2` is the (smaller) gap between the caption's row
           and the buttons' row, so the bar stays short enough for the list's
           bottom padding above to cover it. */}
-      <div
-        className="fixed bottom-0 left-0 right-0 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 bg-background px-4 pt-4"
-        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
-      >
+      <div className="above-tabbar fixed left-0 right-0 z-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 border-t border-neutral-200 bg-background px-4 py-4">
         <p className="w-full text-center text-sm text-neutral-500">{t.holdToRecord}</p>
         <button
           onPointerDown={() => { navigator.vibrate?.(10); pl.start() }}
@@ -287,7 +288,10 @@ export default function AddPage() {
           className={`h-36 w-36 select-none rounded-full text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
-          PL
+          <span className="flex flex-col items-center gap-1">
+            <Icon icon={Mic} size={32} />
+            <span className="text-lg font-semibold">PL</span>
+          </span>
         </button>
         <button
           onPointerDown={() => { navigator.vibrate?.(10); ru.start() }}
@@ -298,7 +302,10 @@ export default function AddPage() {
           className={`h-36 w-36 select-none rounded-full text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
-          RU
+          <span className="flex flex-col items-center gap-1">
+            <Icon icon={Mic} size={32} />
+            <span className="text-lg font-semibold">RU</span>
+          </span>
         </button>
       </div>
     </div>

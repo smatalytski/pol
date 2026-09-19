@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useListenPlayer } from '@/hooks/useListenPlayer'
 import { t } from '@/i18n/pl'
+import { Button } from '@/components/ui/Button'
+import { Pause, Play, RotateCcw, SkipForward, Square } from '@/components/ui/icons'
 
 /** Session lengths the planner accepts (spec §4.1), remembered per browser. */
 const LENGTHS = [10, 20, 30, 45] as const
@@ -110,15 +112,15 @@ export default function ListenPage() {
     content = (
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <span className="text-sm text-neutral-500">{t.listenLength}</span>
-          <div className="flex gap-2">
+          <span className="text-sub text-neutral-500">{t.listenLength}</span>
+          <div className="flex self-start rounded-lg border border-neutral-300 p-0.5">
             {LENGTHS.map((n) => (
               <button
                 key={n}
                 type="button"
                 aria-pressed={minutes === n}
                 onClick={() => chooseMinutes(n)}
-                className={`rounded border px-3 py-2 ${minutes === n ? 'bg-black text-white' : ''}`}
+                className={`min-w-12 rounded-md px-3 py-1.5 tabular-nums ${minutes === n ? 'bg-black font-semibold text-white' : ''}`}
               >
                 {n}
               </button>
@@ -130,7 +132,7 @@ export default function ListenPage() {
             type="button"
             aria-pressed={selectedTopicIds.length === 0}
             onClick={chooseAllTopics}
-            className={`rounded border px-3 py-2 ${selectedTopicIds.length === 0 ? 'bg-black text-white' : ''}`}
+            className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.length === 0 ? 'border-black bg-black text-white' : 'border-neutral-300'}`}
           >
             {t.listenAllTopics}
           </button>
@@ -140,20 +142,18 @@ export default function ListenPage() {
               type="button"
               aria-pressed={selectedTopicIds.includes(topic.id)}
               onClick={() => toggleTopic(topic.id)}
-              className={`rounded border px-3 py-2 ${selectedTopicIds.includes(topic.id) ? 'bg-black text-white' : ''}`}
+              className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.includes(topic.id) ? 'border-black bg-black text-white' : 'border-neutral-300'}`}
             >
               {topic.name ?? t.unnamedTopic}
             </button>
           ))}
         </div>
         {settings && (
-          <Link href="/ustawienia" className="text-sm text-neutral-500 underline">
+          <Link href="/ustawienia" className="text-sub text-neutral-500 underline">
             {summaryLine(settings)}
           </Link>
         )}
-        <button type="button" onClick={handleStart} className="self-start rounded bg-black px-4 py-2 text-white">
-          {t.listenStart}
-        </button>
+        <Button variant="primary" size="md" icon={Play} label={t.listenStart} onClick={handleStart} className="self-start" />
       </div>
     )
   } else if (state.phase === 'playing' || state.phase === 'paused') {
@@ -163,25 +163,17 @@ export default function ListenPage() {
     content = (
       <div className="flex flex-col gap-4">
         <p className="text-2xl">{card.promptText}</p>
-        <p className="text-sm text-neutral-500">{card.topicName ?? t.unnamedTopic}</p>
-        <p className="text-sm text-neutral-500">{`${state.index + 1} / ${state.cards.length}`}</p>
-        <p className="text-sm text-neutral-500">{`${t.listenMinutesLeft} ${minutesLeft}`}</p>
-        <div className="flex gap-4">
+        <p className="text-sub text-neutral-500">{card.topicName ?? t.unnamedTopic}</p>
+        <p className="text-sub tabular-nums text-neutral-500">{`${state.index + 1} / ${state.cards.length}`}</p>
+        <p className="text-sub tabular-nums text-neutral-500">{`${t.listenMinutesLeft} ${minutesLeft}`}</p>
+        <div className="flex items-center gap-3">
           {state.phase === 'playing' ? (
-            <button type="button" aria-label={t.listenPause} onClick={() => player.pause()} className="text-2xl">
-              ⏸
-            </button>
+            <Button variant="icon" size="md" icon={Pause} label={t.listenPause} onClick={() => player.pause()} />
           ) : (
-            <button type="button" aria-label={t.listenResume} onClick={() => player.resume()} className="text-2xl">
-              ▶
-            </button>
+            <Button variant="icon" size="md" icon={Play} label={t.listenResume} onClick={() => player.resume()} />
           )}
-          <button type="button" aria-label={t.listenSkip} onClick={() => player.skip()} className="text-2xl">
-            ⏭
-          </button>
-          <button type="button" onClick={() => player.stop()} className="rounded border px-4 py-2">
-            {t.listenStop}
-          </button>
+          <Button variant="icon" size="md" icon={SkipForward} label={t.listenSkip} onClick={() => player.skip()} />
+          <Button variant="secondary" size="md" icon={Square} label={t.listenStop} onClick={() => player.stop()} className="ml-auto" />
         </div>
       </div>
     )
@@ -189,9 +181,7 @@ export default function ListenPage() {
     content = (
       <div className="flex flex-col gap-4">
         <p className="text-xl">{`${t.listenDone} ${state.heard} ${t.listenCards}`}</p>
-        <button type="button" onClick={() => setBackAtIdle(true)} className="self-start rounded border px-4 py-2">
-          {t.listenAgain}
-        </button>
+        <Button variant="primary" size="md" icon={RotateCcw} label={t.listenAgain} onClick={() => setBackAtIdle(true)} className="self-start" />
       </div>
     )
   } else if (state.phase === 'failed') {
@@ -202,10 +192,8 @@ export default function ListenPage() {
     content = (
       <div className="flex flex-col gap-4">
         <p className="text-red-600">{t.listenFailed}</p>
-        <p className="text-sm text-neutral-500">{state.error}</p>
-        <button type="button" onClick={() => setBackAtIdle(true)} className="self-start rounded border px-4 py-2">
-          {t.listenAgain}
-        </button>
+        <p className="text-sub text-neutral-500">{state.error}</p>
+        <Button variant="primary" size="md" icon={RotateCcw} label={t.listenAgain} onClick={() => setBackAtIdle(true)} className="self-start" />
       </div>
     )
   } else {
@@ -213,7 +201,7 @@ export default function ListenPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4">
       {/* Rendered unconditionally from mount, hidden — the hook caches this element on its first effect. */}
       <audio ref={audioRef} className="hidden" />
       {content}

@@ -2,6 +2,9 @@
 import type { ReactNode } from 'react'
 import { CardListItem } from '@/components/CardListItem'
 import { MoveToTopic } from '@/components/MoveToTopic'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Plus, Undo2, X } from '@/components/ui/icons'
 import type { CardRow } from '@/lib/cards/service'
 import type { DiscardedEntry, ItemView, TopicView } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
@@ -15,21 +18,15 @@ export type Act = (key: string, url: string, method: string, body?: unknown) => 
 
 type Common = { topicId: string; busy: ReadonlySet<string>; act: Act }
 
-const small = 'rounded border px-2 py-1 text-sm disabled:opacity-40'
-
 function DiscardButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
-  return (
-    <button type="button" aria-label={t.discard} disabled={disabled} onClick={onClick} className={small}>
-      ✕
-    </button>
-  )
+  return <Button variant="danger" iconOnly icon={X} label={t.discard} disabled={disabled} onClick={onClick} />
 }
 
 /** The move picker, disabled with the rest of its row while a write is in flight. */
 function Move({ topicId, disabled, onMove }: { topicId: string; disabled: boolean; onMove: (to: string) => Promise<void> }) {
   return (
     <fieldset disabled={disabled} className="contents">
-      <MoveToTopic currentTopicId={topicId} onMove={onMove} />
+      <MoveToTopic currentTopicId={topicId} compact onMove={onMove} />
     </fieldset>
   )
 }
@@ -47,8 +44,8 @@ export function CardedTab({
     <ul>
       {pending.map((p) => (
         <li key={`pending:${p.id}`} className="flex items-baseline justify-between gap-3 border-b py-3 text-neutral-500">
-          <span className="min-w-0 break-words text-lg">{p.transcript}</span>
-          <span className="shrink-0 text-xs">{p.status === 'generating' ? t.generating : t.queued}</span>
+          <span className="min-w-0 break-words text-row">{p.transcript}</span>
+          <Badge tone={p.status === 'generating' ? 'sky' : 'neutral'}>{p.status === 'generating' ? t.generating : t.queued}</Badge>
         </li>
       ))}
       {cards.map((c) => {
@@ -72,7 +69,7 @@ export function CardedTab({
   )
 }
 
-/** bez karty: the open items, each with `+ karta`, ✕ and the move picker. */
+/** bez karty: the open items, each with `+ karta`, odrzuć and the move picker. */
 export function OpenTab({ topicId, items, busy, act }: Common & { items: ItemView[] }) {
   return (
     <ul>
@@ -83,17 +80,15 @@ export function OpenTab({ topicId, items, busy, act }: Common & { items: ItemVie
         return (
           <Row key={item.id} relative>
             <span className="break-words">
-              <span className="text-lg">{item.answerPl}</span>
-              {item.glossRu && <span>{` — ${item.glossRu}`}</span>}
-              <span className="ml-2 inline-flex gap-2 text-xs text-neutral-500">
-                {item.kind && <span>{item.kind === 'fraza' ? t.kindPhrase : t.kindWord}</span>}
-                {item.level === 'sredni' && <span className="text-amber-700">{t.levelBadge}</span>}
+              <span className="text-row">{item.answerPl}</span>
+              {item.glossRu && <span className="text-sub text-neutral-500">{` — ${item.glossRu}`}</span>}
+              <span className="ml-2 inline-flex gap-1 align-middle">
+                {item.kind && <Badge>{item.kind === 'fraza' ? t.kindPhrase : t.kindWord}</Badge>}
+                {item.level === 'sredni' && <Badge tone="amber">{t.levelBadge}</Badge>}
               </span>
             </span>
             <span className="flex flex-wrap justify-end gap-2">
-              <button type="button" disabled={off} onClick={() => void act(key, `${base}/card`, 'POST')} className={small}>
-                {t.makeCard}
-              </button>
+              <Button variant="primary" icon={Plus} label={t.makeCard} disabled={off} onClick={() => void act(key, `${base}/card`, 'POST')} />
               <DiscardButton disabled={off} onClick={() => void act(key, `${base}/discard`, 'POST')} />
               <Move topicId={topicId} disabled={off} onMove={(to) => act(key, base, 'PATCH', { topicId: to })} />
             </span>
@@ -115,13 +110,15 @@ export function DiscardedTab({ topicId, entries, busy, act }: Common & { entries
         return (
           <Row key={key}>
             <span className="break-words">
-              <span className="text-lg">{e.kind === 'item' ? e.item.answerPl : e.card.answerPl}</span>
-              {e.kind === 'card' && <span className="ml-2 text-xs text-sky-700">{t.cardBadge}</span>}
+              <span className="text-row">{e.kind === 'item' ? e.item.answerPl : e.card.answerPl}</span>
+              {e.kind === 'card' && (
+                <span className="ml-2 align-middle">
+                  <Badge tone="sky">{t.cardBadge}</Badge>
+                </span>
+              )}
             </span>
             <span className="flex justify-end">
-              <button type="button" disabled={busy.has(key)} onClick={() => void act(key, url, 'POST')} className={small}>
-                {t.restore}
-              </button>
+              <Button variant="secondary" icon={Undo2} label={t.restore} disabled={busy.has(key)} onClick={() => void act(key, url, 'POST')} />
             </span>
           </Row>
         )
@@ -135,5 +132,5 @@ export function DiscardedTab({ topicId, entries, busy, act }: Common & { entries
 // row's MoveToTopic panel to that row rather than the whole page — only rows
 // that actually carry one need it.
 function Row({ children, relative }: { children: ReactNode; relative?: boolean }) {
-  return <li className={`flex flex-col gap-1 border-b py-3 ${relative ? 'relative' : ''}`}>{children}</li>
+  return <li className={`flex flex-col gap-2 border-b py-3 ${relative ? 'relative' : ''}`}>{children}</li>
 }

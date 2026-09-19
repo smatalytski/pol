@@ -3,13 +3,22 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* The bottom tab bar's row, before the phone's safe-area inset. */
+  --tabbar-h: 3.5rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-source-sans), system-ui, sans-serif;
+}
+
+/* The type scale (spec 2026-09-19-ui-icons §5): row titles 17px, secondary text 15px. */
+@theme {
+  --text-row: 1.0625rem;
+  --text-row--line-height: 1.4;
+  --text-sub: 0.9375rem;
+  --text-sub--line-height: 1.4;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,5 +31,22 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Tab-bar spacing. Named apart from Tailwind's own pb-* / bottom-* so they
+   can never collide with its functional utilities. */
+@utility tabbar-h {
+  height: var(--tabbar-h);
+}
+@utility pad-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* The page's own bottom room: the tab bar, its inset, and a little air. */
+@utility pad-below-tabbar {
+  padding-bottom: calc(var(--tabbar-h) + 1rem + env(safe-area-inset-bottom));
+}
+/* A fixed bar that must sit on top of the tab bar (/dodaj's record buttons). */
+@utility above-tabbar {
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
 }

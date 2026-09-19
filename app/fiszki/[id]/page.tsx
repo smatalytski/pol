@@ -7,6 +7,9 @@ import { hasForms, parseForms } from '@/lib/cards/forms'
 import { CardTypeSwitch } from '@/components/CardTypeSwitch'
 import { FormsView } from '@/components/FormsView'
 import { MoveToTopic } from '@/components/MoveToTopic'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Archive, CirclePause, CirclePlay, Sparkles } from '@/components/ui/icons'
 import { t } from '@/i18n/pl'
 
 /**
@@ -143,7 +146,7 @@ export default function CardDetailPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link href="/fiszki" className="text-sm underline">
+      <Link href="/fiszki" className="inline-flex min-h-8 items-center self-start text-sub text-neutral-500">
         {t.backToCards}
       </Link>
 
@@ -165,7 +168,7 @@ export default function CardDetailPage() {
         key={`answer:${card.answerPl}`}
         defaultValue={card.answerPl}
         onBlur={(e) => e.target.value !== card.answerPl && void patch({ answerPl: e.target.value })}
-        className="w-full text-2xl font-semibold"
+        className="w-full bg-transparent text-xl font-bold"
       />
 
       <audio controls preload="none" src={`/api/cards/${id}/audio?part=answer`} aria-label={t.play} />
@@ -183,61 +186,53 @@ export default function CardDetailPage() {
             e.target.value !== (card.promptText ?? '') && void patch({ promptText: e.target.value })
           }
           placeholder={t.needsInput}
-          className="w-full text-lg"
+          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-row"
         />
       </label>
 
       {card.promptHint && (
         <div>
           <p className="text-xs uppercase text-neutral-500">{t.detailHint}</p>
-          <p className="text-sm">{card.promptHint}</p>
+          <p className="text-sub">{card.promptHint}</p>
         </div>
       )}
 
       {card.examplePl && (
         <div>
           <p className="text-xs uppercase text-neutral-500">{t.detailExample}</p>
-          <p className="text-lg">{card.examplePl}</p>
+          <p className="text-row">{card.examplePl}</p>
         </div>
       )}
 
       {card.grammarNote && (
         <div>
           <p className="text-xs uppercase text-neutral-500">{t.detailGrammar}</p>
-          <p className="text-sm">{card.grammarNote}</p>
+          <p className="text-sub">{card.grammarNote}</p>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-4 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
         {card.status === 'needs_input' && (
-          <button
-            onClick={() => void regenerate()}
-            disabled={generating}
-            className="underline disabled:text-neutral-400"
-          >
-            {t.regenerate}
-          </button>
+          <Button variant="secondary" icon={Sparkles} label={t.regenerate} onClick={() => void regenerate()} disabled={generating} />
         )}
-        <button
+        <Button
+          variant="secondary"
+          icon={card.suspendedAt ? CirclePlay : CirclePause}
+          label={card.suspendedAt ? t.unsuspend : t.suspend}
           onClick={() => void patch({ suspendedAt: card.suspendedAt ? null : Date.now() })}
-          className="underline"
-        >
-          {card.suspendedAt ? t.unsuspend : t.suspend}
-        </button>
-        <button onClick={() => void remove()} className="underline text-red-600">
-          {t.moveToDiscarded}
-        </button>
+        />
+        <Button variant="danger" icon={Archive} label={t.moveToDiscarded} onClick={() => void remove()} />
         {/* wygeneruj ponownie is the only thing that queues a rebuild here
             now that re-recognition is gone, so this shows while a queued or
             running job for this card exists — not only during the request
             that queues it. */}
-        {generating && <span className="text-neutral-500">{t.generating}</span>}
+        {generating && <Badge tone="sky">{t.generating}</Badge>}
       </div>
 
-      {saveError && <p className="text-sm text-red-600">{t.saveFailed}</p>}
-      {regenError && <p className="text-sm text-red-600">{t.regenerateFailed}</p>}
-      {typeError && <p className="text-sm text-red-600">{t.typeFailed}</p>}
-      {typeDuplicate && <p className="text-sm text-amber-600">{t.typeDuplicate}</p>}
+      {saveError && <p className="text-sub text-red-600">{t.saveFailed}</p>}
+      {regenError && <p className="text-sub text-red-600">{t.regenerateFailed}</p>}
+      {typeError && <p className="text-sub text-red-600">{t.typeFailed}</p>}
+      {typeDuplicate && <p className="text-sub text-amber-600">{t.typeDuplicate}</p>}
     </div>
   )
 }
