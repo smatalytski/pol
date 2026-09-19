@@ -31,4 +31,11 @@ describe('Nav', () => {
     expect(add).toBe(listen + 1)
     expect(screen.getByRole('link', { name: 'Słuchaj' }).getAttribute('href')).toBe('/sluchaj')
   })
+
+  // Six links in one unwrapped flex row overflow a 360-393px phone width —
+  // wrapping keeps every tab reachable instead of clipping or scrolling.
+  it('wraps onto multiple lines instead of overflowing on a narrow screen', () => {
+    render(<Nav />)
+    expect(screen.getByRole('navigation').className).toContain('flex-wrap')
+  })
 })

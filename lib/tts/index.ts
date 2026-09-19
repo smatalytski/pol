@@ -106,11 +106,23 @@ export function ttsSynthesizer(opts: { synthesizeSpeech: SynthesizeFn }): Synthe
   }
 }
 
+// Module-level and created lazily on first use: a fresh TextToSpeechClient
+// per call would open a new gRPC channel every request and never close it.
+// One client is reused for the life of the process instead.
+let client: TextToSpeechClient | undefined
+
+function getClient(): TextToSpeechClient {
+  if (!client) {
+    client = new TextToSpeechClient({
+      apiEndpoint: `${speechLocation()}-texttospeech.googleapis.com`,
+    })
+  }
+  return client
+}
+
 export function getSynthesizer(): Synthesizer {
-  const client = new TextToSpeechClient({
-    apiEndpoint: `${speechLocation()}-texttospeech.googleapis.com`,
-  })
+  const c = getClient()
   return ttsSynthesizer({
-    synthesizeSpeech: (req) => client.synthesizeSpeech(req as never) as never,
+    synthesizeSpeech: (req) => c.synthesizeSpeech(req as never) as never,
   })
 }

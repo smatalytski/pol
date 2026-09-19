@@ -168,7 +168,6 @@ describe('sequence', () => {
   })
 
   it('audioKey includes both voice names', () => {
-    const key1 = audioKey(cardWithHintAndExample, defaultSettings)
     // The key should include both voices. We verify this by checking that it
     // changes if we can somehow change the voices (we can't directly in this test,
     // but we verify the hashInput includes them)

@@ -98,7 +98,7 @@ Migration `006-listening.sql` (append-only) creates `card_audio` and `listens`. 
   - Eligible cards (§3.1), limited to `topicIds` when given; any switched-off topic in the list is ignored.
   - Minus `excludeIds`.
 - **Ordering:**
-  1. cards due by the end of today (local time), least recently heard first;
+  1. review cards due by the end of today (local time), least recently heard first;
   2. then all others: never heard first, then least recently heard;
   3. ties broken by `due`, then by id.
 - **Time budget:** cards are taken in that order until the sum of `estimatedMs` reaches `minutes`.

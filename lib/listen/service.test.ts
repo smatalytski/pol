@@ -5,6 +5,7 @@ import { cardAudio, cards, listens, media, reviews, topics } from '../db/schema'
 import { createCard, deleteCard, type CreateCardInput } from '../cards/service'
 import { setSetting, getSettings } from '../settings'
 import { audioKey, estimateMs, sequenceFor, settingsToSequence } from '../audio/sequence'
+import { startOfLocalDay } from '../review/queue'
 import { eligibleCard, listenCardOf, markHeard, planSession } from './service'
 
 const NOW = new Date('2026-09-12T10:00:00')
@@ -34,6 +35,10 @@ function mkCard(db: DbT, over: Partial<CreateCardInput> = {}): string {
 
 function setDue(db: DbT, cardId: string, due: number) {
   db.update(cards).set({ due }).where(eq(cards.id, cardId)).run()
+}
+
+function setState(db: DbT, cardId: string, state: number) {
+  db.update(cards).set({ state }).where(eq(cards.id, cardId)).run()
 }
 
 function insertTopic(db: DbT, id: string, suspendedAt: number | null) {
@@ -72,8 +77,10 @@ describe('ordering', () => {
     const notDue = NOW.getTime() + 5 * 86_400_000
 
     const a = mkCard(db, { answerPl: 'a-word' })
+    setState(db, a, 2)
     setDue(db, a, dueToday)
     const b = mkCard(db, { answerPl: 'b-word' })
+    setState(db, b, 2)
     setDue(db, b, dueToday)
     const c = mkCard(db, { answerPl: 'c-word' })
     setDue(db, c, notDue)
@@ -95,11 +102,47 @@ describe('ordering', () => {
     const dueToday = NOW.getTime()
     const x = mkCard(db, { answerPl: 'x-word' })
     const y = mkCard(db, { answerPl: 'y-word' })
+    setState(db, x, 2)
+    setState(db, y, 2)
     setDue(db, x, dueToday)
     setDue(db, y, dueToday)
 
     const result = planSession(db, { minutes: 45 }, NOW)
     expect(result.map((c) => c.id)).toEqual([x, y].sort())
+  })
+
+  it('puts a due review card ahead of a new, never-heard card even though the new card is also "due" by creation time', () => {
+    const { db } = createTestDb()
+    // A never-reviewed card's `due` is its creation time (lib/scheduler
+    // newState), so without a `state` check it would wrongly look due today
+    // and crowd out real reviews.
+    const newCard = mkCard(db, { answerPl: 'new-word' })
+
+    const reviewCard = mkCard(db, { answerPl: 'review-word' })
+    setState(db, reviewCard, 2)
+    setDue(db, reviewCard, NOW.getTime())
+    db.insert(listens)
+      .values({ cardId: reviewCard, heardAt: NOW.getTime() - 86_400_000 })
+      .run() // heard yesterday
+
+    const result = planSession(db, { minutes: 45 }, NOW)
+    expect(result.map((c) => c.id)).toEqual([reviewCard, newCard])
+  })
+
+  it('the due-today group boundary is the end of the injected `now`\'s local day', () => {
+    const { db } = createTestDb()
+    const endOfToday = startOfLocalDay(NOW) + 86_400_000
+
+    const dueLateToday = mkCard(db, { answerPl: 'boundary-in' })
+    setState(db, dueLateToday, 2)
+    setDue(db, dueLateToday, endOfToday - 60_000) // 23:59 today
+
+    const dueEarlyTomorrow = mkCard(db, { answerPl: 'boundary-out' })
+    setState(db, dueEarlyTomorrow, 2)
+    setDue(db, dueEarlyTomorrow, endOfToday + 60_000) // 00:01 tomorrow
+
+    const result = planSession(db, { minutes: 45 }, NOW)
+    expect(result.map((c) => c.id)).toEqual([dueLateToday, dueEarlyTomorrow])
   })
 })
 

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { t } from '@/i18n/pl'
 // Type-only: lib/listen/service pulls in the database, which must never reach
 // the client bundle.
 import type { PlannedCard } from '@/lib/listen/service'
@@ -28,6 +29,12 @@ const SESSION_LENGTHS = [10, 20, 30, 45] as const
 const TOP_UP_BELOW = 3
 /** Consecutive failures that end the session. */
 const MAX_FAILURES = 3
+/**
+ * How long a card's audio fetch may hang before it's treated as a failure. A
+ * request that never resolves would otherwise leave the card "loading"
+ * forever — silence with no failure counted, and nothing to skip past.
+ */
+const AUDIO_FETCH_TIMEOUT_MS = 30_000
 const ACTIONS = ['play', 'pause', 'nexttrack', 'previoustrack', 'stop'] as const
 
 type Loaded = { ok: true; url: string } | { ok: false; error: string }
@@ -108,7 +115,7 @@ function createPlayer(env: {
   function setMetadata(card: PlannedCard) {
     const ms = env.mediaSession()
     if (!ms || typeof MediaMetadata === 'undefined') return
-    ms.metadata = new MediaMetadata({ title: card.promptText, artist: 'Fiszki', album: card.topicName ?? '' })
+    ms.metadata = new MediaMetadata({ title: card.promptText, artist: 'Fiszki', album: card.topicName ?? t.unnamedTopic })
   }
 
   function revoke(s: Session, keep: Set<string>) {
@@ -145,7 +152,7 @@ function createPlayer(env: {
     if (existing) return existing
     const p = (async (): Promise<Loaded> => {
       try {
-        const res = await env.fetch()(audioUrl(card))
+        const res = await env.fetch()(audioUrl(card), { signal: AbortSignal.timeout(AUDIO_FETCH_TIMEOUT_MS) })
         if (!res.ok) return { ok: false, error: await errorOf(res) }
         const blob = await res.blob()
         if (!alive(s)) return { ok: false, error: 'stopped' }

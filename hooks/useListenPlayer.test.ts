@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { PlannedCard } from '@/lib/listen/service'
+import { t } from '@/i18n/pl'
 import { useListenPlayer } from './useListenPlayer'
 
 class FakeAudio extends EventTarget {
@@ -329,6 +330,31 @@ describe('useListenPlayer', () => {
     await waitFor(() => expect(playing(hook.result.current.state).index).toBe(1))
   })
 
+  it('a hung audio fetch times out (via an AbortSignal) and counts as a failure, so the next card plays', async () => {
+    const cards = [0, 1].map((i) => card(i))
+    const f = fakeFetch({ cards })
+    // Captured outside the fetchImpl so a failed assertion here fails the
+    // test itself, instead of being swallowed as just another load failure.
+    let c0Signal: AbortSignal | undefined
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/listen/cards/c0/')) {
+        c0Signal = init?.signal ?? undefined
+        throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+      }
+      return f.fetchImpl(input, init)
+    }) as unknown as typeof fetch
+    const audio = new FakeAudio()
+    const hook = renderHook(() =>
+      useListenPlayer({ audio: () => audio as unknown as HTMLAudioElement, fetchImpl, mediaSession: null }),
+    )
+    await act(async () => {
+      await hook.result.current.start({ minutes: 10 })
+    })
+    await waitFor(() => expect(playing(hook.result.current.state).index).toBe(1))
+    // The hook must pass a real timeout signal, not just tolerate a missing one.
+    expect(c0Signal).toBeInstanceOf(AbortSignal)
+  })
+
   it('registers Media Session handlers that drive the player, and metadata follows the card', async () => {
     const cards = [0, 1, 2, 3, 4].map((i) => card(i))
     const { ms, raw, fire } = fakeMediaSession()
@@ -341,7 +367,8 @@ describe('useListenPlayer', () => {
     await act(async () => {
       await hook.result.current.start({ minutes: 10 })
     })
-    expect(raw.metadata).toMatchObject({ title: 'prompt 0', artist: 'Fiszki', album: '' })
+    // card 0's topicName is null — the same unnamed-topic label the page uses.
+    expect(raw.metadata).toMatchObject({ title: 'prompt 0', artist: 'Fiszki', album: t.unnamedTopic })
 
     await act(async () => {
       fire('pause')

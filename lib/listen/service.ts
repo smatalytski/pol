@@ -54,11 +54,12 @@ export function eligibleCard(db: Db, id: string): CardRow | null {
 
 /**
  * Plans a listening session (spec §4.1): eligible cards, optionally scoped to
- * `topicIds` and minus `excludeIds`, ordered with today's due cards first
- * (least recently heard first within that group), then the rest (never heard
- * first, then least recently heard), ties broken by `due` then `id` — and
- * taken in that order until the running `estimatedMs` reaches or passes the
- * chosen `minutes`.
+ * `topicIds` and minus `excludeIds`, ordered with review cards due by the end
+ * of today first (least recently heard first within that group), then the
+ * rest — including every never-reviewed card, however recent its creation
+ * `due` — (never heard first, then least recently heard), ties broken by
+ * `due` then `id` — and taken in that order until the running `estimatedMs`
+ * reaches or passes the chosen `minutes`.
  */
 export function planSession(
   db: Db,
@@ -92,9 +93,14 @@ export function planSession(
 
   const topicNameById = new Map(db.select({ id: topics.id, name: topics.name }).from(topics).all().map((t) => [t.id, t.name]))
 
+  // Group 0 is "due for review by end of today" — a never-reviewed card
+  // (state 0) doesn't count, even though its `due` (its creation time, per
+  // lib/scheduler's newState) usually looks like "today": that's not a review
+  // due date, and letting it in here would crowd out real due reviews. This
+  // mirrors the review queue's own due predicate (lib/review/queue.ts).
   const sorted = [...rows].sort((a, b) => {
-    const aGroup = a.due <= endOfToday ? 0 : 1
-    const bGroup = b.due <= endOfToday ? 0 : 1
+    const aGroup = a.state !== 0 && a.due <= endOfToday ? 0 : 1
+    const bGroup = b.state !== 0 && b.due <= endOfToday ? 0 : 1
     if (aGroup !== bGroup) return aGroup - bGroup
 
     // Never heard sorts as "least recently heard" — before any real heardAt.
