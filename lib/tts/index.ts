@@ -5,17 +5,10 @@ import type { Db } from '../db/client'
 import { ttsClips } from '../db/schema'
 import { speechLocation } from '../gcp/clients'
 import { putMedia } from '../media/store'
+import { type Lang, VOICES } from './voices'
 
-export type Lang = 'pl' | 'ru'
-
-// Chirp 3: HD, GA for both locales in the `eu` region. Names confirmed by
-// Step 1's probe of voices.list — do not invent them. Both are the "Kore"
-// character, which exists for both locales, so the same voice persona speaks
-// both languages.
-export const VOICES: Record<Lang, string> = {
-  pl: 'pl-PL-Chirp3-HD-Kore',
-  ru: 'ru-RU-Chirp3-HD-Kore',
-}
+export type { Lang }
+export { VOICES }
 
 const LANGUAGE_CODES: Record<Lang, string> = { pl: 'pl-PL', ru: 'ru-RU' }
 
@@ -113,11 +106,23 @@ export function ttsSynthesizer(opts: { synthesizeSpeech: SynthesizeFn }): Synthe
   }
 }
 
+// Module-level and created lazily on first use: a fresh TextToSpeechClient
+// per call would open a new gRPC channel every request and never close it.
+// One client is reused for the life of the process instead.
+let client: TextToSpeechClient | undefined
+
+function getClient(): TextToSpeechClient {
+  if (!client) {
+    client = new TextToSpeechClient({
+      apiEndpoint: `${speechLocation()}-texttospeech.googleapis.com`,
+    })
+  }
+  return client
+}
+
 export function getSynthesizer(): Synthesizer {
-  const client = new TextToSpeechClient({
-    apiEndpoint: `${speechLocation()}-texttospeech.googleapis.com`,
-  })
+  const c = getClient()
   return ttsSynthesizer({
-    synthesizeSpeech: (req) => client.synthesizeSpeech(req as never) as never,
+    synthesizeSpeech: (req) => c.synthesizeSpeech(req as never) as never,
   })
 }

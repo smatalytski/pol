@@ -28,7 +28,16 @@ function put(body: unknown) {
 describe('GET /api/settings', () => {
   it('returns the defaults on an empty table', async () => {
     const body = await (await GET()).json()
-    expect(body).toEqual({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 })
+    expect(body).toEqual({
+      newPerDay: 10,
+      requestRetention: 0.9,
+      audioGapSeconds: 5,
+      audioRepeatAnswer: 1,
+      audioExample: 1,
+      audioHint: 0,
+      audioRepeatExample: 1,
+      audioNextSeconds: 5,
+    })
   })
 })
 
@@ -58,5 +67,54 @@ describe('PUT /api/settings', () => {
   it('rejects a negative or non-integer newPerDay', async () => {
     expect((await put({ newPerDay: -1 })).status).toBe(400)
     expect((await put({ newPerDay: 2.5 })).status).toBe(400)
+  })
+
+  it('persists audioRepeatAnswer of 0', async () => {
+    const res = await put({ audioRepeatAnswer: 0 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioRepeatAnswer).toBe(0)
+  })
+
+  it('rejects audioExample of 2', async () => {
+    const res = await put({ audioExample: 2 })
+    expect(res.status).toBe(400)
+  })
+
+  it('persists audioHint of 1', async () => {
+    const res = await put({ audioHint: 1 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioHint).toBe(1)
+  })
+
+  it('rejects audioHint of 2', async () => {
+    const res = await put({ audioHint: 2 })
+    expect(res.status).toBe(400)
+  })
+
+  it('persists audioRepeatExample of 0', async () => {
+    const res = await put({ audioRepeatExample: 0 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioRepeatExample).toBe(0)
+  })
+
+  it('rejects audioRepeatExample of 2', async () => {
+    const res = await put({ audioRepeatExample: 2 })
+    expect(res.status).toBe(400)
+  })
+
+  it('persists a legitimate audioNextSeconds override', async () => {
+    const res = await put({ audioNextSeconds: 12 })
+    expect(res.status).toBe(200)
+    expect((await res.json()).audioNextSeconds).toBe(12)
+  })
+
+  it('rejects audioNextSeconds of 0', async () => {
+    const res = await put({ audioNextSeconds: 0 })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects audioNextSeconds of 31', async () => {
+    const res = await put({ audioNextSeconds: 31 })
+    expect(res.status).toBe(400)
   })
 })

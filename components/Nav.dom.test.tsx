@@ -19,4 +19,23 @@ describe('Nav', () => {
     const link = screen.getByRole('link', { name: 'Dodaj' })
     expect(link.getAttribute('href')).toBe('/dodaj')
   })
+
+  it('puts Słuchaj between Powtórki and Dodaj', () => {
+    render(<Nav />)
+    const links = screen.getAllByRole('link').map((l) => l.textContent)
+    const review = links.indexOf('Powtórki')
+    const listen = links.indexOf('Słuchaj')
+    const add = links.indexOf('Dodaj')
+    expect(review).toBeGreaterThanOrEqual(0)
+    expect(listen).toBe(review + 1)
+    expect(add).toBe(listen + 1)
+    expect(screen.getByRole('link', { name: 'Słuchaj' }).getAttribute('href')).toBe('/sluchaj')
+  })
+
+  // Six links in one unwrapped flex row overflow a 360-393px phone width —
+  // wrapping keeps every tab reachable instead of clipping or scrolling.
+  it('wraps onto multiple lines instead of overflowing on a narrow screen', () => {
+    render(<Nav />)
+    expect(screen.getByRole('navigation').className).toContain('flex-wrap')
+  })
 })

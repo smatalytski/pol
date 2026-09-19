@@ -11,6 +11,11 @@ const Body = z.object({
   newPerDay: z.number().int().min(0).max(200).optional(),
   requestRetention: z.number().min(0.7).max(0.98).optional(),
   audioGapSeconds: z.number().int().min(1).max(30).optional(),
+  audioRepeatAnswer: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioExample: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioHint: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioRepeatExample: z.union([z.literal(0), z.literal(1)]).optional(),
+  audioNextSeconds: z.number().int().min(1).max(30).optional(),
 })
 
 export async function PUT(req: Request) {

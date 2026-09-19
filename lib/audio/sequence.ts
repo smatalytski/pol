@@ -1,0 +1,139 @@
+import { createHash } from 'node:crypto'
+import { VOICES } from '../tts/voices'
+
+export const ASSEMBLY_VERSION = 1
+
+export type SequenceSettings = {
+  gapSeconds: number
+  repeatAnswer: boolean
+  example: boolean
+  hint: boolean
+  repeatExample: boolean
+  nextSeconds: number
+}
+
+export type SpokenPart =
+  | { kind: 'speech'; lang: 'pl' | 'ru'; text: string }
+  | { kind: 'silence'; ms: number }
+
+export type ListenCard = {
+  promptText: string
+  promptHint: string | null
+  answerPl: string
+  examplePl: string | null
+}
+
+/**
+ * Normalizes a spoken text so a slash is never read aloud. A slash written
+ * to separate alternatives (`седоватый / с проседью`, `a/b`) reads like a
+ * stray "slash" or a confusing pause to TTS, so every `/`, together with any
+ * whitespace around it, becomes `, ` instead (spec §3.2). Exported and pure
+ * so it can be unit-tested directly and reused by the review screen's own
+ * audio route.
+ */
+export function speakable(text: string): string {
+  return text.replace(/\s*\/\s*/g, ', ').trim()
+}
+
+/**
+ * Builds the sequence of spoken parts and silences for a card.
+ *
+ * Sequence:
+ * 1. RU prompt_text (+ ". " + prompt_hint when hint is on and the hint is non-blank)
+ * 2. silence: gapSeconds
+ * 3. PL answer_pl
+ * 4. if repeatAnswer: 1000 ms silence + PL answer_pl
+ * 5. if example and example_pl: 1000 ms silence + PL example_pl
+ *    if also repeatExample: 1000 ms silence + PL example_pl again
+ * 6. nextSeconds trailing silence
+ *
+ * Every spoken text passes through `speakable` first, so a slash stored in
+ * the card never gets read aloud.
+ */
+export function sequenceFor(card: ListenCard, s: SequenceSettings): SpokenPart[] {
+  const parts: SpokenPart[] = []
+
+  // 1. RU prompt (+ hint, only when the setting is on and the hint is non-blank)
+  const promptText = card.promptText.trim()
+  const hintText = s.hint ? card.promptHint?.trim() : undefined
+  const ruText = hintText ? `${promptText}. ${hintText}` : promptText
+  parts.push({ kind: 'speech', lang: 'ru', text: speakable(ruText) })
+
+  // 2. Silence (gap)
+  parts.push({ kind: 'silence', ms: s.gapSeconds * 1000 })
+
+  // 3. PL answer
+  const answerText = speakable(card.answerPl.trim())
+  parts.push({ kind: 'speech', lang: 'pl', text: answerText })
+
+  // 4. Repeat answer if enabled
+  if (s.repeatAnswer) {
+    parts.push({ kind: 'silence', ms: 1000 })
+    parts.push({ kind: 'speech', lang: 'pl', text: answerText })
+  }
+
+  // 5. Example if enabled and present, optionally repeated
+  const exampleText = card.examplePl?.trim() ? speakable(card.examplePl.trim()) : undefined
+  if (s.example && exampleText) {
+    parts.push({ kind: 'silence', ms: 1000 })
+    parts.push({ kind: 'speech', lang: 'pl', text: exampleText })
+    if (s.repeatExample) {
+      parts.push({ kind: 'silence', ms: 1000 })
+      parts.push({ kind: 'speech', lang: 'pl', text: exampleText })
+    }
+  }
+
+  // 6. Trailing silence, before the next card
+  parts.push({ kind: 'silence', ms: s.nextSeconds * 1000 })
+
+  return parts
+}
+
+/**
+ * Computes a stable SHA-256 cache key for a card's audio sequence.
+ * The key includes the assembly version, voice names, and the sequence itself.
+ */
+export function audioKey(card: ListenCard, s: SequenceSettings): string {
+  const parts = sequenceFor(card, s)
+  const hashInput = JSON.stringify({ v: ASSEMBLY_VERSION, voices: VOICES, parts })
+  return createHash('sha256').update(hashInput).digest('hex')
+}
+
+/**
+ * Estimates the duration of a sequence in milliseconds.
+ * Calculation: 60 ms per character of spoken text, plus all silences.
+ */
+export function estimateMs(parts: SpokenPart[]): number {
+  let totalMs = 0
+
+  for (const part of parts) {
+    if (part.kind === 'speech') {
+      totalMs += part.text.length * 60
+    } else {
+      totalMs += part.ms
+    }
+  }
+
+  return totalMs
+}
+
+/**
+ * Converts settings from their stored form (0/1 numbers) to the sequence form (booleans).
+ */
+export function settingsToSequence(settings: {
+  audioGapSeconds: number
+  audioRepeatAnswer: number
+  audioExample: number
+  audioHint: number
+  audioRepeatExample: number
+  audioNextSeconds: number
+}): SequenceSettings {
+  return {
+    gapSeconds: settings.audioGapSeconds,
+    repeatAnswer: settings.audioRepeatAnswer !== 0,
+    example: settings.audioExample !== 0,
+    hint: settings.audioHint !== 0,
+    repeatExample: settings.audioRepeatExample !== 0,
+    nextSeconds: settings.audioNextSeconds,
+  }
+}
