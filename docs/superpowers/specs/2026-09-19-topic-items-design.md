@@ -45,6 +45,7 @@ A new, append-only `migrations/005-topic-items.sql`.
 | `status` | `open` (bez karty) \| `discarded` (odrzucone) \| `carded` (converted) |
 | `capture_id` | the capture `+ karta` created; `ON DELETE SET NULL` |
 | `card_id` | the card it became, once known |
+| `batch_job_id` | the `suggest` job that proposed it; null for manual and copied rows |
 
 SQLite cannot drop a NOT NULL constraint, so the migration creates `topic_items`, copies `suggestions` into it and drops `suggestions`. The copy maps `proposed` to `open`, `rejected` to `discarded`, and `accepted` to `carded`, with `card_id` taken from the item's capture where one exists. Copied rows get `source = 'suggested'` and `level = 'zaawansowany'`. `round` is not carried over.
 
@@ -101,7 +102,7 @@ Items with `status = 'carded'` are in no group. They exist so that a batch never
   - `sredni` treats the user as a solid B1 speaker: include common situational vocabulary a B1 speaker is likely to lack, but still skip absolute basics such as `lekarz` or `dziecko`.
 - **New items:** saved as `open`, `source = 'suggested'`, with the batch's `level`.
 - **Deduplication is unchanged:** never a live deck word, and never anything the topic has held, in any status. The exclusion list sent to the model covers every `topic_items.answer_pl` of the topic.
-- **One batch at a time per topic:** a batch is refused while that topic has a `suggest` job queued or running. With rounds gone, the job's params no longer carry `round`, and the "a rerun never duplicates a round" guard becomes "the job records the ids of the items it inserted, and a rerun that finds them does nothing".
+- **One batch at a time per topic:** a batch is refused while that topic has a `suggest` job queued or running. With rounds gone, the job's params no longer carry `round`, and the "a rerun never duplicates a round" guard becomes: a job that finds items with its own `batch_job_id` has already stored its batch and does nothing.
 - **Ogólne:** `POST` for a batch on the default topic gets a 400.
 
 ### 4.6 Adding by hand
