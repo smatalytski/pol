@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { VOICES } from '../tts'
+import { VOICES } from '../tts/voices'
 
 export const ASSEMBLY_VERSION = 1
 

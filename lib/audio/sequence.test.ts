@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { ASSEMBLY_VERSION, sequenceFor, audioKey, estimateMs, settingsToSequence, type SequenceSettings, type ListenCard } from './sequence'
-import { VOICES } from '../tts'
+import { VOICES } from '../tts/voices'
 
 describe('sequence', () => {
+  it('does not import from ../tts (must use ../tts/voices to stay pure)', () => {
+    const sourceCode = readFileSync(resolve(__dirname, './sequence.ts'), 'utf-8')
+    expect(sourceCode).not.toContain(`from '../tts'`)
+  })
   const defaultSettings: SequenceSettings = { gapSeconds: 5, repeatAnswer: true, example: true }
 
   const cardWithHintAndExample: ListenCard = {
