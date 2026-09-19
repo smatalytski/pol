@@ -1,10 +1,10 @@
-import { and, count, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { Db } from '../db/client'
 import { captures, cards, generationJobs, topicItems, topics } from '../db/schema'
 import { answerKey } from '../cards/answer-key'
-import type { CardRow } from '../cards/service'
+import { cardTopicName, knownCardFor, type CardRow } from '../cards/service'
 import type { Suggester } from '../generate'
 import { enqueueJob, type JobRow } from '../queue/jobs'
 import { DEFAULT_TOPIC_ID } from './default'
@@ -185,12 +185,15 @@ export function listTopics(db: Db): TopicListRow[] {
   const deleted = cardCounts(true)
   const open = itemCounts('open')
   const discarded = itemCounts('discarded')
+  // A /dodaj capture is created with topic_id NULL (unchanged by this task);
+  // it belongs to Ogólne the same as a topicless card does, so it is folded
+  // into DEFAULT_TOPIC_ID's group here rather than dropped from every count.
   const pending = countsBy(
     db
-      .select({ topicId: captures.topicId, n: count() })
+      .select({ topicId: sql<string>`coalesce(${captures.topicId}, ${DEFAULT_TOPIC_ID})`, n: count() })
       .from(captures)
-      .where(and(isNotNull(captures.topicId), inArray(captures.status, PENDING)))
-      .groupBy(captures.topicId)
+      .where(inArray(captures.status, PENDING))
+      .groupBy(sql`coalesce(${captures.topicId}, ${DEFAULT_TOPIC_ID})`)
       .all(),
   )
   // A topic still searching for a batch: /tematy polls for it too, so a
@@ -315,10 +318,16 @@ export function topicView(db: Db, id: string): TopicView | null {
       open: items('open').map(itemView),
       discarded,
     },
+    // A /dodaj capture has topic_id NULL and belongs to Ogólne (see listTopics).
     pending: db
       .select({ id: captures.id, transcript: captures.transcript, status: captures.status })
       .from(captures)
-      .where(and(eq(captures.topicId, id), inArray(captures.status, PENDING)))
+      .where(
+        and(
+          id === DEFAULT_TOPIC_ID ? or(eq(captures.topicId, id), isNull(captures.topicId)) : eq(captures.topicId, id),
+          inArray(captures.status, PENDING),
+        ),
+      )
       .orderBy(desc(captures.createdAt))
       .all() as TopicView['pending'],
     batch: { state, error: state === 'failed' ? latest!.lastError : null },
@@ -344,4 +353,129 @@ export function retrySuggest(db: Db, topicId: string, now: Date): string | null 
   const latest = latestSuggestJob(db, topicId)
   if (latest?.status !== 'failed') return null
   return enqueueSuggest(db, topicId, parseBatchJob(latest.paramsJson), now)
+}
+
+/**
+ * `+ karta` on an open item (spec 2026-09-19-topic-items §4.1): turns it into
+ * an audio-less capture with an ordinary `new` job, exactly what accepting a
+ * recording did before, and marks the item carded with that capture linked.
+ * Null, queueing nothing, unless the item is open and in this topic — the
+ * caller turns that into a 404. One transaction, so an item is never left
+ * carded without its capture, or a capture created without its item updated.
+ */
+export function cardItem(db: Db, topicId: string, itemId: string, now: Date): { captureId: string } | null {
+  return db.transaction((tx) => {
+    const item = tx
+      .select()
+      .from(topicItems)
+      .where(and(eq(topicItems.id, itemId), eq(topicItems.topicId, topicId), eq(topicItems.status, 'open')))
+      .get()
+    if (!item) return null
+    const captureId = randomUUID()
+    tx.insert(captures)
+      .values({
+        id: captureId,
+        audioMediaId: null,
+        transcript: item.answerPl,
+        status: 'queued',
+        error: null,
+        generationJson: null,
+        cardId: null,
+        createdAt: now.getTime(),
+        transcribedAt: null,
+        duplicateOf: null,
+        topicId,
+        glossRu: item.glossRu,
+        lang: null,
+      })
+      .run()
+    enqueueJob(tx as unknown as Db, { kind: 'new', captureId }, now)
+    tx.update(topicItems).set({ status: 'carded', captureId }).where(eq(topicItems.id, itemId)).run()
+    return { captureId }
+  })
+}
+
+/** `✕` on an item in bez karty (spec §4.2): open only, becomes discarded with a timestamp. */
+export function discardItem(db: Db, topicId: string, itemId: string, now: Date): boolean {
+  const item = db
+    .select({ id: topicItems.id })
+    .from(topicItems)
+    .where(and(eq(topicItems.id, itemId), eq(topicItems.topicId, topicId), eq(topicItems.status, 'open')))
+    .get()
+  if (!item) return false
+  db.update(topicItems).set({ status: 'discarded', discardedAt: now.getTime() }).where(eq(topicItems.id, itemId)).run()
+  return true
+}
+
+/** `przywróć` on an item in odrzucone (spec §4.3): discarded only, goes back to open. */
+export function restoreItem(db: Db, topicId: string, itemId: string): boolean {
+  const item = db
+    .select({ id: topicItems.id })
+    .from(topicItems)
+    .where(and(eq(topicItems.id, itemId), eq(topicItems.topicId, topicId), eq(topicItems.status, 'discarded')))
+    .get()
+  if (!item) return false
+  db.update(topicItems).set({ status: 'open', discardedAt: null }).where(eq(topicItems.id, itemId)).run()
+  return true
+}
+
+/** `temat: …` on an item (spec §4.4): sets its topic without touching its group. False for an unknown item or topic. */
+export function moveItem(db: Db, itemId: string, toTopicId: string): boolean {
+  if (!db.select({ id: topics.id }).from(topics).where(eq(topics.id, toTopicId)).get()) return false
+  return db.update(topicItems).set({ topicId: toTopicId }).where(eq(topicItems.id, itemId)).run().changes > 0
+}
+
+/**
+ * `dodaj` on the hand-add bar (spec §4.6). Trims the text and refuses an
+ * empty one, a word the topic already holds (any status, compared by
+ * `answerKey` in JS like `searchCards`), or a word already in the deck
+ * (`knownCardFor`, so a Cyrillic entry matches against cards' Russian
+ * prompts too). Otherwise stores it as a manual open item with no gloss,
+ * kind or level — a hand-added word carries none of a suggestion's metadata.
+ */
+export function addManualItem(
+  db: Db,
+  topicId: string,
+  text: string,
+  now: Date,
+):
+  | { ok: true; item: ItemView }
+  | { ok: false; reason: 'empty' | 'not-found' }
+  | { ok: false; reason: 'in-topic' }
+  | { ok: false; reason: 'in-deck'; topicName: string } {
+  const trimmed = text.trim()
+  if (!trimmed) return { ok: false, reason: 'empty' }
+  if (!db.select({ id: topics.id }).from(topics).where(eq(topics.id, topicId)).get()) return { ok: false, reason: 'not-found' }
+
+  const key = answerKey(trimmed)
+  const inTopic = db
+    .select({ answerPl: topicItems.answerPl })
+    .from(topicItems)
+    .where(eq(topicItems.topicId, topicId))
+    .all()
+    .some((i) => answerKey(i.answerPl) === key)
+  if (inTopic) return { ok: false, reason: 'in-topic' }
+
+  const cardId = knownCardFor(db, trimmed)
+  if (cardId) return { ok: false, reason: 'in-deck', topicName: cardTopicName(db, cardId) }
+
+  const id = randomUUID()
+  db.insert(topicItems)
+    .values({
+      id,
+      topicId,
+      answerPl: trimmed,
+      glossRu: null,
+      kind: null,
+      source: 'manual',
+      level: null,
+      status: 'open',
+      captureId: null,
+      cardId: null,
+      batchJobId: null,
+      discardedAt: null,
+      createdAt: now.getTime(),
+    })
+    .run()
+  return { ok: true, item: itemView(db.select().from(topicItems).where(eq(topicItems.id, id)).get()!) }
 }

@@ -1,8 +1,8 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import type { Db } from '../db/client'
 import { captures, cards, topicItems, topics } from '../db/schema'
-import { createCard, regenerateCard, type GeneratedFields } from '../cards/service'
+import { createCard, knownCardFor, regenerateCard, type GeneratedFields } from '../cards/service'
 import { answerKey } from '../cards/answer-key'
 import { getMedia, putMedia } from '../media/store'
 import { toCardFields, type Generator, type Meaning, type Suggester } from '../generate'
@@ -70,33 +70,6 @@ function strandedFields(transcript: string): GeneratedFields {
  * so the time is read then. Routes pass `() => new Date()`; tests a fake.
  */
 export type RecognizeDeps = { db: Db; transcriber: Transcriber; clock: () => Date }
-
-const CYRILLIC = /[Ѐ-ӿ]/
-
-/**
- * `już masz` at recognition time (spec 2026-09-18-generation-queue §4). Checks
- * the raw transcript against live ru_to_pl cards — new dictations are always
- * ru_to_pl, and dedup is type-scoped. Best-effort by design: a card is keyed by
- * its generated answer, so a transcript that lost a diacritic misses here, and
- * createCard's dedup at generation time stays as the backstop.
- */
-export function knownCardFor(db: Db, transcript: string): string | null {
-  const key = answerKey(transcript)
-  if (!key) return null
-  const live = and(eq(cards.type, 'ru_to_pl'), isNull(cards.deletedAt))
-  if (!CYRILLIC.test(transcript)) {
-    return db.select({ id: cards.id }).from(cards).where(and(live, eq(cards.answerKey, key))).get()?.id ?? null
-  }
-  // The Russian prompt is stored raw, not keyed, so keys are compared in JS —
-  // the same personal-scale trade-off as searchCards.
-  const match = db
-    .select({ id: cards.id, promptText: cards.promptText })
-    .from(cards)
-    .where(and(live, isNotNull(cards.promptText)))
-    .all()
-    .find((c) => answerKey(c.promptText!) === key)
-  return match?.id ?? null
-}
 
 /**
  * Recognises an uploaded (or failed) recording and opens its review window.

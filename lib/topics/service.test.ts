@@ -3,15 +3,21 @@ import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { captures, cards, generationJobs, topicItems, topics } from '../db/schema'
 import { createCard, deleteCard } from '../cards/service'
+import { createCapture } from '../capture/pipeline'
 import type { Suggestion, Suggester } from '../generate'
 import { enqueueJob } from '../queue/jobs'
 import { DEFAULT_TOPIC_ID } from './default'
 import {
   activeSuggestJob,
+  addManualItem,
+  cardItem,
   createTopic,
+  discardItem,
   enqueueSuggest,
   listTopics,
+  moveItem,
   parseBatchJob,
+  restoreItem,
   retrySuggest,
   runSuggest,
   topicView,
@@ -270,6 +276,18 @@ describe('topicView', () => {
     expect(topicView(db, 't1')!.pending).toEqual([{ id: 'c1', transcript: 'gorączka', status: 'queued' }])
   })
 
+  // Controller ruling from Task 2's review: /dodaj creates its captures with
+  // topic_id NULL (unchanged here), so a NULL capture topic must be treated
+  // as the default topic here too, the same as listTopics's pendingCount.
+  it('treats a /dodaj-style capture (topic_id null) as Ogólne’s pending, and not another topic’s', () => {
+    const { db } = createTestDb()
+    topic(db, 't2')
+    const capId = createCapture(db, { bytes: new Uint8Array([1, 2, 3]), mime: 'audio/webm' }, NOW)
+    db.update(captures).set({ status: 'queued' }).where(eq(captures.id, capId)).run()
+    expect(topicView(db, DEFAULT_TOPIC_ID)!.pending).toEqual([{ id: capId, transcript: null, status: 'queued' }])
+    expect(topicView(db, 't2')!.pending).toEqual([])
+  })
+
   it('is null for an unknown topic', () => {
     const { db } = createTestDb()
     expect(topicView(db, 'nope')).toBeNull()
@@ -303,6 +321,18 @@ describe('listTopics', () => {
     const rows = listTopics(db)
     expect(rows[0]).toMatchObject({ id: DEFAULT_TOPIC_ID, cardCount: 1, openCount: 0, discardedCount: 0 })
     expect(rows[1]).toMatchObject({ id: 't1', cardCount: 0, openCount: 1, discardedCount: 1 })
+  })
+
+  // Same controller ruling as topicView's pending: a NULL capture topic
+  // (/dodaj) counts toward Ogólne's pendingCount, not toward no topic at all.
+  it('counts a /dodaj-style capture (topic_id null) toward Ogólne’s pendingCount, and not another topic’s', () => {
+    const { db } = createTestDb()
+    topic(db, 't2')
+    const capId = createCapture(db, { bytes: new Uint8Array([1, 2, 3]), mime: 'audio/webm' }, NOW)
+    db.update(captures).set({ status: 'queued' }).where(eq(captures.id, capId)).run()
+    const rows = listTopics(db)
+    expect(rows.find((t) => t.id === DEFAULT_TOPIC_ID)!.pendingCount).toBe(1)
+    expect(rows.find((t) => t.id === 't2')!.pendingCount).toBe(0)
   })
 
   it('counts live and deleted cards and pending captures per topic, newest topic first after the default', () => {
@@ -370,5 +400,82 @@ describe('retrySuggest', () => {
     db.update(generationJobs).set({ status: 'failed' }).where(eq(generationJobs.id, jobId)).run()
     const again = retrySuggest(db, 't1', NOW)!
     expect(JSON.parse(jobRow(db, again).paramsJson!)).toEqual({ count: 10, mix: 'mieszane', level: 'zaawansowany' })
+  })
+})
+
+describe('+ karta (§4.1)', () => {
+  it('turns an open item into a queued capture with a new job, and marks it carded', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const id = item(db, 'gorączka', { glossRu: 'жар' })
+    const { captureId } = cardItem(db, 't1', id, NOW)!
+    expect(db.select().from(captures).where(eq(captures.id, captureId)).get()).toMatchObject({
+      status: 'queued', audioMediaId: null, transcript: 'gorączka', topicId: 't1', glossRu: 'жар',
+    })
+    expect(db.select().from(generationJobs).where(eq(generationJobs.captureId, captureId)).get()!.kind).toBe('new')
+    expect(db.select().from(topicItems).where(eq(topicItems.id, id)).get()).toMatchObject({ status: 'carded', captureId })
+  })
+
+  it('refuses an item that is not open, or not in this topic', () => {
+    const { db } = createTestDb()
+    topic(db); topic(db, 't2')
+    const gone = item(db, 'a', { status: 'discarded' })
+    expect(cardItem(db, 't1', gone, NOW)).toBeNull()
+    expect(cardItem(db, 't2', item(db, 'b'), NOW)).toBeNull()
+  })
+})
+
+describe('discard and restore (§4.2, §4.3)', () => {
+  it('discards an item with a timestamp and restores it to open', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const id = item(db, 'a')
+    expect(discardItem(db, 't1', id, NOW)).toBe(true)
+    expect(db.select().from(topicItems).get()).toMatchObject({ status: 'discarded', discardedAt: NOW.getTime() })
+    expect(restoreItem(db, 't1', id)).toBe(true)
+    expect(db.select().from(topicItems).get()).toMatchObject({ status: 'open', discardedAt: null })
+  })
+})
+
+describe('adding by hand (§4.6)', () => {
+  it('saves a trimmed manual open item with no gloss, kind or level', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const r = addManualItem(db, 't1', '  wahacz  ', NOW)
+    expect(r).toMatchObject({ ok: true, item: { answerPl: 'wahacz', glossRu: null, kind: null, source: 'manual', level: null } })
+  })
+
+  it('refuses empty text, a word the topic already holds in any status, and a deck word', () => {
+    const { db } = createTestDb()
+    topic(db)
+    item(db, 'Katar', { status: 'discarded' })
+    card(db, 'kot') // in Ogólne
+    expect(addManualItem(db, 't1', '  ', NOW)).toEqual({ ok: false, reason: 'empty' })
+    expect(addManualItem(db, 't1', 'katar.', NOW)).toEqual({ ok: false, reason: 'in-topic' })
+    expect(addManualItem(db, 't1', 'Kot', NOW)).toEqual({ ok: false, reason: 'in-deck', topicName: 'Ogólne' })
+  })
+
+  it('matches a Cyrillic entry against cards\' Russian prompts', () => {
+    const { db } = createTestDb()
+    topic(db)
+    card(db, 'kot') // helper's promptText is 'x'
+    db.update(cards).set({ promptText: 'кот' }).run()
+    expect(addManualItem(db, 't1', 'Кот', NOW)).toMatchObject({ ok: false, reason: 'in-deck' })
+  })
+
+  it('is allowed in the default topic', () => {
+    const { db } = createTestDb()
+    expect(addManualItem(db, DEFAULT_TOPIC_ID, 'wahacz', NOW)).toMatchObject({ ok: true })
+  })
+})
+
+describe('moving (§4.4)', () => {
+  it('moves an item to another topic without changing its status', () => {
+    const { db } = createTestDb()
+    topic(db); topic(db, 't2')
+    const id = item(db, 'a', { status: 'discarded' })
+    expect(moveItem(db, id, 't2')).toBe(true)
+    expect(db.select().from(topicItems).get()).toMatchObject({ topicId: 't2', status: 'discarded' })
+    expect(moveItem(db, id, 'nope')).toBe(false)
   })
 })

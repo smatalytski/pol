@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { createTestDb } from '../db/testing'
 import { cards, captures, generationJobs, media, topicItems, topics } from '../db/schema'
-import { createCard, deleteCard, type CreateCardInput } from '../cards/service'
+import { createCard, deleteCard, knownCardFor, type CreateCardInput } from '../cards/service'
 import { GenerationError, type Generator, type GeneratedCard } from '../generate'
 import type { Transcriber } from '../transcribe'
 import { enqueueJob } from '../queue/jobs'
 import { DEFAULT_TOPIC_ID } from '../topics/default'
 import {
-  createCapture, recognizeCapture, recognizeStranded, listOnScreen, pendingCaptures, knownCardFor,
+  createCapture, recognizeCapture, recognizeStranded, listOnScreen, pendingCaptures,
   generateNewCard, giveUpNewCard, jobHandlers,
 } from './pipeline'
 

@@ -10,7 +10,9 @@ import {
   CardTypeError,
   deleteCard,
   findDuplicate,
+  moveCard,
   regenerateCard,
+  restoreCard,
   searchCards,
   setCardType,
   updateCard,
@@ -562,5 +564,34 @@ describe('setCardType', () => {
     const { card, duplicateOf } = setCardType(db, cardId, 'pl_to_pl', LATER)
     expect(duplicateOf).toBe(existing.cardId)
     expect(card.type).toBe('ru_to_pl')
+  })
+})
+
+describe('restoreCard', () => {
+  it('undeletes a card with its schedule untouched', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    db.update(cards).set({ reps: 3, stability: 7 }).where(eq(cards.id, cardId)).run()
+    deleteCard(db, cardId, NOW)
+    const r = restoreCard(db, cardId, NOW)
+    expect(r).toMatchObject({ ok: true, card: { id: cardId, deletedAt: null, reps: 3, stability: 7 } })
+  })
+
+  it('refuses when a live card with the same answer now exists, naming its topic', () => {
+    const { db } = createTestDb()
+    const { cardId } = createCard(db, input(), NOW)
+    deleteCard(db, cardId, NOW)
+    createCard(db, input(), NOW) // a fresh one, filed under Ogólne
+    expect(restoreCard(db, cardId, NOW)).toEqual({ ok: false, reason: 'conflict', topicName: 'Ogólne' })
+  })
+})
+
+describe('moveCard', () => {
+  it('moves a card to another topic, refusing an unknown one', () => {
+    const { db } = createTestDb()
+    db.insert(topics).values({ id: 't2', name: 'B', context: 'x', suspendedAt: null, createdAt: 1, isDefault: false }).run()
+    const { cardId } = createCard(db, input(), NOW)
+    expect(moveCard(db, cardId, 't2')!.topicId).toBe('t2')
+    expect(moveCard(db, cardId, 'nope')).toBeNull()
   })
 })
