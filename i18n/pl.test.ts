@@ -16,6 +16,10 @@ describe('strings', () => {
       'levelAdvanced', 'levelIntermediate', 'levelBadge', 'tabCarded', 'tabOpen', 'tabDiscarded',
       'makeCard', 'discard', 'restore', 'cardBadge', 'moveTo', 'manualAdd', 'manualPlaceholder',
       'addItem', 'cancel', 'moveToDiscarded',
+      'listen', 'listenLength', 'listenAllTopics', 'listenStart', 'listenStop', 'listenPause', 'listenResume',
+      'listenSkip', 'listenDone', 'listenCards', 'listenAgain', 'listenFailed', 'listenMinutesLeft',
+      'listenSection', 'listenGap', 'listenRepeat', 'listenExample',
+      'listenSummaryGap', 'listenSummaryRepeat', 'listenSummaryExample',
     ]
     for (const key of required) expect(t).toHaveProperty(key)
   })

@@ -2,19 +2,30 @@
 import { useEffect, useState } from 'react'
 import { t } from '@/i18n/pl'
 
-type Settings = { newPerDay: number; requestRetention: number }
+type Settings = {
+  newPerDay: number
+  requestRetention: number
+  audioGapSeconds: number
+  audioRepeatAnswer: number
+  audioExample: number
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null)
-  // Draft strings for the two inputs, separate from `settings` (the last
+  // Draft values for the controls below, separate from `settings` (the last
   // known-good value the server has confirmed). Important review finding
   // (A3): these inputs used to be uncontrolled `defaultValue`s, so a value
   // the server rejected (e.g. requestRetention outside 0.7-0.98) stayed on
   // screen looking accepted. Making them controlled from `settings` and only
   // ever advancing the draft on a successful PUT means a rejected value
-  // reverts to the last confirmed one instead of lingering.
+  // reverts to the last confirmed one instead of lingering. The two
+  // checkboxes save on change rather than on blur, but follow the same
+  // draft/revert shape.
   const [newPerDayDraft, setNewPerDayDraft] = useState('')
   const [retentionDraft, setRetentionDraft] = useState('')
+  const [gapDraft, setGapDraft] = useState('')
+  const [repeatDraft, setRepeatDraft] = useState(false)
+  const [exampleDraft, setExampleDraft] = useState(false)
   const [error, setError] = useState(false)
 
   useEffect(() => {
@@ -24,6 +35,9 @@ export default function SettingsPage() {
         setSettings(s)
         setNewPerDayDraft(String(s.newPerDay))
         setRetentionDraft(String(s.requestRetention))
+        setGapDraft(String(s.audioGapSeconds))
+        setRepeatDraft(s.audioRepeatAnswer === 1)
+        setExampleDraft(s.audioExample === 1)
       })
   }, [])
 
@@ -35,13 +49,12 @@ export default function SettingsPage() {
     })
     // Cross-field clobber guard (re-review finding on A3): only ever touch
     // the draft(s) for the field(s) this specific `save()` call actually
-    // sent. Each input's onBlur calls `save` with just its own key — without
-    // this scoping, blurring field A (an async PUT) while the user is
+    // sent. Each control calls `save` with just its own key — without this
+    // scoping, blurring/changing field A (an async PUT) while the user is
     // already mid-edit on field B, then having A's response land, would
     // overwrite B's uncommitted draft with the server's stale pre-edit
     // value, silently discarding it. That is exactly the class of bug A3
-    // was written to close, just reintroduced across two fields instead of
-    // one.
+    // was written to close, just reintroduced across more fields.
     if (!res.ok) {
       setError(true)
       // Revert only the just-attempted field's draft to the last confirmed
@@ -49,6 +62,9 @@ export default function SettingsPage() {
       if (settings) {
         if ('newPerDay' in patch) setNewPerDayDraft(String(settings.newPerDay))
         if ('requestRetention' in patch) setRetentionDraft(String(settings.requestRetention))
+        if ('audioGapSeconds' in patch) setGapDraft(String(settings.audioGapSeconds))
+        if ('audioRepeatAnswer' in patch) setRepeatDraft(settings.audioRepeatAnswer === 1)
+        if ('audioExample' in patch) setExampleDraft(settings.audioExample === 1)
       }
       return
     }
@@ -57,6 +73,9 @@ export default function SettingsPage() {
     setSettings(s)
     if ('newPerDay' in patch) setNewPerDayDraft(String(s.newPerDay))
     if ('requestRetention' in patch) setRetentionDraft(String(s.requestRetention))
+    if ('audioGapSeconds' in patch) setGapDraft(String(s.audioGapSeconds))
+    if ('audioRepeatAnswer' in patch) setRepeatDraft(s.audioRepeatAnswer === 1)
+    if ('audioExample' in patch) setExampleDraft(s.audioExample === 1)
   }
 
   if (!settings) return null
@@ -89,6 +108,44 @@ export default function SettingsPage() {
           className="rounded border p-3"
         />
       </label>
+
+      <div className="flex flex-col gap-4">
+        <h2 className="text-lg">{t.listenSection}</h2>
+        <label className="flex flex-col gap-1">
+          {t.listenGap}
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={gapDraft}
+            onChange={(e) => setGapDraft(e.target.value)}
+            onBlur={() => void save({ audioGapSeconds: Number(gapDraft) })}
+            className="rounded border p-3"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={repeatDraft}
+            onChange={(e) => {
+              setRepeatDraft(e.target.checked)
+              void save({ audioRepeatAnswer: e.target.checked ? 1 : 0 })
+            }}
+          />
+          {t.listenRepeat}
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={exampleDraft}
+            onChange={(e) => {
+              setExampleDraft(e.target.checked)
+              void save({ audioExample: e.target.checked ? 1 : 0 })
+            }}
+          />
+          {t.listenExample}
+        </label>
+      </div>
     </div>
   )
 }

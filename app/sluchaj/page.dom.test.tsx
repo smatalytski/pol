@@ -1,0 +1,173 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
+import { t } from '@/i18n/pl'
+import type { PlayerState } from '@/hooks/useListenPlayer'
+
+vi.mock('next/link', () => ({
+  default: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
+}))
+
+const start = vi.fn()
+const pause = vi.fn()
+const resume = vi.fn()
+const skip = vi.fn()
+const stop = vi.fn()
+const replay = vi.fn()
+
+let mockState: PlayerState = { phase: 'idle' }
+
+vi.mock('@/hooks/useListenPlayer', () => ({
+  useListenPlayer: () => ({
+    state: mockState,
+    start,
+    pause,
+    resume,
+    skip,
+    stop,
+    replay,
+  }),
+}))
+
+const ListenPage = (await import('./page')).default
+
+const STORAGE_KEY = 'fiszki:listen:minutes'
+
+function stubFetch(topics: unknown[], settings: Record<string, unknown>) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url === '/api/topics') return Promise.resolve({ ok: true, json: () => Promise.resolve({ topics }) }) as unknown as Promise<Response>
+      if (url === '/api/settings') return Promise.resolve({ ok: true, json: () => Promise.resolve(settings) }) as unknown as Promise<Response>
+      return Promise.reject(new Error(`unexpected fetch ${url}`))
+    }),
+  )
+}
+
+const card = (over: Partial<{ id: string; promptText: string; topicName: string; estimatedMs: number; audioKey: string }> = {}) => ({
+  id: 'c1',
+  promptText: 'привет',
+  topicName: 'U lekarza',
+  estimatedMs: 3000,
+  audioKey: 'k1',
+  ...over,
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  localStorage.clear()
+  mockState = { phase: 'idle' }
+  start.mockClear()
+  pause.mockClear()
+  resume.mockClear()
+  skip.mockClear()
+  stop.mockClear()
+  replay.mockClear()
+})
+
+describe('ListenPage — idle', () => {
+  it('renders a hidden audio element unconditionally', () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    const { container } = render(<ListenPage />)
+    expect(container.querySelector('audio')).toBeTruthy()
+  })
+
+  it('calls start({ minutes: 20 }) by default, with no topicIds', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    fireEvent.click(screen.getByRole('button', { name: t.listenStart }))
+    expect(start).toHaveBeenCalledWith({ minutes: 20 })
+  })
+
+  it('uses the stored length on mount and sends the chosen length and topic ids once chosen', async () => {
+    localStorage.setItem(STORAGE_KEY, '45')
+    stubFetch(
+      [
+        { id: 't1', name: 'U lekarza', suspendedAt: null, isDefault: false },
+        { id: 't2', name: 'Zawieszony', suspendedAt: 12345, isDefault: false },
+      ],
+      { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 },
+    )
+    render(<ListenPage />)
+    expect(screen.getByRole('button', { name: '45' }).getAttribute('aria-pressed')).toBe('true')
+    // Only the switched-on topic is offered — the suspended one is not.
+    const chip = await screen.findByRole('button', { name: 'U lekarza' })
+    expect(screen.queryByRole('button', { name: 'Zawieszony' })).toBeNull()
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('button', { name: t.listenStart }))
+    expect(start).toHaveBeenCalledWith({ minutes: 45, topicIds: ['t1'] })
+  })
+
+  it('clears the chosen topics when "wszystkie" is chosen', async () => {
+    stubFetch(
+      [{ id: 't1', name: 'U lekarza', suspendedAt: null, isDefault: false }],
+      { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 },
+    )
+    render(<ListenPage />)
+    const chip = await screen.findByRole('button', { name: 'U lekarza' })
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('button', { name: t.listenAllTopics }))
+    fireEvent.click(screen.getByRole('button', { name: t.listenStart }))
+    expect(start).toHaveBeenCalledWith({ minutes: 20 })
+  })
+
+  it('shows a summary line built from settings, linking to /ustawienia', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    const link = await screen.findByText('przerwa 5 s · odpowiedź ×2 · przykład')
+    expect(link.closest('a')?.getAttribute('href')).toBe('/ustawienia')
+  })
+
+  it('omits disabled parts from the summary line', async () => {
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 0, audioExample: 0 })
+    render(<ListenPage />)
+    expect(await screen.findByText('przerwa 5 s')).toBeTruthy()
+  })
+})
+
+describe('ListenPage — playing / paused', () => {
+  it('renders the playing card and calls pause/skip/stop', () => {
+    mockState = { phase: 'playing', index: 0, cards: [card(), card({ id: 'c2' })], playedMs: 0, heard: 0 }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    expect(screen.getByText('привет')).toBeTruthy()
+    expect(screen.getByText('U lekarza')).toBeTruthy()
+    expect(screen.getByText('1 / 2')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: t.listenPause }))
+    expect(pause).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: t.listenSkip }))
+    expect(skip).toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: t.listenStop }))
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it('renders the paused card and calls resume', () => {
+    mockState = { phase: 'paused', index: 0, cards: [card()], playedMs: 0, heard: 0 }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    fireEvent.click(screen.getByRole('button', { name: t.listenResume }))
+    expect(resume).toHaveBeenCalled()
+  })
+})
+
+describe('ListenPage — done / failed', () => {
+  it('shows the done text and returns to idle via Jeszcze raz', async () => {
+    mockState = { phase: 'done', heard: 7 }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    expect(screen.getByText(`${t.listenDone} 7 ${t.listenCards}`)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: t.listenAgain }))
+    expect(await screen.findByRole('button', { name: t.listenStart })).toBeTruthy()
+  })
+
+  it('shows the failure text and error, and offers Jeszcze raz', () => {
+    mockState = { phase: 'failed', heard: 2, error: 'boom' }
+    stubFetch([], { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 })
+    render(<ListenPage />)
+    expect(screen.getByText(t.listenFailed)).toBeTruthy()
+    expect(screen.getByText('boom')).toBeTruthy()
+    expect(screen.getByRole('button', { name: t.listenAgain })).toBeTruthy()
+  })
+})

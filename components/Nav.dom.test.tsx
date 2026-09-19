@@ -19,4 +19,16 @@ describe('Nav', () => {
     const link = screen.getByRole('link', { name: 'Dodaj' })
     expect(link.getAttribute('href')).toBe('/dodaj')
   })
+
+  it('puts Słuchaj between Powtórki and Dodaj', () => {
+    render(<Nav />)
+    const links = screen.getAllByRole('link').map((l) => l.textContent)
+    const review = links.indexOf('Powtórki')
+    const listen = links.indexOf('Słuchaj')
+    const add = links.indexOf('Dodaj')
+    expect(review).toBeGreaterThanOrEqual(0)
+    expect(listen).toBe(review + 1)
+    expect(add).toBe(listen + 1)
+    expect(screen.getByRole('link', { name: 'Słuchaj' }).getAttribute('href')).toBe('/sluchaj')
+  })
 })

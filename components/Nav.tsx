@@ -3,6 +3,7 @@ import { t } from '@/i18n/pl'
 
 const LINKS = [
   { href: '/powtorki', label: t.review },
+  { href: '/sluchaj', label: t.listen },
   { href: '/dodaj', label: t.add },
   { href: '/fiszki', label: t.cards },
   { href: '/tematy', label: t.topics },

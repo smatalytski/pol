@@ -106,6 +106,27 @@ export const t = {
   addItem: 'dodaj',
   cancel: 'anuluj',
   moveToDiscarded: 'przenieś do odrzuconych',
+
+  listen: 'Słuchaj',
+  listenLength: 'czas',
+  listenAllTopics: 'wszystkie',
+  listenStart: 'Start',
+  listenStop: 'Stop',
+  listenPause: 'pauza',
+  listenResume: 'wznów',
+  listenSkip: 'pomiń',
+  listenDone: 'Koniec — przesłuchano',
+  listenCards: 'kart',
+  listenAgain: 'Jeszcze raz',
+  listenFailed: 'nie udało się odtworzyć',
+  listenMinutesLeft: 'zostało min',
+  listenSection: 'Słuchanie',
+  listenGap: 'Przerwa na zastanowienie (s)',
+  listenRepeat: 'Powtórz odpowiedź',
+  listenExample: 'Czytaj przykład',
+  listenSummaryGap: 'przerwa',
+  listenSummaryRepeat: 'odpowiedź ×2',
+  listenSummaryExample: 'przykład',
 } as const
 
 export type Strings = typeof t
