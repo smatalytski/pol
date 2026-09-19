@@ -661,7 +661,7 @@ describe('AddPage slow and failing chip controls', () => {
     stubMic()
     stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
     render(<AddPage />)
-    const control = await screen.findByText(t.deleteItem)
+    const control = await screen.findByRole('button', { name: t.deleteItem })
     await act(async () => {
       fireEvent.click(control)
     })
@@ -672,7 +672,7 @@ describe('AddPage slow and failing chip controls', () => {
     stubMic()
     stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
     render(<AddPage />)
-    const control = await screen.findByText(t.deleteItem)
+    const control = await screen.findByRole('button', { name: t.deleteItem })
     await act(async () => {
       fireEvent.click(control)
     })

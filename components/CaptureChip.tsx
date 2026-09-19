@@ -3,6 +3,8 @@ import { useRef } from 'react'
 import type { CaptureView } from '@/lib/capture/pipeline'
 import { REVIEW_MS } from '@/lib/queue/review'
 import { t } from '@/i18n/pl'
+import { Button } from '@/components/ui/Button'
+import { RefreshCw, Trash2 } from '@/components/ui/icons'
 
 /**
  * A chip renders one of two things: a recording that has no server row yet
@@ -73,7 +75,7 @@ export function CaptureChip({
     // No server row yet, so there's nothing to retry or delete.
     return (
       <li className="flex items-center gap-3 border-b py-3">
-        <p className="flex-1 text-lg text-neutral-500">{t.uploading}</p>
+        <p className="flex-1 text-row text-neutral-500">{t.uploading}</p>
       </li>
     )
   }
@@ -99,25 +101,21 @@ export function CaptureChip({
 
   return (
     <li className="flex flex-col gap-2 border-b py-3" onPointerDown={onPointerDown} onPointerUp={onPointerUp}>
-      <div className="flex items-center gap-3">
-        <div className="flex-1">
-          {/* "rozpoznawanie…" is only for a recording still waiting on its
-              first transcript (§7.1) — a failed one shows only its error
-              below, never this placeholder beside it. */}
-          <p className="text-lg">{capture.transcript ?? (capture.status === 'uploaded' ? t.transcribing : null)}</p>
-          {capture.duplicateOf && <p className="text-sm text-amber-600">{t.alreadyHave}</p>}
-          {capture.error && <p className="text-sm text-red-600">{capture.error}</p>}
-        </div>
-        {capture.status === 'failed' && (
-          <button onClick={() => onRetry(capture.id)} {...own} disabled={pending} className="text-sm underline disabled:text-neutral-400">
-            {t.retry}
-          </button>
-        )}
+      <div>
+        {/* "rozpoznawanie…" is only for a recording still waiting on its
+            first transcript (§7.1) — a failed one shows only its error
+            below, never this placeholder beside it. */}
+        <p className="text-row">{capture.transcript ?? (capture.status === 'uploaded' ? t.transcribing : null)}</p>
+        {capture.duplicateOf && <p className="text-sub text-amber-600">{t.alreadyHave}</p>}
+        {capture.error && <p className="text-sub text-red-600">{capture.error}</p>}
       </div>
 
-      <button onClick={() => onDelete(item)} {...own} className="self-end text-sm text-red-600 underline">
-        {t.deleteItem}
-      </button>
+      <div className="flex justify-end gap-2">
+        {capture.status === 'failed' && (
+          <Button variant="secondary" icon={RefreshCw} label={t.retry} onClick={() => onRetry(capture.id)} disabled={pending} {...own} />
+        )}
+        <Button variant="danger" iconOnly icon={Trash2} label={t.deleteItem} onClick={() => onDelete(item)} {...own} />
+      </div>
 
       {/* The review window (spec 2026-09-18-generation-queue §3). Cosmetic:
           the server decides approval; this only shows what it says is left,

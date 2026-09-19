@@ -7,6 +7,8 @@ import { enqueue, flush, listOutbox, type OutboxItem } from '@/lib/capture/outbo
 import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
+import { Icon } from '@/components/ui/Icon'
+import { Mic } from '@/components/ui/icons'
 
 type Notice = 'deleteFailed'
 
@@ -284,7 +286,10 @@ export default function AddPage() {
           className={`h-36 w-36 select-none rounded-full text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
-          PL
+          <span className="flex flex-col items-center gap-1">
+            <Icon icon={Mic} size={32} />
+            <span className="text-lg font-semibold">PL</span>
+          </span>
         </button>
         <button
           onPointerDown={() => { navigator.vibrate?.(10); ru.start() }}
@@ -295,7 +300,10 @@ export default function AddPage() {
           className={`h-36 w-36 select-none rounded-full text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
-          RU
+          <span className="flex flex-col items-center gap-1">
+            <Icon icon={Mic} size={32} />
+            <span className="text-lg font-semibold">RU</span>
+          </span>
         </button>
       </div>
     </div>
