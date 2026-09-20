@@ -9,7 +9,7 @@ afterEach(cleanup)
 // Every icon the spec's icon map (§4) names, under lucide's canonical names
 // (CirclePause/CirclePlay/LoaderCircle are the spec's PauseCircle/PlayCircle/Loader2).
 const USED = [
-  'Archive', 'CirclePause', 'CirclePlay', 'Eye', 'FolderInput', 'Headphones', 'Layers', 'List',
+  'Archive', 'Check', 'CirclePause', 'CirclePlay', 'Eye', 'FolderInput', 'Headphones', 'Layers', 'List',
   'LoaderCircle', 'Mic', 'Pause', 'Play', 'Plus', 'RefreshCw', 'RotateCcw', 'Search', 'Settings',
   'SkipForward', 'Sparkles', 'Square', 'Trash2', 'Undo2', 'X',
 ] as const

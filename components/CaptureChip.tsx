@@ -4,7 +4,7 @@ import type { CaptureView } from '@/lib/capture/pipeline'
 import { REVIEW_MS } from '@/lib/queue/review'
 import { t } from '@/i18n/pl'
 import { Button } from '@/components/ui/Button'
-import { RefreshCw, Trash2 } from '@/components/ui/icons'
+import { Check, RefreshCw, Trash2 } from '@/components/ui/icons'
 
 /**
  * A chip renders one of two things: a recording that has no server row yet
@@ -27,8 +27,8 @@ import { RefreshCw, Trash2 } from '@/components/ui/icons'
  * correlating the two unrelated id spaces.
  *
  * The chip itself is status-only: no audio player, no type switch, no
- * tap-to-edit form. A recording under review offers only usuń, with a bar
- * draining toward approval — a wrong language is not fixed here (re-
+ * tap-to-edit form. A recording under review offers usuń and zatwierdź,
+ * with a bar draining toward approval — a wrong language is not fixed here (re-
  * recognition is gone); it is deleted and recorded again with the matching
  * PL/RU button on /dodaj. A failed recognition offers ponów instead. There
  * is nothing here for a card the recording turned into — an on-screen
@@ -58,11 +58,14 @@ export function CaptureChip({
   item,
   onRetry,
   onDelete,
+  onApprove,
   pending = false,
 }: {
   item: ChipItem
   onRetry: (id: string) => void
   onDelete: (item: ChipItem) => void
+  /** Approve this recording now rather than waiting out its review window. */
+  onApprove: (id: string) => void
   /** A ponów recognition for this recording is in flight; its retry control is disabled until it lands. */
   pending?: boolean
 }) {
@@ -111,6 +114,9 @@ export function CaptureChip({
       </div>
 
       <div className="flex justify-end gap-2">
+        {capture.inReview && (
+          <Button variant="primary" icon={Check} label={t.approveNow} onClick={() => onApprove(capture.id)} disabled={pending} {...own} />
+        )}
         {capture.status === 'failed' && (
           <Button variant="secondary" icon={RefreshCw} label={t.retry} onClick={() => onRetry(capture.id)} disabled={pending} {...own} />
         )}

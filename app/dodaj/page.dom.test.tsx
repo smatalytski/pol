@@ -705,4 +705,49 @@ describe('AddPage slow and failing chip controls', () => {
     })
     expect(await screen.findByText(t.deleteFailed)).toBeTruthy()
   })
+
+  it('treats a 409 on approve as already-approved, not a failure', async () => {
+    // The chip's data is up to one poll stale, so the worker can promote the
+    // recording out from under the user between polls; the endpoint then has
+    // nothing to refuse but a 409. That is success from here, not a refusal.
+    const list: CaptureView[] = [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith('/zatwierdz')
+            ? { ok: false, status: 409, json: () => Promise.resolve({ error: 'already promoted' }) }
+            : { ok: true, json: () => Promise.resolve({ captures: list }) },
+        ) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    await waitFor(() => expect(screen.getByText(t.approveNow)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.approveNow))
+    // The controls re-enable once whilePending's refresh comes back — that is
+    // the signal the 409 has been handled without an error notice appearing.
+    await waitFor(() => expect((screen.getByText(t.approveNow) as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.queryByText(t.approveFailed)).toBeNull()
+    expect(screen.getByText('kot')).toBeTruthy()
+  })
+
+  it('reports a genuinely failed approve and leaves the chip on screen', async () => {
+    const list: CaptureView[] = [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith('/zatwierdz')
+            ? { ok: false, status: 500, json: () => Promise.resolve({ error: 'server error' }) }
+            : { ok: true, json: () => Promise.resolve({ captures: list }) },
+        ) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    await waitFor(() => expect(screen.getByText(t.approveNow)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.approveNow))
+    await waitFor(() => expect(screen.getByText(t.approveFailed)).toBeTruthy())
+    // The list still returns it, so the chip stays until a real promotion.
+    expect(screen.getByText('kot')).toBeTruthy()
+  })
 })

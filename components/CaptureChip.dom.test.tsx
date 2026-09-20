@@ -28,7 +28,7 @@ describe('CaptureChip', () => {
 
   it('leaves an outbox chip exactly as before — no swipe/tap wiring', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={{ kind: 'outbox', id: 'o1', createdAt: 1 }} onRetry={vi.fn()} onDelete={onDelete} />)
+    render(<CaptureChip item={{ kind: 'outbox', id: 'o1', createdAt: 1 }} onRetry={vi.fn()} onDelete={onDelete} onApprove={vi.fn()} />)
     const li = screen.getByRole('listitem')
     swipe(li, -100)
     expect(onDelete).not.toHaveBeenCalled()
@@ -37,14 +37,14 @@ describe('CaptureChip', () => {
   it('swiping left past the threshold calls onDelete with the item', () => {
     const onDelete = vi.fn()
     const item = captureItem()
-    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} />)
+    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onApprove={vi.fn()} />)
     swipe(screen.getByRole('listitem'), -100)
     expect(onDelete).toHaveBeenCalledWith(item)
   })
 
   it('a short swipe under the threshold does not delete', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onApprove={vi.fn()} />)
     swipe(screen.getByRole('listitem'), -20)
     expect(onDelete).not.toHaveBeenCalled()
   })
@@ -55,6 +55,7 @@ describe('CaptureChip', () => {
         item={{ kind: 'outbox', id: 'o1', createdAt: 1 }}
         onRetry={vi.fn()}
         onDelete={vi.fn()}
+        onApprove={vi.fn()}
       />,
     )
     expect(screen.queryByText(t.asRussian)).toBeNull()
@@ -66,7 +67,7 @@ describe('CaptureChip', () => {
   it('has a visible delete control', () => {
     const onDelete = vi.fn()
     const item = captureItem()
-    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} />)
+    render(<CaptureChip item={item} onRetry={vi.fn()} onDelete={onDelete} onApprove={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: t.deleteItem }))
     expect(onDelete).toHaveBeenCalledTimes(1)
     expect(onDelete).toHaveBeenCalledWith(item)
@@ -79,18 +80,18 @@ describe('CaptureChip', () => {
   // <li>'s own swipe handler and trigger a second, uncontrolled delete.
   it('swiping across the delete button does not also trigger the li swipe handler', () => {
     const onDelete = vi.fn()
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onApprove={vi.fn()} />)
     swipe(screen.getByRole('button', { name: t.deleteItem }), -100)
     expect(onDelete).not.toHaveBeenCalled()
   })
 
   it('shows no audio player — the chip is status only', () => {
-    const { container } = render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} />)
+    const { container } = render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} />)
     expect(container.querySelector('audio')).toBeNull()
   })
 
   it('shows t.deleteItem and no language controls on an under-review chip', () => {
-    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} />)
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} />)
     expect(screen.getByRole('button', { name: t.deleteItem })).toBeTruthy()
     expect(screen.queryByText(t.asPolish)).toBeNull()
     expect(screen.queryByText(t.asRussian)).toBeNull()
@@ -100,7 +101,7 @@ describe('CaptureChip', () => {
     render(
       <CaptureChip
         item={captureItem({ status: 'failed', transcript: null, error: 'unintelligible', inReview: false, reviewRemainingMs: null })}
-        onRetry={vi.fn()} onDelete={vi.fn()}
+        onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()}
       />,
     )
     expect(screen.getByText(t.retry)).toBeTruthy()
@@ -113,15 +114,15 @@ describe('CaptureChip', () => {
 
   it('disables ponów while a retry is pending, and enables it otherwise', () => {
     const failed = captureItem({ status: 'failed', transcript: null, error: 'unintelligible', inReview: false, reviewRemainingMs: null })
-    const { rerender } = render(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} pending />)
+    const { rerender } = render(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} pending />)
     expect((screen.getByText(t.retry) as HTMLButtonElement).disabled).toBe(true)
 
-    rerender(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} pending={false} />)
+    rerender(<CaptureChip item={failed} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} pending={false} />)
     expect((screen.getByText(t.retry) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('says już masz for a word already in the deck', () => {
-    render(<CaptureChip item={captureItem({ duplicateOf: 'card-9' })} onRetry={vi.fn()} onDelete={vi.fn()} />)
+    render(<CaptureChip item={captureItem({ duplicateOf: 'card-9' })} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} />)
     expect(screen.getByText(t.alreadyHave)).toBeTruthy()
   })
 
@@ -129,7 +130,7 @@ describe('CaptureChip', () => {
   // server says is left, so the fade never looks like a glitch.
   it('draws the review bar from the server-computed remaining time', () => {
     const { container } = render(
-      <CaptureChip item={captureItem({ reviewRemainingMs: 2_500 })} onRetry={vi.fn()} onDelete={vi.fn()} />,
+      <CaptureChip item={captureItem({ reviewRemainingMs: 2_500 })} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} />,
     )
     const bar = container.querySelector('[data-review-bar]') as HTMLElement
     expect(bar.style.width).toBe('25%')
@@ -139,7 +140,7 @@ describe('CaptureChip', () => {
     render(
       <CaptureChip
         item={captureItem({ status: 'uploaded', transcript: null, inReview: false, reviewRemainingMs: null })}
-        onRetry={vi.fn()} onDelete={vi.fn()}
+        onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()}
       />,
     )
     expect(screen.getByText(t.transcribing)).toBeTruthy()
@@ -151,11 +152,43 @@ describe('CaptureChip', () => {
         item={captureItem({ status: 'failed', error: 'x', inReview: false, reviewRemainingMs: null })}
         onRetry={vi.fn()}
         onDelete={vi.fn()}
+        onApprove={vi.fn()}
       />,
     )
     const retry = screen.getByRole('button', { name: t.retry })
     const del = screen.getByRole('button', { name: t.deleteItem })
     expect(retry.parentElement).toBe(del.parentElement)
     expect(del.parentElement!.className).toContain('justify-end')
+  })
+
+  it('offers zatwierdź only while the recording is under review', () => {
+    const onApprove = vi.fn()
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={onApprove} />)
+    fireEvent.click(screen.getByText(t.approveNow))
+    expect(onApprove).toHaveBeenCalledWith('cap-1')
+  })
+
+  it('hides zatwierdź once the recording has left review', () => {
+    render(
+      <CaptureChip
+        item={captureItem({ inReview: false, reviewRemainingMs: null })}
+        onRetry={vi.fn()}
+        onDelete={vi.fn()}
+        onApprove={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText(t.approveNow)).toBeNull()
+  })
+
+  it('disables zatwierdź while an action on this chip is in flight', () => {
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={vi.fn()} onApprove={vi.fn()} pending />)
+    expect((screen.getByText(t.approveNow) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('does not read a tap on zatwierdź as a delete swipe', () => {
+    const onDelete = vi.fn()
+    render(<CaptureChip item={captureItem()} onRetry={vi.fn()} onDelete={onDelete} onApprove={vi.fn()} />)
+    swipe(screen.getByText(t.approveNow), -100)
+    expect(onDelete).not.toHaveBeenCalled()
   })
 })

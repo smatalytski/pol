@@ -10,10 +10,11 @@ import { t } from '@/i18n/pl'
 import { Icon } from '@/components/ui/Icon'
 import { Mic } from '@/components/ui/icons'
 
-type Notice = 'deleteFailed'
+type Notice = 'deleteFailed' | 'approveFailed'
 
 const NOTICE_TEXT: Record<Notice, string> = {
   deleteFailed: t.deleteFailed,
+  approveFailed: t.approveFailed,
 }
 
 export default function AddPage() {
@@ -189,6 +190,33 @@ export default function AddPage() {
     [whilePending],
   )
 
+  // Approving takes the recording out of review immediately (spec
+  // 2026-09-20 §3). `whilePending` keeps the chip's controls disabled until
+  // the refreshed list comes back, so a second tap cannot race the first. The
+  // chip's data is up to one poll (1s) stale, and the worker's own tick can
+  // promote a recording out from under the user between polls — in a
+  // backgrounded PWA, where `setInterval` is throttled, this is not a rare
+  // race but routine. When that happens this request lands after the
+  // recording is already `queued`, and the endpoint has nothing to refuse
+  // but a 409; treating it as a real failure would flash the red notice on a
+  // tap that fully succeeded. So a 409 here means "already approved", not
+  // "refused" — it is reported as success, and the refreshed list settles
+  // the truth either way. Any other non-ok status, or a request that never
+  // lands at all, still reports a failure.
+  const approve = useCallback(
+    (id: string) => {
+      void whilePending(id, async () => {
+        try {
+          const res = await fetch(`/api/captures/${id}/zatwierdz`, { method: 'POST' })
+          if (mountedRef.current) setNotice(res.ok || res.status === 409 ? null : 'approveFailed')
+        } catch {
+          if (mountedRef.current) setNotice('approveFailed')
+        }
+      })
+    },
+    [whilePending],
+  )
+
   // Spec §4's "swipe to delete", and the visible `usuń` button (swipe alone
   // was invisible) calls the same handler. An outbox chip never calls this
   // (CaptureChip doesn't attach either control to it — see its own comment),
@@ -243,6 +271,7 @@ export default function AddPage() {
             item={item}
             onRetry={retry}
             onDelete={deleteChip}
+            onApprove={approve}
             pending={item.kind === 'capture' && pending.has(item.capture.id)}
           />
         ))}

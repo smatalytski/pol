@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { useListenPlayer } from '@/hooks/useListenPlayer'
 import { t } from '@/i18n/pl'
 import { Button } from '@/components/ui/Button'
-import { Pause, Play, RotateCcw, SkipForward, Square } from '@/components/ui/icons'
+import { Icon } from '@/components/ui/Icon'
+import { Sheet } from '@/components/ui/Sheet'
+import { Pause, Play, RotateCcw, SkipForward, Square, X } from '@/components/ui/icons'
 
 /** Session lengths the planner accepts (spec §4.1), remembered per browser. */
 const LENGTHS = [10, 20, 30, 45] as const
@@ -63,6 +65,9 @@ export default function ListenPage() {
   const [topics, setTopics] = useState<Topic[]>([])
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
   const [settings, setSettings] = useState<ListenSettings | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [topicQuery, setTopicQuery] = useState('')
+  const topicSearchRef = useRef<HTMLInputElement | null>(null)
   // Set by "Jeszcze raz" — the hook itself has no way back to `idle` from
   // `done`/`failed` (spec §5.2 end state), so the choice screen is shown
   // again locally, with the same length and topics still selected, until the
@@ -87,17 +92,35 @@ export default function ListenPage() {
       .catch(() => {})
   }, [])
 
+  // `Sheet` focuses its own dialog container in an effect that runs when it
+  // mounts open. Effects run children-first, so a plain effect here (parent
+  // of `Sheet`) fires after that and would seem to win outright — but the
+  // design spec (§7.3) wants the search input focused, not the container,
+  // and relying on exact effect ordering between this component and
+  // `Sheet`'s internals is fragile. Deferring one more turn with
+  // `requestAnimationFrame` guarantees this runs strictly after any focus
+  // `Sheet` sets synchronously in its own effect, regardless of ordering.
+  useEffect(() => {
+    if (!pickerOpen) return
+    const raf = requestAnimationFrame(() => {
+      topicSearchRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [pickerOpen])
+
   function chooseMinutes(n: number) {
     setMinutes(n)
     rememberMinutes(n)
   }
 
-  function chooseAllTopics() {
-    setSelectedTopicIds([])
+  function addTopic(id: string) {
+    setSelectedTopicIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
+    setPickerOpen(false)
+    setTopicQuery('')
   }
 
-  function toggleTopic(id: string) {
-    setSelectedTopicIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  function removeTopic(id: string) {
+    setSelectedTopicIds((prev) => prev.filter((x) => x !== id))
   }
 
   function handleStart() {
@@ -107,6 +130,13 @@ export default function ListenPage() {
 
   const state = player.state
   let content: ReactNode
+
+  // The sheet offers what is not already chosen; `topics` is already filtered
+  // to unsuspended ones where it is fetched.
+  const topicSearch = topicQuery.trim().toLowerCase()
+  const pickable = topics.filter(
+    (x) => !selectedTopicIds.includes(x.id) && (x.name ?? '').toLowerCase().includes(topicSearch),
+  )
 
   if (backAtIdle || state.phase === 'idle') {
     content = (
@@ -127,27 +157,64 @@ export default function ListenPage() {
             ))}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            aria-pressed={selectedTopicIds.length === 0}
-            onClick={chooseAllTopics}
-            className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.length === 0 ? 'border-primary bg-primary text-white' : 'border-neutral-300'}`}
-          >
-            {t.listenAllTopics}
-          </button>
-          {topics.map((topic) => (
-            <button
-              key={topic.id}
-              type="button"
-              aria-pressed={selectedTopicIds.includes(topic.id)}
-              onClick={() => toggleTopic(topic.id)}
-              className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.includes(topic.id) ? 'border-primary bg-primary text-white' : 'border-neutral-300'}`}
-            >
-              {topic.name ?? t.unnamedTopic}
-            </button>
-          ))}
+        {/* No selection means every topic — `handleStart` below sends no
+            `topicIds` at all in that case, which is what the planner already
+            treats as "everything". A `wszystkie` chip alongside this would be
+            a second way to say the same thing, free to disagree with it. */}
+        <div className="flex flex-col gap-2">
+          {selectedTopicIds.length === 0 ? (
+            <p className="text-sub text-neutral-500">{t.listenTopicsAll}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {selectedTopicIds.map((id) => {
+                const name = topics.find((x) => x.id === id)?.name ?? t.unnamedTopic
+                return (
+                  <span key={id} className="inline-flex items-center gap-0.5 rounded-full bg-primary py-1 pl-3 pr-1 text-sm text-white">
+                    {name}
+                    {/* The icon stays 16px, but the border box grows to 32×32
+                        (WCAG 2.5.8's minimum, and this app's smallest Button
+                        size) by centering it in a fixed box rather than
+                        padding around it — a bare 16px button here was a tap
+                        target smaller than anything else in the app. */}
+                    <button
+                      type="button"
+                      aria-label={`${t.removeTopic}: ${name}`}
+                      onClick={() => removeTopic(id)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center"
+                    >
+                      <Icon icon={X} size={16} />
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
+          <Button variant="secondary" label={t.addTopic} onClick={() => setPickerOpen(true)} className="self-start" />
         </div>
+        <Sheet open={pickerOpen} label={t.addTopic} onClose={() => { setPickerOpen(false); setTopicQuery('') }}>
+          <input
+            ref={topicSearchRef}
+            value={topicQuery}
+            onChange={(e) => setTopicQuery(e.target.value)}
+            placeholder={t.filterTopics}
+            className="w-full rounded-lg border border-neutral-300 px-3 py-3"
+          />
+          {pickable.length === 0 ? (
+            <p className="text-sub text-neutral-500">
+              {topics.length > 0 && selectedTopicIds.length === topics.length ? t.allTopicsChosen : t.noTopicsFound}
+            </p>
+          ) : (
+            <ul>
+              {pickable.map((topic) => (
+                <li key={topic.id}>
+                  <button type="button" onClick={() => addTopic(topic.id)} className="w-full border-b py-3 text-left text-row">
+                    {topic.name ?? t.unnamedTopic}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Sheet>
         {settings && (
           <Link href="/ustawienia" className="text-sub text-neutral-500 underline">
             {summaryLine(settings)}

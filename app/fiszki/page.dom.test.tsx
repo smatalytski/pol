@@ -209,4 +209,14 @@ describe('CardsPage (browse list)', () => {
     expect(screen.getAllByText(t.topicOff)).toHaveLength(1)
     expect(screen.getByText(t.topicOff).closest('li')).toBe(screen.getByText('gorączka').closest('li'))
   })
+
+  it('pins the filter box to the top of the screen', () => {
+    stubFetch(() => [])
+    render(<CardsPage />)
+    const box = screen.getByPlaceholderText(t.cards).closest('div')!.parentElement!
+    expect(box.className).toContain('sticky')
+    expect(box.className).toContain('top-0')
+    // Opaque, or rows scroll through it.
+    expect(box.className).toContain('bg-background')
+  })
 })

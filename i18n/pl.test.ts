@@ -16,8 +16,10 @@ describe('strings', () => {
       'levelAdvanced', 'levelIntermediate', 'levelBadge', 'tabCarded', 'tabOpen', 'tabDiscarded',
       'makeCard', 'discard', 'restore', 'cardBadge', 'moveTo', 'manualAdd', 'manualPlaceholder',
       'addItem', 'cancel', 'moveToDiscarded',
-      'listen', 'listenLength', 'listenAllTopics', 'listenStart', 'listenStop', 'listenPause', 'listenResume',
+      'listen', 'listenLength', 'listenStart', 'listenStop', 'listenPause', 'listenResume',
       'listenSkip', 'listenDone', 'listenCards', 'listenAgain', 'listenFailed', 'listenMinutesLeft',
+      'approveNow', 'approveFailed', 'settingsGeneral', 'filterTopics', 'addTopic', 'removeTopic',
+      'listenTopicsAll', 'sheetClose', 'noTopicsFound', 'allTopicsChosen',
       'listenSection', 'listenGap', 'listenNext', 'listenRepeat', 'listenExample', 'listenHint', 'listenRepeatExample',
       'listenSummaryGap', 'listenSummaryNext', 'listenSummaryRepeat', 'listenSummaryExample', 'listenSummaryHint', 'listenSummaryExampleTwice',
     ]

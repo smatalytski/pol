@@ -85,20 +85,21 @@ export function underReview(db: Db): ReviewRow[] {
 }
 
 /**
- * Every approved recording leaves review: a word already in the deck becomes
- * 'duplicate' and is never queued (§4); any other becomes 'queued' with a
- * `new` job. A word whose matched card was deleted during the window counts
- * as new, and its stale duplicate_of is cleared. One transaction, so a
- * recording is never queued without its job.
+ * Promote exactly these recordings, whatever the clock says: a word already
+ * in the deck becomes 'duplicate' and is never queued (§4); any other becomes
+ * 'queued' with a `new` job. A word whose matched card was deleted during the
+ * window counts as new, and its stale duplicate_of is cleared. One
+ * transaction, so a recording is never queued without its job.
  * Processed oldest-transcribed-first (ties broken by createdAt) so that, when
- * several recordings are approved in the same tick, their jobs are inserted
- * in a fixed, sensible order rather than whatever order a Set yields.
+ * several recordings are promoted at once, their jobs are inserted in a fixed,
+ * sensible order rather than whatever order a Set yields.
+ * Ids that are not under review are skipped, which is what makes promoting
+ * the same recording twice a no-op rather than a second card.
  */
-export function promoteApproved(db: Db, now: Date): { queued: string[]; duplicates: string[] } {
-  const rows = underReview(db)
-  const approved = approvedIds(rows, now.getTime())
-  const ordered = rows
-    .filter((r) => approved.has(r.id))
+export function promoteIds(db: Db, ids: readonly string[], now: Date): { queued: string[]; duplicates: string[] } {
+  const wanted = new Set(ids)
+  const ordered = underReview(db)
+    .filter((r) => wanted.has(r.id))
     .sort((a, b) => a.transcribedAt - b.transcribedAt || a.createdAt - b.createdAt)
   const queued: string[] = []
   const duplicates: string[] = []
@@ -128,6 +129,17 @@ export function promoteApproved(db: Db, now: Date): { queued: string[]; duplicat
     }
   })
   return { queued, duplicates }
+}
+
+/**
+ * Every recording whose review window is up leaves review (§3). The worker's
+ * entry point; `promoteIds` does the work.
+ * `underReview` is read twice — once here to decide, once inside `promoteIds`
+ * to order — which is two cheap indexed selects and keeps the ordering rule in
+ * exactly one place.
+ */
+export function promoteApproved(db: Db, now: Date): { queued: string[]; duplicates: string[] } {
+  return promoteIds(db, [...approvedIds(underReview(db), now.getTime())], now)
 }
 
 /** At startup: a job left 'running' was interrupted; it goes back to the queue (§6). */
