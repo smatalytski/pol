@@ -705,4 +705,24 @@ describe('AddPage slow and failing chip controls', () => {
     })
     expect(await screen.findByText(t.deleteFailed)).toBeTruthy()
   })
+
+  it('reports a refused approve and leaves the chip on screen', async () => {
+    const list: CaptureView[] = [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.endsWith('/zatwierdz')
+            ? { ok: false, status: 409, json: () => Promise.resolve({ error: 'not under review' }) }
+            : { ok: true, json: () => Promise.resolve({ captures: list }) },
+        ) as unknown as Promise<Response>,
+      ),
+    )
+    render(<AddPage />)
+    await waitFor(() => expect(screen.getByText(t.approveNow)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.approveNow))
+    await waitFor(() => expect(screen.getByText(t.approveFailed)).toBeTruthy())
+    // The list still returns it, so the chip stays until a real promotion.
+    expect(screen.getByText('kot')).toBeTruthy()
+  })
 })

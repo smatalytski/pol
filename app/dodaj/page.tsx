@@ -10,10 +10,11 @@ import { t } from '@/i18n/pl'
 import { Icon } from '@/components/ui/Icon'
 import { Mic } from '@/components/ui/icons'
 
-type Notice = 'deleteFailed'
+type Notice = 'deleteFailed' | 'approveFailed'
 
 const NOTICE_TEXT: Record<Notice, string> = {
   deleteFailed: t.deleteFailed,
+  approveFailed: t.approveFailed,
 }
 
 export default function AddPage() {
@@ -189,6 +190,26 @@ export default function AddPage() {
     [whilePending],
   )
 
+  // Approving takes the recording out of review immediately (spec
+  // 2026-09-20 §3). `whilePending` keeps the chip's controls disabled until
+  // the refreshed list comes back, so a second tap cannot race the first; a
+  // 409 from a request that did land is reported like any other failure,
+  // which is honest — from here it is indistinguishable from a real refusal,
+  // and the refreshed list settles it either way.
+  const approve = useCallback(
+    (id: string) => {
+      void whilePending(id, async () => {
+        try {
+          const res = await fetch(`/api/captures/${id}/zatwierdz`, { method: 'POST' })
+          if (mountedRef.current) setNotice(res.ok ? null : 'approveFailed')
+        } catch {
+          if (mountedRef.current) setNotice('approveFailed')
+        }
+      })
+    },
+    [whilePending],
+  )
+
   // Spec §4's "swipe to delete", and the visible `usuń` button (swipe alone
   // was invisible) calls the same handler. An outbox chip never calls this
   // (CaptureChip doesn't attach either control to it — see its own comment),
@@ -243,6 +264,7 @@ export default function AddPage() {
             item={item}
             onRetry={retry}
             onDelete={deleteChip}
+            onApprove={approve}
             pending={item.kind === 'capture' && pending.has(item.capture.id)}
           />
         ))}
