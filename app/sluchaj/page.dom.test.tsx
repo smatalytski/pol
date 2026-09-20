@@ -163,6 +163,28 @@ describe('ListenPage — idle', () => {
     expect(await screen.findByText(t.allTopicsChosen)).toBeTruthy()
   })
 
+  it('says no match found for a query that matches nothing while a topic is still unselected', async () => {
+    stubFetch(
+      [{ id: 't1', name: 'Praca', suspendedAt: null }, { id: 't2', name: 'Dom', suspendedAt: null }],
+      SETTINGS,
+    )
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    fireEvent.change(await screen.findByPlaceholderText(t.filterTopics), { target: { value: 'zzz' } })
+    expect(await screen.findByText(t.noTopicsFound)).toBeTruthy()
+    expect(screen.queryByText(t.allTopicsChosen)).toBeNull()
+  })
+
+  it('says no topics found when there are no topics at all', async () => {
+    stubFetch([], SETTINGS)
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    expect(await screen.findByText(t.noTopicsFound)).toBeTruthy()
+    expect(screen.queryByText(t.allTopicsChosen)).toBeNull()
+  })
+
   it('focuses the search input when the topic sheet opens', async () => {
     stubFetch([{ id: 't1', name: 'Praca', suspendedAt: null }], SETTINGS)
     render(<ListenPage />)
