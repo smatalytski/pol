@@ -60,14 +60,21 @@ export default function CardsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="relative">
-        <Icon icon={Search} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="w-full rounded-lg border border-neutral-300 py-3 pl-10 pr-3"
-          placeholder={t.cards}
-        />
+      {/* Pinned, so the filter is reachable however far down the list you
+          are. `-mx-4 px-4` cancels the shell's own padding (app/layout.tsx's
+          `main` has `px-4 pt-4`) so the opaque background runs edge to edge
+          and rows pass behind it rather than beside it. Nothing in the shell
+          sets `overflow`, so this sticks to the viewport. */}
+      <div className="sticky top-0 z-10 -mx-4 bg-background px-4 py-2">
+        <div className="relative">
+          <Icon icon={Search} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="w-full rounded-lg border border-neutral-300 py-3 pl-10 pr-3"
+            placeholder={t.cards}
+          />
+        </div>
       </div>
       <ul>
         {visiblePending.map((p) => (
