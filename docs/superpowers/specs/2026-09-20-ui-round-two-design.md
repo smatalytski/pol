@@ -57,6 +57,8 @@ The draining bar stays — it is what tells you there is a deadline to pre-empt.
 
 On success the recording is promoted, so the next poll (already running, since `inReview` keeps `hasPending` true) drops it from `listOnScreen` and the chip leaves the screen. A failed or refused call surfaces through the existing `notice` line, as `deleteChip` already does; a new `approveFailed` notice is added.
 
+The chip's data is up to one poll (1s) stale, so the worker's own tick can promote a recording out from under the user between polls — routine, not rare, in a backgrounded PWA where `setInterval` is throttled. When that happens, this screen's request for a tap that already succeeded lands after the status guard has moved on, and the endpoint has nothing to give back but the same 409 §3.2 defines for a genuine refusal. This screen treats that 409 as success — it clears the notice rather than setting `approveFailed` — because from here it means "already approved". Any other non-ok status, and a request that never lands at all, still sets `approveFailed`; the refresh `whilePending` already performs settles the truth either way.
+
 ## 4. `/fiszki` — pinned filter
 
 The search box is wrapped in:

@@ -192,16 +192,23 @@ export default function AddPage() {
 
   // Approving takes the recording out of review immediately (spec
   // 2026-09-20 §3). `whilePending` keeps the chip's controls disabled until
-  // the refreshed list comes back, so a second tap cannot race the first; a
-  // 409 from a request that did land is reported like any other failure,
-  // which is honest — from here it is indistinguishable from a real refusal,
-  // and the refreshed list settles it either way.
+  // the refreshed list comes back, so a second tap cannot race the first. The
+  // chip's data is up to one poll (1s) stale, and the worker's own tick can
+  // promote a recording out from under the user between polls — in a
+  // backgrounded PWA, where `setInterval` is throttled, this is not a rare
+  // race but routine. When that happens this request lands after the
+  // recording is already `queued`, and the endpoint has nothing to refuse
+  // but a 409; treating it as a real failure would flash the red notice on a
+  // tap that fully succeeded. So a 409 here means "already approved", not
+  // "refused" — it is reported as success, and the refreshed list settles
+  // the truth either way. Any other non-ok status, or a request that never
+  // lands at all, still reports a failure.
   const approve = useCallback(
     (id: string) => {
       void whilePending(id, async () => {
         try {
           const res = await fetch(`/api/captures/${id}/zatwierdz`, { method: 'POST' })
-          if (mountedRef.current) setNotice(res.ok ? null : 'approveFailed')
+          if (mountedRef.current) setNotice(res.ok || res.status === 409 ? null : 'approveFailed')
         } catch {
           if (mountedRef.current) setNotice('approveFailed')
         }
