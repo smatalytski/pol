@@ -127,7 +127,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
     stubMic()
     render(<AddPage />)
     const button = screen.getByRole('button', { name: t.recordPolish })
-    expect(button.className).toContain('bg-black')
+    expect(button.className).toContain('bg-primary')
 
     // Let getUserMedia (and the rest of the factory's setup) resolve before
     // releasing, so this test isolates "does pointerup map to stop()" rather
@@ -141,7 +141,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
     await act(async () => {
       fireEvent.pointerUp(button)
     })
-    expect(button.className).toContain('bg-black')
+    expect(button.className).toContain('bg-primary')
   })
 
   it('cleans up the same way when the gesture is cancelled instead of released', async () => {
@@ -157,7 +157,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
     await act(async () => {
       fireEvent.pointerCancel(button)
     })
-    expect(button.className).toContain('bg-black')
+    expect(button.className).toContain('bg-primary')
 
     // Not stuck: a fresh press right after still works.
     await act(async () => {
@@ -168,7 +168,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
     await act(async () => {
       fireEvent.pointerUp(button)
     })
-    expect(button.className).toContain('bg-black')
+    expect(button.className).toContain('bg-primary')
   })
 })
 

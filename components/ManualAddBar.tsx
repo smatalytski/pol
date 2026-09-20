@@ -91,7 +91,7 @@ export function ManualAddBar({ onAdd }: { onAdd: (text: string) => Promise<strin
           onPointerCancel={pl.stop}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={t.recordPolish}
-          className={`inline-flex h-9 select-none items-center gap-1 rounded-full px-3 text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`inline-flex h-9 select-none items-center gap-1 rounded-full px-3 text-white ${pl.recording ? 'bg-red-600' : 'bg-primary'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
           <Icon icon={Mic} size={16} />
@@ -104,7 +104,7 @@ export function ManualAddBar({ onAdd }: { onAdd: (text: string) => Promise<strin
           onPointerCancel={ru.stop}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={t.recordRussian}
-          className={`inline-flex h-9 select-none items-center gap-1 rounded-full px-3 text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`inline-flex h-9 select-none items-center gap-1 rounded-full px-3 text-white ${ru.recording ? 'bg-red-600' : 'bg-primary'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
           <Icon icon={Mic} size={16} />

@@ -3,6 +3,9 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Filled buttons, the on-state of a switch and a selected segment. Lifted
+     off pure black so large fills (/dodaj's record discs) read less heavy. */
+  --primary: #262626;
   /* The bottom tab bar's row, before the phone's safe-area inset. */
   --tabbar-h: 3.5rem;
 }
@@ -10,6 +13,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
   --font-sans: var(--font-source-sans), system-ui, sans-serif;
 }
 

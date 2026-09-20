@@ -8,7 +8,7 @@ export type ButtonSize = 'sm' | 'md'
 const BASE =
   'inline-flex shrink-0 select-none items-center justify-center gap-1.5 rounded-lg font-medium disabled:opacity-40'
 const LOOK: Record<ButtonVariant, string> = {
-  primary: 'bg-black text-white',
+  primary: 'bg-primary text-white',
   secondary: 'border border-neutral-300',
   icon: 'border border-neutral-300',
   danger: 'border border-neutral-300 text-red-600',

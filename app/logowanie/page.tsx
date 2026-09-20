@@ -27,7 +27,7 @@ export default function LoginPage() {
         className="rounded-lg border border-neutral-300 p-4 text-lg"
         placeholder={t.passwordPlaceholder}
       />
-      <button type="submit" className="rounded-lg bg-black p-4 text-lg text-white">
+      <button type="submit" className="rounded-lg bg-primary p-4 text-lg text-white">
         {t.logIn}
       </button>
       {failed && <p className="text-red-600">{t.badPassword}</p>}

@@ -7,11 +7,11 @@ import { Plus, Trash2 } from './icons'
 afterEach(cleanup)
 
 describe('Button', () => {
-  it('shows a primary button as a filled black icon + word', () => {
+  it('shows a primary button as a filled icon + word', () => {
     render(<Button variant="primary" icon={Plus} label="dodaj" />)
     const button = screen.getByRole('button', { name: 'dodaj' })
     expect(button.textContent).toBe('dodaj')
-    expect(button.className).toContain('bg-black')
+    expect(button.className).toContain('bg-primary')
     expect(button.getAttribute('type')).toBe('button')
     expect(button.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true')
     expect(button.querySelector('svg')!.getAttribute('width')).toBe('18')
@@ -22,7 +22,7 @@ describe('Button', () => {
     const button = screen.getByRole('button', { name: 'przywróć' })
     expect(button.textContent).toBe('przywróć')
     expect(button.className).toContain('border')
-    expect(button.className).not.toContain('bg-black')
+    expect(button.className).not.toContain('bg-primary')
   })
 
   it('names an icon-only button by its label, as aria-label and tooltip', () => {

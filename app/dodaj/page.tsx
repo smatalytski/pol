@@ -285,7 +285,7 @@ export default function AddPage() {
           onPointerCancel={pl.stop}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={t.recordPolish}
-          className={`h-36 w-36 select-none rounded-full text-white ${pl.recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`h-36 w-36 select-none rounded-full text-white ${pl.recording ? 'bg-red-600' : 'bg-primary'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
           <span className="flex flex-col items-center gap-1">
@@ -299,7 +299,7 @@ export default function AddPage() {
           onPointerCancel={ru.stop}
           onContextMenu={(e) => e.preventDefault()}
           aria-label={t.recordRussian}
-          className={`h-36 w-36 select-none rounded-full text-white ${ru.recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`h-36 w-36 select-none rounded-full text-white ${ru.recording ? 'bg-red-600' : 'bg-primary'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
           <span className="flex flex-col items-center gap-1">
