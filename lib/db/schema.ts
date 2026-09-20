@@ -138,3 +138,9 @@ export const listens = sqliteTable('listens', {
   cardId: text('card_id').notNull(),
   heardAt: integer('heard_at').notNull(),
 })
+
+export const loginThrottle = sqliteTable('login_throttle', {
+  id: integer('id').primaryKey(),
+  failures: integer('failures').notNull(),
+  blockedUntil: integer('blocked_until'),
+})

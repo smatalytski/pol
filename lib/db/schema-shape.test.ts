@@ -21,6 +21,7 @@ describe('schema after migrations', () => {
     expect(names).toEqual([
       '001-init.sql', '002-generation-queue.sql', '003-topics.sql', '004-capture-lang.sql',
       '005-topic-items.sql', '006-listening.sql', '007-prompt-commas.sql',
+      '008-login-throttle.sql',
     ])
   })
 

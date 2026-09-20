@@ -65,6 +65,7 @@ export const t = {
   settingsSaveFailed: 'nie udało się zapisać ustawień',
 
   logIn: 'wejdź',
+  tooManyAttempts: 'Zbyt wiele prób logowania. Spróbuj ponownie za chwilę.',
   badPassword: 'złe hasło',
   passwordPlaceholder: 'hasło',
 
