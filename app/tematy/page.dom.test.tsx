@@ -79,6 +79,18 @@ describe('TopicsPage', () => {
     expect(screen.queryByText(t.newTopic)).toBeNull()
   })
 
+  // jsdom's fireEvent.click does no hit-testing, so it cannot catch a
+  // transparent fixed band swallowing taps meant for the row underneath it —
+  // only the classes can be asserted here.
+  it('lets taps pass through the fixed band around the new-topic button', async () => {
+    stubFetch([row()])
+    render(<TopicsPage />)
+    const link = await screen.findByLabelText(t.newTopic)
+    const band = link.closest('.fixed')!
+    expect(band.className).toContain('pointer-events-none')
+    expect(link.className).toContain('pointer-events-auto')
+  })
+
   it('switches a topic off', async () => {
     const calls = stubFetch([row()])
     render(<TopicsPage />)

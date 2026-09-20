@@ -110,13 +110,19 @@ export default function TopicsPage() {
           would leave two height utilities fighting in the stylesheet, where
           the winner is decided by Tailwind's output order, not by the order
           they appear in the attribute. */}
-      <div className="above-tabbar fixed inset-x-0 z-10">
+      {/* This band is otherwise an invisible full-width strip with no
+          background, sitting above rows further down the list once it
+          grows tall enough to reach here. Without `pointer-events-none`
+          it swallows taps meant for whatever row is underneath it — the
+          row's Link never navigates and its Switch never toggles — so the
+          wrapper opts out of hit-testing and only the button opts back in. */}
+      <div className="above-tabbar pointer-events-none fixed inset-x-0 z-10">
         <div className="mx-auto flex max-w-xl justify-end px-4 pb-4">
           <Link
             href="/tematy/nowy"
             aria-label={t.newTopic}
             title={t.newTopic}
-            className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg"
+            className="pointer-events-auto inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg"
           >
             <Icon icon={Plus} size={24} />
           </Link>
