@@ -120,7 +120,7 @@ export default function ListenPage() {
                 type="button"
                 aria-pressed={minutes === n}
                 onClick={() => chooseMinutes(n)}
-                className={`min-w-12 rounded-md px-3 py-1.5 tabular-nums ${minutes === n ? 'bg-black font-semibold text-white' : ''}`}
+                className={`min-w-12 rounded-md px-3 py-1.5 tabular-nums ${minutes === n ? 'bg-primary font-semibold text-white' : ''}`}
               >
                 {n}
               </button>
@@ -132,7 +132,7 @@ export default function ListenPage() {
             type="button"
             aria-pressed={selectedTopicIds.length === 0}
             onClick={chooseAllTopics}
-            className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.length === 0 ? 'border-black bg-black text-white' : 'border-neutral-300'}`}
+            className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.length === 0 ? 'border-primary bg-primary text-white' : 'border-neutral-300'}`}
           >
             {t.listenAllTopics}
           </button>
@@ -142,7 +142,7 @@ export default function ListenPage() {
               type="button"
               aria-pressed={selectedTopicIds.includes(topic.id)}
               onClick={() => toggleTopic(topic.id)}
-              className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.includes(topic.id) ? 'border-black bg-black text-white' : 'border-neutral-300'}`}
+              className={`rounded-full border px-3 py-1.5 text-sm ${selectedTopicIds.includes(topic.id) ? 'border-primary bg-primary text-white' : 'border-neutral-300'}`}
             >
               {topic.name ?? t.unnamedTopic}
             </button>

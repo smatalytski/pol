@@ -28,7 +28,7 @@ export function BatchSettings({ value, onChange }: { value: BatchParams; onChang
             type="button"
             aria-pressed={value.mix === m}
             onClick={() => onChange({ ...value, mix: m })}
-            className={`min-h-8 rounded-md px-2 py-1 ${value.mix === m ? 'bg-black text-white' : 'text-neutral-600'}`}
+            className={`min-h-8 rounded-md px-2 py-1 ${value.mix === m ? 'bg-primary text-white' : 'text-neutral-600'}`}
           >
             {MIX_LABEL[m]}
           </button>
@@ -41,7 +41,7 @@ export function BatchSettings({ value, onChange }: { value: BatchParams; onChang
             type="button"
             aria-pressed={value.level === l}
             onClick={() => onChange({ ...value, level: l })}
-            className={`min-h-8 rounded-md px-2 py-1 ${value.level === l ? 'bg-black text-white' : 'text-neutral-600'}`}
+            className={`min-h-8 rounded-md px-2 py-1 ${value.level === l ? 'bg-primary text-white' : 'text-neutral-600'}`}
           >
             {LEVEL_LABEL[l]}
           </button>

@@ -30,7 +30,7 @@ export function Switch({
       {showLabel && <span>{label}</span>}
       <span
         aria-hidden="true"
-        className={`relative inline-block h-6 w-10 shrink-0 rounded-full transition-colors motion-reduce:transition-none ${checked ? 'bg-black' : 'bg-neutral-300'}`}
+        className={`relative inline-block h-6 w-10 shrink-0 rounded-full transition-colors motion-reduce:transition-none ${checked ? 'bg-primary' : 'bg-neutral-300'}`}
       >
         <span
           className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform motion-reduce:transition-none ${checked ? 'translate-x-4' : ''}`}

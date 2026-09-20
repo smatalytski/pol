@@ -67,7 +67,7 @@ export function ReviewCard({
           ))}
         </div>
       ) : (
-        <button onClick={onReveal} className="flex h-14 items-center justify-center gap-2 rounded-lg bg-black text-lg text-white">
+        <button onClick={onReveal} className="flex h-14 items-center justify-center gap-2 rounded-lg bg-primary text-lg text-white">
           <Icon icon={Eye} />
           {t.show}
         </button>

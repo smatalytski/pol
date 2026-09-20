@@ -188,7 +188,7 @@ export default function TopicPage() {
             type="button"
             aria-pressed={tab === key}
             onClick={() => choose(key)}
-            className={`flex-1 rounded-md px-2 py-1.5 tabular-nums ${tab === key ? 'bg-black font-semibold text-white' : 'text-neutral-600'}`}
+            className={`flex-1 rounded-md px-2 py-1.5 tabular-nums ${tab === key ? 'bg-primary font-semibold text-white' : 'text-neutral-600'}`}
           >
             {`${labels[key]} (${counts[key]})`}
           </button>

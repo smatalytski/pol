@@ -99,7 +99,7 @@ export default function NewTopicPage() {
           onPointerUp={stop}
           onPointerCancel={stop}
           onContextMenu={(e) => e.preventDefault()}
-          className={`inline-flex select-none items-center gap-2 rounded-full px-4 py-3 text-white ${recording ? 'bg-red-600' : 'bg-black'}`}
+          className={`inline-flex select-none items-center gap-2 rounded-full px-4 py-3 text-white ${recording ? 'bg-red-600' : 'bg-primary'}`}
           style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
         >
           <Icon icon={Mic} />
@@ -112,7 +112,7 @@ export default function NewTopicPage() {
               type="button"
               aria-pressed={lang === l}
               onClick={() => setLang(l)}
-              className={`min-h-8 rounded-md px-2 py-1 ${lang === l ? 'bg-black text-white' : 'text-neutral-600'}`}
+              className={`min-h-8 rounded-md px-2 py-1 ${lang === l ? 'bg-primary text-white' : 'text-neutral-600'}`}
             >
               {l === 'ru' ? t.asRussian : t.asPolish}
             </button>
