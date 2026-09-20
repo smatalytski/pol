@@ -81,7 +81,9 @@ above-tabbar fixed inset-x-0 z-10   →   inner mx-auto max-w-xl px-4 pb-4 flex 
 
 The re-centring wrapper is required because a fixed element ignores the body's `mx-auto max-w-xl`; `/dodaj`'s record bar already does exactly this and its comment explains why `sticky` does not work here.
 
-It stays a `<Link>` to `/tematy/nowy` with `buttonClass('primary', 'md', true)` — icon-only, so it carries `aria-label` and `title` of `t.newTopic`, keeping the accessible name tests already look for.
+It stays a `<Link>` to `/tematy/nowy` carrying `aria-label` and `title` of `t.newTopic`, so the accessible name tests already look for survives the word disappearing.
+
+Its classes are written out rather than taken from `buttonClass`: the button is 56 px, and appending `h-14` to `buttonClass`'s `h-10` would leave two height utilities fighting in the stylesheet, where the winner is decided by Tailwind's output order rather than by the order they appear in the attribute.
 
 The list gets bottom padding so the button never covers the last row.
 
@@ -124,7 +126,7 @@ Suspended topics stay excluded, as today.
 A new shared overlay, since the app has none:
 
 - `role="dialog"`, `aria-modal="true"`, `aria-label` from a required prop.
-- Opens covering the screen; closes on Escape, on the `zamknij` button, and on a backdrop tap.
+- Opens covering the screen; closes on Escape and on the `zamknij` button. It covers the page rather than dimming it, so there is no backdrop to tap.
 - Focus moves to the sheet on open and returns to the opener on close; focus is trapped while open.
 - Body scroll is locked while open.
 - Renders nothing when closed.
