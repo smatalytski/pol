@@ -8,6 +8,7 @@
 export type { LucideIcon } from 'lucide-react'
 export {
   Archive,
+  Check,
   CirclePause,
   CirclePlay,
   Eye,
