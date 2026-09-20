@@ -5,7 +5,11 @@ import type { ReactNode } from 'react'
 import { t } from '@/i18n/pl'
 
 vi.mock('next/link', () => ({
-  default: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
+  default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
 }))
 
 const TopicsPage = (await import('./page')).default
@@ -49,10 +53,30 @@ describe('TopicsPage', () => {
     expect(toggle.parentElement).not.toBe(li)
   })
 
-  it('links to a new topic', async () => {
-    stubFetch([])
+  it('filters the list by topic name, ignoring case', async () => {
+    stubFetch([row({ id: 't1', name: 'U lekarza' }), row({ id: 't2', name: 'Praca' })])
     render(<TopicsPage />)
-    expect(screen.getByText(t.newTopic).closest('a')?.getAttribute('href')).toBe('/tematy/nowy')
+    await waitFor(() => expect(screen.getByText('Praca')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText(t.filterTopics), { target: { value: 'lek' } })
+    expect(screen.getByText('U lekarza')).toBeTruthy()
+    expect(screen.queryByText('Praca')).toBeNull()
+  })
+
+  it('pins the filter box', async () => {
+    stubFetch([row()])
+    render(<TopicsPage />)
+    const box = screen.getByPlaceholderText(t.filterTopics).closest('div')!.parentElement!
+    expect(box.className).toContain('sticky')
+    expect(box.className).toContain('bg-background')
+  })
+
+  it('offers new-topic as an icon-only link that keeps its accessible name', async () => {
+    stubFetch([row()])
+    render(<TopicsPage />)
+    const link = await screen.findByLabelText(t.newTopic)
+    expect(link.getAttribute('href')).toBe('/tematy/nowy')
+    // The word itself is gone — it is a plus button now.
+    expect(screen.queryByText(t.newTopic)).toBeNull()
   })
 
   it('switches a topic off', async () => {
@@ -116,7 +140,7 @@ describe('TopicsPage', () => {
     )
     render(<TopicsPage />)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
-    expect(screen.getByText(t.newTopic)).toBeTruthy()
+    expect(screen.getByLabelText(t.newTopic)).toBeTruthy()
   })
 
   it('shows an error when a malformed response would otherwise crash the list', async () => {
