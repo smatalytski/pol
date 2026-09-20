@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
-import { SESSION_COOKIE, constantTimeEqual, createSessionToken } from '@/lib/auth/session'
+import { IDLE_MS, SESSION_COOKIE, constantTimeEqual, createSessionToken } from '@/lib/auth/session'
 import { afterFailure, afterSuccess, retryAfterMs, type ThrottleState } from '@/lib/auth/throttle'
 import { db } from '@/lib/db/client'
 import { loginThrottle } from '@/lib/db/schema'
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     secure: true,
     sameSite: 'lax',
     path: '/',
-    maxAge: 365 * 24 * 60 * 60,
+    maxAge: IDLE_MS / 1000,
   })
   return res
 }

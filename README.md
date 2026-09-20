@@ -126,6 +126,19 @@ sudo chown -R fiszki:fiszki /opt/fiszki /mnt/fiszki
 
 ### 5. Write `/etc/fiszki.env`
 
+> **Logging every device out.** There is no session store to clear: a session is
+> a token signed with `SESSION_SECRET`, so changing that value and restarting
+> invalidates every cookie ever issued, on every device.
+>
+> ```bash
+> sudo sed -i "s/^SESSION_SECRET=.*/SESSION_SECRET=$(openssl rand -hex 32)/" /etc/fiszki.env
+> sudo systemctl restart fiszki
+> ```
+>
+> Sessions otherwise lapse after 30 days unused, and after a year regardless of
+> use (`lib/auth/session.ts`). The cookie is re-issued as you browse, so an
+> active user is never asked for the password until that yearly cap.
+
 ```bash
 sudo tee /etc/fiszki.env >/dev/null <<'EOF'
 APP_PASSWORD=<pick one>
