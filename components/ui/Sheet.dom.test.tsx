@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Sheet } from './Sheet'
 import { t } from '@/i18n/pl'
@@ -40,6 +41,28 @@ describe('Sheet', () => {
     const { rerender } = render(<Sheet open label="tematy" onClose={vi.fn()}><p>hello</p></Sheet>)
     rerender(<Sheet open={false} label="tematy" onClose={vi.fn()}><p>hello</p></Sheet>)
     expect(document.body.style.overflow).not.toBe('hidden')
+  })
+
+  it('restores focus to whatever opened it once it closes', () => {
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>otwórz</button>
+          <Sheet open={open} label="tematy" onClose={() => setOpen(false)}>
+            <p>hello</p>
+          </Sheet>
+        </>
+      )
+    }
+    render(<Harness />)
+    const opener = screen.getByText('otwórz')
+    opener.focus()
+    expect(document.activeElement).toBe(opener)
+    fireEvent.click(opener)
+    expect(document.activeElement).toBe(screen.getByRole('dialog'))
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(document.activeElement).toBe(opener)
   })
 
   it('keeps Tab inside the sheet', () => {

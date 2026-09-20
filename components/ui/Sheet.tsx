@@ -77,7 +77,23 @@ export function Sheet({
     >
       <div className="mx-auto flex max-w-xl flex-col gap-3 p-4">
         {children}
-        <Button variant="secondary" size="md" icon={X} label={t.sheetClose} onClick={onClose} className="self-start" />
+        {/* Left last in the DOM — right after `children` — so the focus trap
+            above (which treats the last FOCUSABLE match as the final tab
+            stop) is unaffected; `order-first` only reorders it visually, to
+            the top of this flex column, and `sticky top-0` keeps it pinned
+            there as the list scrolls beneath it. Without a backdrop, with no
+            Escape key on a phone, and with the search input above taking
+            focus (and so the keyboard) on open, `zamknij` at the bottom of
+            an unbounded list could be scrolled well out of reach; pinned at
+            the top, it never is. */}
+        <Button
+          variant="secondary"
+          size="md"
+          icon={X}
+          label={t.sheetClose}
+          onClick={onClose}
+          className="order-first sticky top-0 z-10 self-start bg-background"
+        />
       </div>
     </div>
   )
