@@ -27,8 +27,8 @@ import { Check, RefreshCw, Trash2 } from '@/components/ui/icons'
  * correlating the two unrelated id spaces.
  *
  * The chip itself is status-only: no audio player, no type switch, no
- * tap-to-edit form. A recording under review offers only usuń, with a bar
- * draining toward approval — a wrong language is not fixed here (re-
+ * tap-to-edit form. A recording under review offers usuń and zatwierdź,
+ * with a bar draining toward approval — a wrong language is not fixed here (re-
  * recognition is gone); it is deleted and recorded again with the matching
  * PL/RU button on /dodaj. A failed recognition offers ponów instead. There
  * is nothing here for a card the recording turned into — an on-screen

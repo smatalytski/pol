@@ -1,5 +1,4 @@
 'use client'
-import type React from 'react'
 import { useEffect, useState } from 'react'
 import { t } from '@/i18n/pl'
 import { Switch } from '@/components/ui/Switch'

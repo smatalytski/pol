@@ -16,7 +16,7 @@ const LOOK: Record<ButtonVariant, string> = {
 const WORDED: Record<ButtonSize, string> = { sm: 'h-8 px-3 text-sm', md: 'h-10 px-4 text-base' }
 const SQUARE: Record<ButtonSize, string> = { sm: 'h-8 w-8', md: 'h-10 w-10' }
 
-/** The classes of a button, for the one place a link has to look like one (Tematy's `nowy temat`). */
+/** The classes of a button, factored out of `Button` itself so its className merge logic (below) can call it twice without duplicating the lookup tables. No production code outside this file calls it directly. */
 export function buttonClass(variant: ButtonVariant, size: ButtonSize = 'sm', iconOnly = variant === 'icon'): string {
   return `${BASE} ${LOOK[variant]} ${iconOnly ? SQUARE[size] : WORDED[size]}`
 }
