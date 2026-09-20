@@ -33,6 +33,7 @@ vi.mock('@/hooks/useListenPlayer', () => ({
 const ListenPage = (await import('./page')).default
 
 const STORAGE_KEY = 'fiszki:listen:minutes'
+const SETTINGS = { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 }
 
 function stubFetch(topics: unknown[], settings: Record<string, unknown>) {
   vi.stubGlobal(
@@ -98,25 +99,77 @@ describe('ListenPage — idle', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '45' }).getAttribute('aria-pressed')).toBe('true')
     })
+    fireEvent.click(screen.getByText(t.addTopic))
     // Only the switched-on topic is offered — the suspended one is not.
-    const chip = await screen.findByRole('button', { name: 'U lekarza' })
-    expect(screen.queryByRole('button', { name: 'Zawieszony' })).toBeNull()
-    fireEvent.click(chip)
+    const item = await screen.findByText('U lekarza')
+    expect(screen.queryByText('Zawieszony')).toBeNull()
+    fireEvent.click(item)
     fireEvent.click(screen.getByRole('button', { name: t.listenStart }))
     expect(start).toHaveBeenCalledWith({ minutes: 45, topicIds: ['t1'] })
   })
 
-  it('clears the chosen topics when "wszystkie" is chosen', async () => {
+  it('lists no topics by default and says everything will play', async () => {
+    stubFetch([{ id: 't1', name: 'Praca', suspendedAt: null }], SETTINGS)
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.listenTopicsAll)).toBeTruthy())
+    expect(screen.queryByText('Praca')).toBeNull()
+  })
+
+  it('adds a topic through the sheet and plays only that topic', async () => {
+    stubFetch([{ id: 't1', name: 'Praca', suspendedAt: null }], SETTINGS)
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    fireEvent.click(await screen.findByText('Praca'))
+    // The sheet closed, and the topic is now a chip.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByText('Praca')).toBeTruthy()
+    fireEvent.click(screen.getByText(t.listenStart))
+    expect(start).toHaveBeenCalledWith({ minutes: 20, topicIds: ['t1'] })
+  })
+
+  it('filters the sheet by name', async () => {
     stubFetch(
-      [{ id: 't1', name: 'U lekarza', suspendedAt: null, isDefault: false }],
-      { audioGapSeconds: 5, audioRepeatAnswer: 1, audioExample: 1 },
+      [{ id: 't1', name: 'Praca', suspendedAt: null }, { id: 't2', name: 'Dom', suspendedAt: null }],
+      SETTINGS,
     )
     render(<ListenPage />)
-    const chip = await screen.findByRole('button', { name: 'U lekarza' })
-    fireEvent.click(chip)
-    fireEvent.click(screen.getByRole('button', { name: t.listenAllTopics }))
-    fireEvent.click(screen.getByRole('button', { name: t.listenStart }))
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    fireEvent.change(await screen.findByPlaceholderText(t.filterTopics), { target: { value: 'dom' } })
+    expect(screen.getByText('Dom')).toBeTruthy()
+    expect(screen.queryByText('Praca')).toBeNull()
+  })
+
+  it('removes a chip and goes back to playing everything', async () => {
+    stubFetch([{ id: 't1', name: 'Praca', suspendedAt: null }], SETTINGS)
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    fireEvent.click(await screen.findByText('Praca'))
+    fireEvent.click(screen.getByLabelText(`${t.removeTopic}: Praca`))
+    expect(screen.getByText(t.listenTopicsAll)).toBeTruthy()
+    fireEvent.click(screen.getByText(t.listenStart))
     expect(start).toHaveBeenCalledWith({ minutes: 20 })
+  })
+
+  it('says so when every topic is already chosen', async () => {
+    stubFetch([{ id: 't1', name: 'Praca', suspendedAt: null }], SETTINGS)
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    fireEvent.click(await screen.findByText('Praca'))
+    fireEvent.click(screen.getByText(t.addTopic))
+    expect(await screen.findByText(t.allTopicsChosen)).toBeTruthy()
+  })
+
+  it('focuses the search input when the topic sheet opens', async () => {
+    stubFetch([{ id: 't1', name: 'Praca', suspendedAt: null }], SETTINGS)
+    render(<ListenPage />)
+    await waitFor(() => expect(screen.getByText(t.addTopic)).toBeTruthy())
+    fireEvent.click(screen.getByText(t.addTopic))
+    const input = await screen.findByPlaceholderText(t.filterTopics)
+    await waitFor(() => expect(document.activeElement).toBe(input))
   })
 
   it('shows a summary line built from settings, linking to /ustawienia', async () => {
