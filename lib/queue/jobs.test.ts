@@ -4,7 +4,7 @@ import { createTestDb } from '../db/testing'
 import { captures, generationJobs } from '../db/schema'
 import { GenerationError } from '../generate'
 import {
-  activeJobCardIds, enqueueJob, hasActiveJob, promoteApproved, recoverRunning, runNextJob,
+  activeJobCardIds, enqueueJob, hasActiveJob, promoteApproved, promoteIds, recoverRunning, runNextJob,
   type JobHandlers,
 } from './jobs'
 
@@ -248,6 +248,42 @@ describe('promoteApproved', () => {
     expect(promoteApproved(db, at(20_000))).toEqual({ queued: ['older', 'younger'], duplicates: [] })
     const jobs = db.select().from(generationJobs).all()
     expect(jobs.map((j) => j.captureId)).toEqual(['older', 'younger'])
+  })
+})
+
+describe('promoteIds', () => {
+  it('promotes a named recording even though its review window is still open', () => {
+    const { db } = createTestDb()
+    capture(db, 'c1')
+    // at(0) is the instant the transcript landed — nothing is approved by the clock yet.
+    expect(promoteApproved(db, at(0))).toEqual({ queued: [], duplicates: [] })
+
+    expect(promoteIds(db, ['c1'], at(0))).toEqual({ queued: ['c1'], duplicates: [] })
+    expect(db.select().from(captures).where(eq(captures.id, 'c1')).get()!.status).toBe('queued')
+    expect(db.select().from(generationJobs).all()).toHaveLength(1)
+  })
+
+  it('is a no-op the second time, so a double tap cannot make two cards', () => {
+    const { db } = createTestDb()
+    capture(db, 'c1')
+    promoteIds(db, ['c1'], at(0))
+    expect(promoteIds(db, ['c1'], at(0))).toEqual({ queued: [], duplicates: [] })
+    expect(db.select().from(generationJobs).all()).toHaveLength(1)
+  })
+
+  it('ignores an id that is not under review', () => {
+    const { db } = createTestDb()
+    capture(db, 'c1', { status: 'failed' })
+    expect(promoteIds(db, ['c1'], at(0))).toEqual({ queued: [], duplicates: [] })
+    expect(db.select().from(generationJobs).all()).toHaveLength(0)
+  })
+
+  it('leaves the recordings it was not asked about alone', () => {
+    const { db } = createTestDb()
+    capture(db, 'c1')
+    capture(db, 'c2')
+    expect(promoteIds(db, ['c1'], at(0)).queued).toEqual(['c1'])
+    expect(db.select().from(captures).where(eq(captures.id, 'c2')).get()!.status).toBe('transcribed')
   })
 })
 
