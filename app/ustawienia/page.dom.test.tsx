@@ -382,6 +382,44 @@ describe('SettingsPage', () => {
     expect(screen.getByText(t.targetRetention)).toBeTruthy()
   })
 
+  it('heads the general settings with their own section title', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ newPerDay: 10, requestRetention: 0.9, audioGapSeconds: 5 }) }) as unknown as Promise<Response>),
+    )
+    render(<SettingsPage />)
+    await waitFor(() => expect(screen.getByText(t.settingsGeneral)).toBeTruthy())
+    expect(screen.getByText(t.listenSection)).toBeTruthy()
+  })
+
+  it('lays every number out as a one-line row', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              newPerDay: 12,
+              requestRetention: 0.87,
+              audioGapSeconds: 5,
+              audioRepeatAnswer: 1,
+              audioExample: 0,
+              audioHint: 1,
+              audioRepeatExample: 0,
+              audioNextSeconds: 9,
+            }),
+        }) as unknown as Promise<Response>,
+      ),
+    )
+    render(<SettingsPage />)
+    await waitFor(() => expect(screen.getByLabelText(t.newPerDay)).toBeTruthy())
+    for (const label of [t.newPerDay, t.targetRetention, t.listenGap, t.listenNext]) {
+      const input = screen.getByLabelText(label)
+      expect((input as HTMLElement).className).toContain('w-20')
+      expect(input.closest('label')!.className).toContain('justify-between')
+    }
+  })
+
   it('shows the four listening toggles as switches', async () => {
     // same GET stub as the first test in this file
     vi.stubGlobal(

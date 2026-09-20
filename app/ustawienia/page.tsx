@@ -1,4 +1,5 @@
 'use client'
+import type React from 'react'
 import { useEffect, useState } from 'react'
 import { t } from '@/i18n/pl'
 import { Switch } from '@/components/ui/Switch'
@@ -12,6 +13,34 @@ type Settings = {
   audioHint: number
   audioRepeatExample: number
   audioNextSeconds: number
+}
+
+/**
+ * One settings row: the name on the left, a compact number on the right, so
+ * a number reads like the switches below it rather than like a form field.
+ * The `<label>` wraps the input, so `getByLabelText` still finds it.
+ */
+function NumberRow({
+  label, value, onChange, onCommit, ...input
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  onCommit: () => void
+} & Pick<React.InputHTMLAttributes<HTMLInputElement>, 'min' | 'max' | 'step'>) {
+  return (
+    <label className="flex items-center justify-between gap-3 text-sub">
+      <span>{label}</span>
+      <input
+        type="number"
+        {...input}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        className="w-20 rounded-lg border border-neutral-300 px-3 py-2 text-right text-base"
+      />
+    </label>
+  )
 }
 
 export default function SettingsPage() {
@@ -99,58 +128,43 @@ export default function SettingsPage() {
   return (
     <div className="flex flex-col gap-4">
       {error && <p className="text-sm text-red-600">{t.settingsSaveFailed}</p>}
-      <label className="flex flex-col gap-1 text-sub">
-        {t.newPerDay}
-        <input
-          type="number"
-          min={0}
-          max={200}
-          value={newPerDayDraft}
-          onChange={(e) => setNewPerDayDraft(e.target.value)}
-          onBlur={() => void save({ newPerDay: Number(newPerDayDraft) })}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sub">
-        {t.targetRetention}
-        <input
-          type="number"
-          step={0.01}
-          min={0.7}
-          max={0.98}
-          value={retentionDraft}
-          onChange={(e) => setRetentionDraft(e.target.value)}
-          onBlur={() => void save({ requestRetention: Number(retentionDraft) })}
-          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
-        />
-      </label>
+      <h2 className="mt-2 text-xl font-bold">{t.settingsGeneral}</h2>
+      <NumberRow
+        label={t.newPerDay}
+        min={0}
+        max={200}
+        value={newPerDayDraft}
+        onChange={setNewPerDayDraft}
+        onCommit={() => void save({ newPerDay: Number(newPerDayDraft) })}
+      />
+      <NumberRow
+        label={t.targetRetention}
+        step={0.01}
+        min={0.7}
+        max={0.98}
+        value={retentionDraft}
+        onChange={setRetentionDraft}
+        onCommit={() => void save({ requestRetention: Number(retentionDraft) })}
+      />
 
       <div className="flex flex-col gap-4">
         <h2 className="mt-2 text-xl font-bold">{t.listenSection}</h2>
-        <label className="flex flex-col gap-1 text-sub">
-          {t.listenGap}
-          <input
-            type="number"
-            min={1}
-            max={30}
-            value={gapDraft}
-            onChange={(e) => setGapDraft(e.target.value)}
-            onBlur={() => void save({ audioGapSeconds: Number(gapDraft) })}
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sub">
-          {t.listenNext}
-          <input
-            type="number"
-            min={1}
-            max={30}
-            value={nextDraft}
-            onChange={(e) => setNextDraft(e.target.value)}
-            onBlur={() => void save({ audioNextSeconds: Number(nextDraft) })}
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-base"
-          />
-        </label>
+        <NumberRow
+          label={t.listenGap}
+          min={1}
+          max={30}
+          value={gapDraft}
+          onChange={setGapDraft}
+          onCommit={() => void save({ audioGapSeconds: Number(gapDraft) })}
+        />
+        <NumberRow
+          label={t.listenNext}
+          min={1}
+          max={30}
+          value={nextDraft}
+          onChange={setNextDraft}
+          onCommit={() => void save({ audioNextSeconds: Number(nextDraft) })}
+        />
         <Switch
           showLabel
           checked={repeatDraft}
