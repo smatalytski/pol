@@ -169,9 +169,19 @@ export default function ListenPage() {
               {selectedTopicIds.map((id) => {
                 const name = topics.find((x) => x.id === id)?.name ?? t.unnamedTopic
                 return (
-                  <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary py-1.5 pl-3 pr-1.5 text-sm text-white">
+                  <span key={id} className="inline-flex items-center gap-0.5 rounded-full bg-primary py-1 pl-3 pr-1 text-sm text-white">
                     {name}
-                    <button type="button" aria-label={`${t.removeTopic}: ${name}`} onClick={() => removeTopic(id)}>
+                    {/* The icon stays 16px, but the border box grows to 32×32
+                        (WCAG 2.5.8's minimum, and this app's smallest Button
+                        size) by centering it in a fixed box rather than
+                        padding around it — a bare 16px button here was a tap
+                        target smaller than anything else in the app. */}
+                    <button
+                      type="button"
+                      aria-label={`${t.removeTopic}: ${name}`}
+                      onClick={() => removeTopic(id)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center"
+                    >
                       <Icon icon={X} size={16} />
                     </button>
                   </span>
