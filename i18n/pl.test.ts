@@ -10,7 +10,7 @@ describe('strings', () => {
       'holdToRecord', 'recordPolish', 'recordRussian', 'uploading', 'transcribing', 'alreadyHave', 'retry', 'deleteItem', 'play', 'micDenied',
       'suspend', 'unsuspend', 'needsInput', 'queued', 'generating',
       'saveFailed',
-      'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'passwordPlaceholder',
+      'newPerDay', 'targetRetention', 'settingsSaveFailed', 'logIn', 'badPassword', 'tooManyAttempts', 'passwordPlaceholder',
       'topics', 'newTopic', 'propose', 'searching', 'more', 'tryAgain',
       'topicsLoadFailed', 'topicSaveFailed',
       'levelAdvanced', 'levelIntermediate', 'levelBadge', 'tabCarded', 'tabOpen', 'tabDiscarded',

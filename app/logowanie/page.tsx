@@ -4,7 +4,10 @@ import { t } from '@/i18n/pl'
 
 export default function LoginPage() {
   const [password, setPassword] = useState('')
-  const [failed, setFailed] = useState(false)
+  // Which message to show, not merely "did it fail": a throttled attempt and a
+  // wrong password are different problems, and telling the user their password
+  // is wrong when it is not sends them hunting for the wrong fix.
+  const [error, setError] = useState<'bad-password' | 'too-many' | null>(null)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -14,7 +17,7 @@ export default function LoginPage() {
       body: JSON.stringify({ password }),
     })
     if (res.ok) window.location.href = '/powtorki'
-    else setFailed(true)
+    else setError(res.status === 429 ? 'too-many' : 'bad-password')
   }
 
   return (
@@ -30,7 +33,9 @@ export default function LoginPage() {
       <button type="submit" className="rounded-lg bg-primary p-4 text-lg text-white">
         {t.logIn}
       </button>
-      {failed && <p className="text-red-600">{t.badPassword}</p>}
+      {error && (
+        <p className="text-red-600">{error === 'too-many' ? t.tooManyAttempts : t.badPassword}</p>
+      )}
     </form>
   )
 }
