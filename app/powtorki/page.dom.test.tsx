@@ -4,6 +4,7 @@ import { fireEvent } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReviewPage from './page'
 import { t } from '@/i18n/pl'
+import { SessionState } from '@/components/SessionState'
 
 type QueueItem = {
   id: string
@@ -58,7 +59,7 @@ describe('ReviewPage', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
-    render(<ReviewPage />)
+    render(<SessionState><ReviewPage /></SessionState>)
     await waitFor(() => screen.getByText('AAA'))
     fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
     const goodButton = await screen.findByRole('button', { name: 'dobrze' })
@@ -109,7 +110,7 @@ describe('ReviewPage', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
-    render(<ReviewPage />)
+    render(<SessionState><ReviewPage /></SessionState>)
     await waitFor(() => screen.getByText('AAA'))
     fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
     fireEvent.click(await screen.findByRole('button', { name: 'dobrze' }))
@@ -144,12 +145,40 @@ describe('ReviewPage', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
-    render(<ReviewPage />)
+    render(<SessionState><ReviewPage /></SessionState>)
     await waitFor(() => screen.getByText('AAA'))
     fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'dobrze' }))
     })
     expect(await screen.findByText(t.rateFailed)).toBeTruthy()
+  })
+
+  it('resumes the same card, still revealed, and does not re-fetch the queue', async () => {
+    let queueFetches = 0
+    global.fetch = vi.fn((url: string) => {
+      if (url === '/api/review/queue') {
+        queueFetches += 1
+        return Promise.resolve({
+          json: () => Promise.resolve({ cards: [card('a', 'AAA'), card('b', 'BBB')], nextDue: null }),
+        } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    }) as unknown as typeof fetch
+
+    const view = render(<SessionState><ReviewPage /></SessionState>)
+    await screen.findByText('AAA')
+    fireEvent.click(screen.getByRole('button', { name: t.show }))
+    expect(screen.getByText('answer-a')).toBeTruthy()
+    expect(queueFetches).toBe(1)
+
+    // Leave for /dodaj and come back: the provider stays, the screen does not.
+    view.rerender(<SessionState><span /></SessionState>)
+    view.rerender(<SessionState><ReviewPage /></SessionState>)
+
+    expect(screen.getByText('AAA')).toBeTruthy()
+    expect(screen.getByText('answer-a')).toBeTruthy()
+    expect(screen.getByRole('button', { name: t.again })).toBeTruthy()
+    expect(queueFetches).toBe(1)
   })
 })
