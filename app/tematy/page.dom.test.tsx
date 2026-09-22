@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { t } from '@/i18n/pl'
+import { SessionState } from '@/components/SessionState'
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
@@ -34,9 +35,26 @@ afterEach(() => {
 })
 
 describe('TopicsPage', () => {
+  it('paints the remembered list at once on return, and still re-fetches it', async () => {
+    const calls = stubFetch([row()])
+    const view = render(<SessionState><TopicsPage /></SessionState>)
+    await screen.findByText('U lekarza')
+    fireEvent.change(screen.getByPlaceholderText(t.filterTopics), { target: { value: 'lek' } })
+    expect(calls.filter((c) => c.url === '/api/topics').length).toBe(1)
+
+    view.rerender(<SessionState><span /></SessionState>)
+    view.rerender(<SessionState><TopicsPage /></SessionState>)
+
+    // Painted from the store synchronously — no await before these two.
+    expect(screen.getByText('U lekarza')).toBeTruthy()
+    expect((screen.getByPlaceholderText(t.filterTopics) as HTMLInputElement).value).toBe('lek')
+    // ...and refreshed anyway, which is what shows a word recorded meanwhile.
+    await waitFor(() => expect(calls.filter((c) => c.url === '/api/topics').length).toBe(2))
+  })
+
   it('lists each topic with its counts, linking to it', async () => {
     stubFetch([row()])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     const name = await screen.findByText('U lekarza')
     expect(name.closest('a')?.getAttribute('href')).toBe('/tematy/t1')
     expect(screen.getByText(`23 ${t.tabCarded} · 5 ${t.tabOpen} · 3 ${t.tabDiscarded}`)).toBeTruthy()
@@ -45,7 +63,7 @@ describe('TopicsPage', () => {
 
   it('lays out the name on its own line from the controls', async () => {
     stubFetch([row()])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     const name = await screen.findByText('U lekarza')
     const li = name.closest('li')!
     const toggle = screen.getByRole('switch', { name: t.topicOn })
@@ -55,7 +73,7 @@ describe('TopicsPage', () => {
 
   it('filters the list by topic name, ignoring case', async () => {
     stubFetch([row({ id: 't1', name: 'U lekarza' }), row({ id: 't2', name: 'Praca' })])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     await waitFor(() => expect(screen.getByText('Praca')).toBeTruthy())
     fireEvent.change(screen.getByPlaceholderText(t.filterTopics), { target: { value: 'lek' } })
     expect(screen.getByText('U lekarza')).toBeTruthy()
@@ -64,7 +82,7 @@ describe('TopicsPage', () => {
 
   it('pins the filter box', async () => {
     stubFetch([row()])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     const box = screen.getByPlaceholderText(t.filterTopics).closest('div')!.parentElement!
     expect(box.className).toContain('sticky')
     expect(box.className).toContain('bg-background')
@@ -72,7 +90,7 @@ describe('TopicsPage', () => {
 
   it('offers new-topic as an icon-only link that keeps its accessible name', async () => {
     stubFetch([row()])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     const link = await screen.findByLabelText(t.newTopic)
     expect(link.getAttribute('href')).toBe('/tematy/nowy')
     // The word itself is gone — it is a plus button now.
@@ -84,7 +102,7 @@ describe('TopicsPage', () => {
   // only the classes can be asserted here.
   it('lets taps pass through the fixed band around the new-topic button', async () => {
     stubFetch([row()])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     const link = await screen.findByLabelText(t.newTopic)
     const band = link.closest('.fixed')!
     expect(band.className).toContain('pointer-events-none')
@@ -93,7 +111,7 @@ describe('TopicsPage', () => {
 
   it('switches a topic off', async () => {
     const calls = stubFetch([row()])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     fireEvent.click(await screen.findByRole('switch', { name: t.topicOn }))
     await waitFor(() => expect(calls.some((c) => c.init?.method === 'PATCH')).toBe(true))
     const patch = calls.find((c) => c.init?.method === 'PATCH')!
@@ -103,7 +121,7 @@ describe('TopicsPage', () => {
 
   it('shows a switch that is on for an active topic and off for a suspended one', async () => {
     stubFetch([row(), row({ id: 't2', name: 'W sklepie', suspendedAt: 5 })])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     await screen.findByText('W sklepie')
     const switches = screen.getAllByRole('switch', { name: t.topicOn })
     expect(switches.map((s) => s.getAttribute('aria-checked'))).toEqual(['true', 'false'])
@@ -111,7 +129,7 @@ describe('TopicsPage', () => {
 
   it('shows an unnamed topic as such', async () => {
     stubFetch([row({ name: null })])
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     expect(await screen.findByText(t.unnamedTopic)).toBeTruthy()
   })
 
@@ -134,7 +152,7 @@ describe('TopicsPage', () => {
       })
       vi.stubGlobal('fetch', fetchMock)
 
-      render(<TopicsPage />)
+      render(<SessionState><TopicsPage /></SessionState>)
       // Advance in slices rather than one big jump: the initial load's state
       // update (and so the polling effect noticing `searching`) settles
       // partway through, so the freshly registered 2s interval needs its
@@ -150,7 +168,7 @@ describe('TopicsPage', () => {
       'fetch',
       vi.fn(() => Promise.resolve({ ok: false, json: () => Promise.resolve({}) }) as unknown as Promise<Response>),
     )
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
     expect(screen.getByLabelText(t.newTopic)).toBeTruthy()
   })
@@ -160,7 +178,7 @@ describe('TopicsPage', () => {
       'fetch',
       vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }) as unknown as Promise<Response>),
     )
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
   })
 
@@ -174,7 +192,7 @@ describe('TopicsPage', () => {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ topics: [row()] }) }) as unknown as Promise<Response>
       }),
     )
-    render(<TopicsPage />)
+    render(<SessionState><TopicsPage /></SessionState>)
     fireEvent.click(await screen.findByRole('switch', { name: t.topicOn }))
     expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
   })

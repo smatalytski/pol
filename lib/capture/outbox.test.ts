@@ -106,4 +106,9 @@ describe('outbox', () => {
     await enqueue({ id: 'a', bytes: new ArrayBuffer(1), mime: 'audio/webm', createdAt: 1, lang: 'ru' })
     expect((await listOutbox())[0].lang).toBe('ru')
   })
+
+  it('keeps a recording’s topic while it waits offline', async () => {
+    await enqueue({ id: 'o1', bytes: new ArrayBuffer(2), mime: 'audio/webm', createdAt: 1, lang: 'pl', topicId: 't1' })
+    expect((await listOutbox())[0].topicId).toBe('t1')
+  })
 })

@@ -10,6 +10,10 @@ export type OutboxItem = {
   // Absent on entries saved before the language existed; they upload as
   // Polish.
   lang?: DictationLang
+  // Absent on entries saved before topics reached this screen, and on any
+  // recording made under Ogólne; both upload with no topic, which the server
+  // stores as NULL and reads back as Ogólne.
+  topicId?: string | null
 }
 
 const store = createStore('fiszki', 'outbox')

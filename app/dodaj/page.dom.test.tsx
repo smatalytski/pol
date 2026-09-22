@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AddPage from './page'
+import { SessionState } from '@/components/SessionState'
 import { clearOutbox, enqueue } from '@/lib/capture/outbox'
 import { createStore, set as idbSet } from 'idb-keyval'
 import type { CaptureView } from '@/lib/capture/pipeline'
@@ -51,6 +52,31 @@ function stubMic() {
   return getUserMedia
 }
 
+function stubScreen(topics: unknown[] = []) {
+  const calls: { url: string; init?: RequestInit }[] = []
+  vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    calls.push({ url, init })
+    const body = url.startsWith('/api/topics') ? { topics } : { captures: [] }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) }) as unknown as Promise<Response>
+  }))
+  vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+  stubMic()
+  return calls
+}
+
+// AddPage doesn't override the hook's default 300ms minMs (see the other
+// gesture tests above), so the press has to actually last that long in real
+// time or the release is discarded as an accidental tap and onRecorded never
+// fires.
+async function holdPolish() {
+  const button = screen.getByRole('button', { name: t.recordPolish })
+  await act(async () => { fireEvent.pointerDown(button) })
+  await act(async () => { await new Promise((r) => setTimeout(r, 320)) })
+  await act(async () => { fireEvent.pointerUp(button) })
+}
+
+const chooseTopic = `${t.recordingTopic}: ${t.defaultTopic}`
+
 describe('AddPage polling (spec §9: poll while pending, stop when idle)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -68,7 +94,7 @@ describe('AddPage polling (spec §9: poll while pending, stop when idle)', () =>
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
 
     // The pending capture keeps the 1s interval alive across several ticks.
     await vi.advanceTimersByTimeAsync(3000)
@@ -92,7 +118,7 @@ describe('AddPage polling (spec §9: poll while pending, stop when idle)', () =>
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const { unmount } = render(<AddPage />)
+    const { unmount } = render(<SessionState><AddPage /></SessionState>)
     await vi.advanceTimersByTimeAsync(2000)
     const countBeforeUnmount = fetchMock.mock.calls.length
     unmount()
@@ -125,7 +151,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
 
   it('turns the button into the recording state on pointerdown and back on pointerup', async () => {
     stubMic()
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const button = screen.getByRole('button', { name: t.recordPolish })
     expect(button.className).toContain('bg-primary')
 
@@ -146,7 +172,7 @@ describe('AddPage gesture wiring (fires real pointer events at the button)', () 
 
   it('cleans up the same way when the gesture is cancelled instead of released', async () => {
     stubMic()
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
@@ -192,7 +218,7 @@ describe('AddPage mic-denied screen', () => {
     const getUserMedia = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
     Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
 
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
@@ -232,7 +258,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
       }),
     )
 
-    const { unmount } = render(<AddPage />)
+    const { unmount } = render(<SessionState><AddPage /></SessionState>)
 
     expect(await screen.findByText(t.uploading)).toBeTruthy()
     expect(screen.queryByRole('button', { name: t.retry })).toBeNull()
@@ -272,7 +298,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
       }),
     )
 
-    const { unmount } = render(<AddPage />)
+    const { unmount } = render(<SessionState><AddPage /></SessionState>)
     const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
@@ -342,7 +368,7 @@ describe('AddPage outbox chips (spec §11: an upload stuck retrying still gets i
       }),
     )
 
-    const { unmount } = render(<AddPage />)
+    const { unmount } = render(<SessionState><AddPage /></SessionState>)
     const button = screen.getByRole('button', { name: t.recordPolish })
 
     await act(async () => {
@@ -414,7 +440,7 @@ describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
         throw new Error(`unexpected fetch ${url}`)
       }),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const li = await screen.findByRole('listitem')
     swipeLeft(li)
     await waitFor(() => expect(deleteCalls).toEqual(['/api/captures/c1']))
@@ -437,7 +463,7 @@ describe('AddPage chip deletion (spec §4: "swipe to delete")', () => {
         throw new Error(`unexpected fetch ${url}`)
       }),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const li = await screen.findByRole('listitem')
     swipeLeft(li)
     await waitFor(() => expect(deleteCalls).toEqual(['/api/captures/c2']))
@@ -468,7 +494,7 @@ describe('AddPage layout', () => {
           }) as unknown as Promise<Response>,
       ),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const button = await screen.findByRole('button', { name: t.recordPolish })
     const list = screen.getByRole('list')
     expect(list.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
@@ -496,7 +522,7 @@ describe('AddPage layout', () => {
           }) as unknown as Promise<Response>,
       ),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const bar = (await screen.findByRole('button', { name: t.recordPolish })).closest('div')!
     expect(bar.className).toContain('fixed')
     // Sits on top of the bottom tab bar rather than at the screen's edge.
@@ -516,7 +542,7 @@ describe('AddPage layout', () => {
           }) as unknown as Promise<Response>,
       ),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     await screen.findByRole('button', { name: t.recordPolish })
     expect(screen.getByRole('list').className).toMatch(/\bpb-/)
   })
@@ -542,7 +568,7 @@ describe('AddPage recording language (PL/RU buttons, no on-screen language contr
       if (init?.method === 'POST') posts.push(init.body as FormData)
       return Promise.resolve({ ok: true, status: 202, json: () => Promise.resolve({ captures: [], captureId: 'c' }) }) as unknown as Promise<Response>
     }))
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const button = screen.getByRole('button', { name: t[key] })
     fireEvent.pointerDown(button)
     await act(async () => { await new Promise((r) => setTimeout(r, 350)) })
@@ -555,7 +581,7 @@ describe('AddPage recording language (PL/RU buttons, no on-screen language contr
     vi.stubGlobal('fetch', vi.fn(() =>
       Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [{ ...captureRow('cap-1', 'transcribed'), transcript: 'kot' }] }) }) as unknown as Promise<Response>,
     ))
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     await screen.findByText('kot')
     expect(screen.queryByText(t.asPolish)).toBeNull()
     expect(screen.queryByText(t.asRussian)).toBeNull()
@@ -590,7 +616,7 @@ describe('AddPage recording language (PL/RU buttons, no on-screen language contr
       }),
     )
 
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     await waitFor(() => expect(posts).toHaveLength(1))
     expect(posts[0].has('lang')).toBe(false)
   })
@@ -623,7 +649,7 @@ describe('AddPage ponów', () => {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: list }) })
       }),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const control = await screen.findByText(t.retry)
     await act(async () => {
       fireEvent.click(control)
@@ -648,7 +674,7 @@ describe('AddPage review fade', () => {
     stubMic()
     let list: CaptureView[] = [captureRow('cap-1', 'transcribed')]
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: list }) }) as unknown as Promise<Response>))
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     expect(await screen.findByRole('listitem')).toBeTruthy()
     list = []
     await waitFor(() => expect(screen.queryByRole('listitem')).toBeNull(), { timeout: 3_000 })
@@ -687,7 +713,7 @@ describe('AddPage slow and failing chip controls', () => {
   it('shows a notice when a delete is refused', async () => {
     stubMic()
     stubWrites(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) }))
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const control = await screen.findByRole('button', { name: t.deleteItem })
     await act(async () => {
       fireEvent.click(control)
@@ -698,7 +724,7 @@ describe('AddPage slow and failing chip controls', () => {
   it('shows a notice when a delete never reaches the server', async () => {
     stubMic()
     stubWrites(() => Promise.reject(new TypeError('Failed to fetch')))
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     const control = await screen.findByRole('button', { name: t.deleteItem })
     await act(async () => {
       fireEvent.click(control)
@@ -721,7 +747,7 @@ describe('AddPage slow and failing chip controls', () => {
         ) as unknown as Promise<Response>,
       ),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     await waitFor(() => expect(screen.getByText(t.approveNow)).toBeTruthy())
     fireEvent.click(screen.getByText(t.approveNow))
     // The controls re-enable once whilePending's refresh comes back — that is
@@ -743,11 +769,173 @@ describe('AddPage slow and failing chip controls', () => {
         ) as unknown as Promise<Response>,
       ),
     )
-    render(<AddPage />)
+    render(<SessionState><AddPage /></SessionState>)
     await waitFor(() => expect(screen.getByText(t.approveNow)).toBeTruthy())
     fireEvent.click(screen.getByText(t.approveNow))
     await waitFor(() => expect(screen.getByText(t.approveFailed)).toBeTruthy())
     // The list still returns it, so the chip stays until a real promotion.
     expect(screen.getByText('kot')).toBeTruthy()
+  })
+})
+
+describe('AddPage topic row', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+  it('starts on Ogólne, with no reset button to hit by accident', () => {
+    stubScreen()
+    render(<SessionState><AddPage /></SessionState>)
+    expect(screen.getByRole('button', { name: chooseTopic })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: t.resetTopic })).toBeNull()
+  })
+
+  it('sends the chosen topic with the recording, and resets in one tap', async () => {
+    const calls = stubScreen([{ id: 't1', name: 'Praca w IT', suspendedAt: null }])
+    render(<SessionState><AddPage /></SessionState>)
+
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Praca w IT' }))
+    await holdPolish()
+
+    await waitFor(() => {
+      const upload = calls.find((c) => c.url === '/api/captures' && c.init?.method === 'POST')
+      expect((upload!.init!.body as FormData).get('topicId')).toBe('t1')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: t.resetTopic }))
+    expect(screen.getByRole('button', { name: chooseTopic })).toBeTruthy()
+  })
+
+  it('sends no topic at all under Ogólne, keeping today’s NULL row', async () => {
+    const calls = stubScreen()
+    render(<SessionState><AddPage /></SessionState>)
+    await holdPolish()
+    await waitFor(() => {
+      const upload = calls.find((c) => c.url === '/api/captures' && c.init?.method === 'POST')
+      expect((upload!.init!.body as FormData).get('topicId')).toBeNull()
+    })
+  })
+
+  it('keeps the chosen topic across a trip to another screen', async () => {
+    stubScreen([{ id: 't1', name: 'Praca w IT', suspendedAt: null }])
+    const view = render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Praca w IT' }))
+
+    view.rerender(<SessionState><span /></SessionState>)
+    view.rerender(<SessionState><AddPage /></SessionState>)
+
+    expect(screen.getByRole('button', { name: `${t.recordingTopic}: Praca w IT` })).toBeTruthy()
+  })
+
+  // The load-bearing case the brief calls out three times: `drain` must tag
+  // a retried upload with the outbox entry's own `topicId`, not whatever
+  // `topic` is live at retry time. This is the only test in the suite that
+  // creates a window where the two diverge — the other topic-row tests drain
+  // synchronously in the same tick they enqueue, so `topic` never has a
+  // chance to change before the (single, successful) upload fires.
+  it('keeps the topic a queued recording was made under, even after the topic is switched before it retries', async () => {
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    const topics = [
+      { id: 'tA', name: 'Temat A', suspendedAt: null },
+      { id: 'tB', name: 'Temat B', suspendedAt: null },
+    ]
+    const posts: FormData[] = []
+    let postAttempts = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === 'string' && url.startsWith('/api/topics')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ topics }) }) as unknown as Promise<Response>
+        }
+        if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [] }) }) as unknown as Promise<Response>
+        }
+        if (url === '/api/captures' && init?.method === 'POST') {
+          postAttempts++
+          posts.push(init.body as FormData)
+          // The first attempt fails (e.g. offline) and the item stays
+          // queued (spec: losing a dictated word is worse than a stuck
+          // queue — outbox.ts's `flush`); the retry succeeds.
+          if (postAttempts === 1) return Promise.resolve({ ok: false, status: 503 }) as unknown as Promise<Response>
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captureId: 'c' }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+
+    render(<SessionState><AddPage /></SessionState>)
+
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Temat A' }))
+    await holdPolish()
+    await waitFor(() => expect(postAttempts).toBe(1))
+
+    // Switch the active topic to Temat B before the retry fires — the
+    // already-queued recording must not be retagged.
+    fireEvent.click(screen.getByRole('button', { name: `${t.recordingTopic}: Temat A` }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Temat B' }))
+    expect(screen.getByRole('button', { name: `${t.recordingTopic}: Temat B` })).toBeTruthy()
+
+    // The real 1s poll interval keeps retrying while the item is still
+    // queued (hasPending stays true); this attempt succeeds.
+    await waitFor(() => expect(postAttempts).toBe(2), { timeout: 3000 })
+    expect(posts[1].get('topicId')).toBe('tA')
+  })
+
+  // Minor review finding: §4.1 re-fetches the topic list on every sheet open
+  // precisely so a topic renamed since the page loaded is never shown stale
+  // — but that promise only covered the picker's own rows, not the trigger's
+  // remembered label. Opening the picker again after a rename must reconcile
+  // the stored topic so the trigger stops naming the wrong topic while still
+  // filing correctly by id.
+  it('reconciles the trigger label when the chosen topic was renamed since it was picked', async () => {
+    let topics = [{ id: 't1', name: 'Praca w IT', suspendedAt: null }]
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const body = url.startsWith('/api/topics') ? { topics } : { captures: [] }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) }) as unknown as Promise<Response>
+    }))
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+
+    render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Praca w IT' }))
+    expect(screen.getByRole('button', { name: `${t.recordingTopic}: Praca w IT` })).toBeTruthy()
+
+    // The topic is renamed server-side while we're away — the trigger still
+    // shows the old name until the list is fetched again.
+    topics = [{ id: 't1', name: 'Dział IT', suspendedAt: null }]
+
+    fireEvent.click(screen.getByRole('button', { name: `${t.recordingTopic}: Praca w IT` }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: `${t.recordingTopic}: Dział IT` })).toBeTruthy()
+    })
+  })
+
+  // Minor review finding: the sheet had no empty state and no error state,
+  // unlike its otherwise-identical twin on /sluchaj.
+  it('shows a message when no topic matches the filter', async () => {
+    stubScreen([{ id: 't1', name: 'Praca w IT', suspendedAt: null }])
+    render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    await screen.findByRole('button', { name: 'Praca w IT' })
+    fireEvent.change(screen.getByPlaceholderText(t.filterTopics), { target: { value: 'zzz' } })
+    expect(await screen.findByText(t.noTopicsFound)).toBeTruthy()
+  })
+
+  it('shows an error when the topic list fails to load', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/topics')) {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [] }) }) as unknown as Promise<Response>
+    }))
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+
+    render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
   })
 })

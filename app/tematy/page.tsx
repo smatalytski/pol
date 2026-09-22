@@ -5,14 +5,16 @@ import { Badge } from '@/components/ui/Badge'
 import { Icon } from '@/components/ui/Icon'
 import { Plus, Search } from '@/components/ui/icons'
 import { Switch } from '@/components/ui/Switch'
+import { useRestoreScroll, useScreenState } from '@/components/SessionState'
 import type { TopicListRow } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
 
 /** Every topic, with its card count, what is still generating, and its on/off switch (spec §5.1). */
 export default function TopicsPage() {
-  const [topics, setTopics] = useState<TopicListRow[]>([])
+  const [topics, setTopics] = useScreenState<TopicListRow[]>('tematy:list', () => [])
   const [error, setError] = useState<string | null>(null)
-  const [q, setQ] = useState('')
+  const [q, setQ] = useScreenState('tematy:q', () => '')
+  useRestoreScroll('tematy', topics.length > 0)
 
   // A non-2xx or malformed body must never reach setTopics (it would leave
   // `topics` as something other than an array and crash the `.some`/`.map`
@@ -30,7 +32,9 @@ export default function TopicsPage() {
     } catch {
       setError(t.topicsLoadFailed)
     }
-  }, [])
+    // `setTopics` is a stable useState identity handed back by the session
+    // store, so `load` stays stable and the mount effect below still runs once.
+  }, [setTopics])
 
   useEffect(() => {
     void load()

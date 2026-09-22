@@ -4,6 +4,7 @@ import { fireEvent } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReviewPage from './page'
 import { t } from '@/i18n/pl'
+import { SessionState } from '@/components/SessionState'
 
 type QueueItem = {
   id: string
@@ -58,7 +59,7 @@ describe('ReviewPage', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
-    render(<ReviewPage />)
+    render(<SessionState><ReviewPage /></SessionState>)
     await waitFor(() => screen.getByText('AAA'))
     fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
     const goodButton = await screen.findByRole('button', { name: 'dobrze' })
@@ -109,7 +110,7 @@ describe('ReviewPage', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
-    render(<ReviewPage />)
+    render(<SessionState><ReviewPage /></SessionState>)
     await waitFor(() => screen.getByText('AAA'))
     fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
     fireEvent.click(await screen.findByRole('button', { name: 'dobrze' }))
@@ -144,12 +145,94 @@ describe('ReviewPage', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     }) as unknown as typeof fetch
 
-    render(<ReviewPage />)
+    render(<SessionState><ReviewPage /></SessionState>)
     await waitFor(() => screen.getByText('AAA'))
     fireEvent.click(screen.getByRole('button', { name: 'pokaż' }))
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'dobrze' }))
     })
     expect(await screen.findByText(t.rateFailed)).toBeTruthy()
+  })
+
+  it('resumes the same card, still revealed, and does not re-fetch the queue', async () => {
+    let queueFetches = 0
+    global.fetch = vi.fn((url: string) => {
+      if (url === '/api/review/queue') {
+        queueFetches += 1
+        return Promise.resolve({
+          json: () => Promise.resolve({ cards: [card('a', 'AAA'), card('b', 'BBB')], nextDue: null }),
+        } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    }) as unknown as typeof fetch
+
+    const view = render(<SessionState><ReviewPage /></SessionState>)
+    await screen.findByText('AAA')
+    fireEvent.click(screen.getByRole('button', { name: t.show }))
+    expect(screen.getByText('answer-a')).toBeTruthy()
+    expect(queueFetches).toBe(1)
+
+    // Leave for /dodaj and come back: the provider stays, the screen does not.
+    view.rerender(<SessionState><span /></SessionState>)
+    view.rerender(<SessionState><ReviewPage /></SessionState>)
+
+    expect(screen.getByText('AAA')).toBeTruthy()
+    expect(screen.getByText('answer-a')).toBeTruthy()
+    expect(screen.getByRole('button', { name: t.again })).toBeTruthy()
+    expect(queueFetches).toBe(1)
+  })
+
+  // Important review finding: `loaded` alone can't tell "a session is still
+  // running" from "the last session already ended" — it stays true for the
+  // rest of the provider's life once set. Left ungated on session state, a
+  // remount after the queue drains would be stuck on the done screen
+  // forever, even though new cards may have since become due or been
+  // generated from /dodaj. A fresh visit to an already-finished screen must
+  // fetch again.
+  it('re-fetches the queue on a remount after the previous session drained', async () => {
+    let queueFetches = 0
+    global.fetch = vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/review/queue') {
+        queueFetches += 1
+        // The first fetch hands back one card; once it's rated the queue is
+        // empty and stays empty until a fresh fetch (the second one) hands
+        // back a new card that arrived after the session ended.
+        const cards = queueFetches === 1 ? [card('a', 'AAA')] : [card('c', 'CCC')]
+        return Promise.resolve({ json: () => Promise.resolve({ cards, nextDue: null }) } as Response)
+      }
+      if (typeof url === 'string' && url.startsWith('/api/review/') && url !== '/api/review/undo' && init?.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ due: 123 }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    }) as unknown as typeof fetch
+
+    const view = render(<SessionState><ReviewPage /></SessionState>)
+    await screen.findByText('AAA')
+    fireEvent.click(screen.getByRole('button', { name: t.show }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: t.again }))
+    })
+
+    // The queue drained: the done screen shows, with the session's tally.
+    await screen.findByText(t.doneForToday)
+    expect(screen.getByText(`${t.sessionReviewed}: 1`)).toBeTruthy()
+    expect(queueFetches).toBe(1)
+
+    // Leave and come back: this is a fresh visit to a screen whose session
+    // already ended, so it resumes nothing and fetches again.
+    view.rerender(<SessionState><span /></SessionState>)
+    view.rerender(<SessionState><ReviewPage /></SessionState>)
+
+    await screen.findByText('CCC')
+    expect(queueFetches).toBe(2)
+
+    // The session tally is separate from the queue and must survive the
+    // re-fetch: rating this new card brings it to 2, not back down to 1.
+    fireEvent.click(screen.getByRole('button', { name: t.show }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: t.again }))
+    })
+    await screen.findByText(t.doneForToday)
+    expect(screen.getByText(`${t.sessionReviewed}: 2`)).toBeTruthy()
   })
 })

@@ -4,9 +4,11 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { BatchSettings } from '@/components/BatchSettings'
 import { ManualAddBar } from '@/components/ManualAddBar'
+import { useRestoreScroll, useScreenState } from '@/components/SessionState'
 import { Button } from '@/components/ui/Button'
+import { Icon } from '@/components/ui/Icon'
 import { Switch } from '@/components/ui/Switch'
-import { RefreshCw, Sparkles } from '@/components/ui/icons'
+import { Plus, RefreshCw, Sparkles } from '@/components/ui/icons'
 import { DEFAULT_COUNT, type BatchParams } from '@/lib/topics/rounds'
 import type { TopicView } from '@/lib/topics/service'
 import { t } from '@/i18n/pl'
@@ -64,6 +66,9 @@ export default function TopicPage() {
   const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set())
   const [saveError, setSaveError] = useState<string | null>(null)
   const [params, setParams] = useState<BatchParams>({ count: DEFAULT_COUNT, mix: 'mieszane', level: 'zaawansowany' })
+  const [draft, setDraft] = useScreenState(`tematy:${id}:draft`, () => '')
+  const [adding, setAdding] = useScreenState(`tematy:${id}:adding`, () => false)
+  useRestoreScroll(`tematy:${id}`, view !== null)
 
   // Only a 404 means "not found". Any other non-2xx, malformed body or
   // network error keeps the last view on screen and shows an error line;
@@ -124,7 +129,7 @@ export default function TopicPage() {
   }
 
   async function addItem(text: string): Promise<string | null> {
-    const error = await send(`/api/topics/${id}/items`, 'POST', { text })
+    const error = await send(`/api/topics/${id}/cards`, 'POST', { text })
     await load()
     return error
   }
@@ -198,12 +203,42 @@ export default function TopicPage() {
       {saveError && <p className="text-sm text-red-600">{saveError}</p>}
 
       {tab === 'carded' && (
-        <CardedTab topicId={id} cards={groups.carded} pending={pending} topicSuspended={topic.suspendedAt !== null} busy={busy} act={act} />
+        // `pb-20` reserves the height of the fixed `+` band below (56px button
+        // + its 16px of padding). The layout's `pad-below-tabbar` only clears
+        // the tab bar, so without this the band — whose button is opaque —
+        // covers the last card row's right-aligned buttons. `/tematy` reserves
+        // the same 80px for the same band; `/dodaj` does the same for its
+        // taller record bar.
+        <div className="flex flex-col gap-4 pb-20">
+          {adding && (
+            <ManualAddBar
+              value={draft}
+              onChange={setDraft}
+              onAdd={addItem}
+              onClose={() => { setDraft(''); setAdding(false) }}
+            />
+          )}
+          <CardedTab topicId={id} cards={groups.carded} pending={pending} topicSuspended={topic.suspendedAt !== null} busy={busy} act={act} />
+          {!adding && (
+            <div className="above-tabbar pointer-events-none fixed inset-x-0 z-10">
+              <div className="mx-auto flex max-w-xl justify-end px-4 pb-4">
+                <button
+                  type="button"
+                  aria-label={t.manualAdd}
+                  title={t.manualAdd}
+                  onClick={() => setAdding(true)}
+                  className="pointer-events-auto inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-lg"
+                >
+                  <Icon icon={Plus} size={24} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {tab === 'open' && (
         <div className="flex flex-col gap-4">
-          <ManualAddBar onAdd={addItem} />
           <OpenTab topicId={id} items={groups.open} busy={busy} act={act} />
           {!topic.isDefault && (
             <div className="flex flex-col gap-3">

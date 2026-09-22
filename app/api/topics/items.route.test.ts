@@ -10,7 +10,7 @@ process.env.FISZKI_DB = path.join(tmpDir, 'test.db')
 afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
 const batchesRoute = await import('./[id]/batches/route')
-const itemsRoute = await import('./[id]/items/route')
+const cardsRoute = await import('./[id]/cards/route')
 const itemRoute = await import('./[id]/items/[itemId]/route')
 const cardRoute = await import('./[id]/items/[itemId]/card/route')
 const discardRoute = await import('./[id]/items/[itemId]/discard/route')
@@ -40,10 +40,12 @@ function makeTopic(id: string, overrides: Partial<typeof topics.$inferInsert> = 
   return id
 }
 
-async function addItem(topicId: string, text: string) {
-  const res = await itemsRoute.POST(post({ text }), params({ id: topicId }))
-  expect(res.status).toBe(201)
-  return ((await res.json()) as { item: { id: string } }).item.id
+const { addManualItem } = await import('@/lib/topics/service')
+
+function addItem(topicId: string, text: string) {
+  const result = addManualItem(db, topicId, text, NOW)
+  if (!result.ok) throw new Error(`seeding ${text} failed: ${result.reason}`)
+  return result.item.id
 }
 
 function seedCard(overrides: Partial<typeof cards.$inferInsert> & { id: string }) {
@@ -133,30 +135,40 @@ describe('POST /api/topics/:id/batches', () => {
   })
 })
 
-describe('POST /api/topics/:id/items', () => {
-  it('adds a hand-typed item', async () => {
+describe('POST /api/topics/:id/cards', () => {
+  it('adds a hand-typed word and cards it', async () => {
     const id = makeTopic('t4')
-    const res = await itemsRoute.POST(post({ text: 'wesele' }), params({ id }))
-    expect(res.status).toBe(201)
-    const { item } = (await res.json()) as { item: { answerPl: string; source: string } }
+    const res = await cardsRoute.POST(post({ text: 'wesele' }), params({ id }))
+    expect(res.status).toBe(202)
+    const { item, captureId } = (await res.json()) as { item: { id: string; answerPl: string; source: string }; captureId: string }
     expect(item).toMatchObject({ answerPl: 'wesele', source: 'manual' })
+    expect(captureId).toEqual(expect.any(String))
+    expect(db.select().from(topicItems).where(eq(topicItems.id, item.id)).get()).toMatchObject({
+      status: 'carded',
+      captureId,
+    })
+    expect(db.select().from(captures).where(eq(captures.id, captureId)).get()).toMatchObject({
+      transcript: 'wesele',
+      topicId: id,
+      status: 'queued',
+    })
   })
 
   it('refuses an empty text with 400', async () => {
     const id = makeTopic('t5')
-    const res = await itemsRoute.POST(post({ text: '   ' }), params({ id }))
+    const res = await cardsRoute.POST(post({ text: '   ' }), params({ id }))
     expect(res.status).toBe(400)
   })
 
   it('is 404 for an unknown topic', async () => {
-    const res = await itemsRoute.POST(post({ text: 'wesele' }), params({ id: 'nope' }))
+    const res = await cardsRoute.POST(post({ text: 'wesele' }), params({ id: 'nope' }))
     expect(res.status).toBe(404)
   })
 
   it('refuses a word the topic already holds with 409', async () => {
     const id = makeTopic('t6')
-    await addItem(id, 'wesele')
-    const res = await itemsRoute.POST(post({ text: 'wesele' }), params({ id }))
+    addItem(id, 'wesele')
+    const res = await cardsRoute.POST(post({ text: 'wesele' }), params({ id }))
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'już jest w tym temacie' })
   })
@@ -165,7 +177,7 @@ describe('POST /api/topics/:id/items', () => {
     const id = makeTopic('t7')
     const deckTopic = makeTopic('t8', { name: 'U lekarza' })
     seedCard({ id: 'c1', answerPl: 'złośliwy', answerKey: 'złośliwy', topicId: deckTopic })
-    const res = await itemsRoute.POST(post({ text: 'złośliwy' }), params({ id }))
+    const res = await cardsRoute.POST(post({ text: 'złośliwy' }), params({ id }))
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'już masz — w temacie U lekarza' })
   })
@@ -174,7 +186,7 @@ describe('POST /api/topics/:id/items', () => {
 describe('POST /api/topics/:id/items/:itemId/card', () => {
   it('turns an open item into a queued capture', async () => {
     const id = makeTopic('t9')
-    const itemId = await addItem(id, 'wesele')
+    const itemId = addItem(id, 'wesele')
     const res = await cardRoute.POST(post(), params({ id, itemId }))
     expect(res.status).toBe(202)
     const { captureId } = (await res.json()) as { captureId: string }
@@ -192,7 +204,7 @@ describe('POST /api/topics/:id/items/:itemId/card', () => {
 describe('POST /api/topics/:id/items/:itemId/discard', () => {
   it('discards an open item', async () => {
     const id = makeTopic('t11')
-    const itemId = await addItem(id, 'wesele')
+    const itemId = addItem(id, 'wesele')
     const res = await discardRoute.POST(post(), params({ id, itemId }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
@@ -209,7 +221,7 @@ describe('POST /api/topics/:id/items/:itemId/discard', () => {
 describe('POST /api/topics/:id/items/:itemId/restore', () => {
   it('restores a discarded item to open', async () => {
     const id = makeTopic('t13')
-    const itemId = await addItem(id, 'wesele')
+    const itemId = addItem(id, 'wesele')
     await discardRoute.POST(post(), params({ id, itemId }))
     const res = await restoreRoute.POST(post(), params({ id, itemId }))
     expect(res.status).toBe(200)
@@ -228,7 +240,7 @@ describe('PATCH /api/topics/:id/items/:itemId', () => {
   it('moves an item to another topic', async () => {
     const id = makeTopic('t15')
     const other = makeTopic('t16')
-    const itemId = await addItem(id, 'wesele')
+    const itemId = addItem(id, 'wesele')
     const res = await itemRoute.PATCH(patchReq({ topicId: other }), params({ id, itemId }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
@@ -237,14 +249,14 @@ describe('PATCH /api/topics/:id/items/:itemId', () => {
 
   it('refuses a bad body with 400', async () => {
     const id = makeTopic('t17')
-    const itemId = await addItem(id, 'wesele')
+    const itemId = addItem(id, 'wesele')
     const res = await itemRoute.PATCH(patchReq({ topicId: '' }), params({ id, itemId }))
     expect(res.status).toBe(400)
   })
 
   it('is 404 for an unknown item or topic', async () => {
     const id = makeTopic('t18')
-    const itemId = await addItem(id, 'wesele')
+    const itemId = addItem(id, 'wesele')
     expect((await itemRoute.PATCH(patchReq({ topicId: id }), params({ id, itemId: 'nope' }))).status).toBe(404)
     expect((await itemRoute.PATCH(patchReq({ topicId: 'nope' }), params({ id, itemId }))).status).toBe(404)
   })

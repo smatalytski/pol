@@ -355,6 +355,37 @@ export function retrySuggest(db: Db, topicId: string, now: Date): string | null 
   return enqueueSuggest(db, topicId, parseBatchJob(latest.paramsJson), now)
 }
 
+/** `+ karta`'s body, without a transaction of its own: see `cardItem` and `addManualCard`. */
+function cardOpenItem(tx: Db, topicId: string, itemId: string, now: Date): { captureId: string } | null {
+  const item = tx
+    .select()
+    .from(topicItems)
+    .where(and(eq(topicItems.id, itemId), eq(topicItems.topicId, topicId), eq(topicItems.status, 'open')))
+    .get()
+  if (!item) return null
+  const captureId = randomUUID()
+  tx.insert(captures)
+    .values({
+      id: captureId,
+      audioMediaId: null,
+      transcript: item.answerPl,
+      status: 'queued',
+      error: null,
+      generationJson: null,
+      cardId: null,
+      createdAt: now.getTime(),
+      transcribedAt: null,
+      duplicateOf: null,
+      topicId,
+      glossRu: item.glossRu,
+      lang: null,
+    })
+    .run()
+  enqueueJob(tx, { kind: 'new', captureId }, now)
+  tx.update(topicItems).set({ status: 'carded', captureId }).where(eq(topicItems.id, itemId)).run()
+  return { captureId }
+}
+
 /**
  * `+ karta` on an open item (spec 2026-09-19-topic-items §4.1): turns it into
  * an audio-less capture with an ordinary `new` job, exactly what accepting a
@@ -364,35 +395,7 @@ export function retrySuggest(db: Db, topicId: string, now: Date): string | null 
  * carded without its capture, or a capture created without its item updated.
  */
 export function cardItem(db: Db, topicId: string, itemId: string, now: Date): { captureId: string } | null {
-  return db.transaction((tx) => {
-    const item = tx
-      .select()
-      .from(topicItems)
-      .where(and(eq(topicItems.id, itemId), eq(topicItems.topicId, topicId), eq(topicItems.status, 'open')))
-      .get()
-    if (!item) return null
-    const captureId = randomUUID()
-    tx.insert(captures)
-      .values({
-        id: captureId,
-        audioMediaId: null,
-        transcript: item.answerPl,
-        status: 'queued',
-        error: null,
-        generationJson: null,
-        cardId: null,
-        createdAt: now.getTime(),
-        transcribedAt: null,
-        duplicateOf: null,
-        topicId,
-        glossRu: item.glossRu,
-        lang: null,
-      })
-      .run()
-    enqueueJob(tx as unknown as Db, { kind: 'new', captureId }, now)
-    tx.update(topicItems).set({ status: 'carded', captureId }).where(eq(topicItems.id, itemId)).run()
-    return { captureId }
-  })
+  return db.transaction((tx) => cardOpenItem(tx as unknown as Db, topicId, itemId, now))
 }
 
 /** `✕` on an item in bez karty (spec §4.2): open only, becomes discarded with a timestamp. */
@@ -478,4 +481,35 @@ export function addManualItem(
     })
     .run()
   return { ok: true, item: itemView(db.select().from(topicItems).where(eq(topicItems.id, id)).get()!) }
+}
+
+/**
+ * A word typed on the topic page's hand-add bar (spec 2026-09-22 §6.3): added
+ * and carded in one transaction, so a refusal leaves nothing behind and a
+ * crash between the two cannot strand an open item nobody asked for.
+ *
+ * The item row is kept rather than skipped straight to a capture: it is what
+ * makes the "already in this topic" check work, and `linkItem` fills in its
+ * card id when generation finishes, exactly as for `+ karta`.
+ */
+export function addManualCard(
+  db: Db,
+  topicId: string,
+  text: string,
+  now: Date,
+):
+  | { ok: true; item: ItemView; captureId: string }
+  | { ok: false; reason: 'empty' | 'not-found' }
+  | { ok: false; reason: 'in-topic' }
+  | { ok: false; reason: 'in-deck'; topicName: string } {
+  return db.transaction((tx) => {
+    const added = addManualItem(tx as unknown as Db, topicId, text, now)
+    if (!added.ok) return added
+    const carded = cardOpenItem(tx as unknown as Db, topicId, added.item.id, now)
+    // Unreachable in practice — the row was just inserted as `open` in this
+    // same transaction — but returning rather than asserting keeps a future
+    // change to addManualItem from becoming a crash on this path.
+    if (!carded) return { ok: false, reason: 'not-found' } as const
+    return { ok: true, item: added.item, captureId: carded.captureId }
+  })
 }

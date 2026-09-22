@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/client'
+import { topics } from '@/lib/db/schema'
 import { getTranscriber, type DictationLang } from '@/lib/transcribe'
 import { createCapture, listOnScreen, recognizeCapture } from '@/lib/capture/pipeline'
 
@@ -16,8 +18,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'lang must be pl or ru' }, { status: 400 })
   }
   const lang: DictationLang = langField ?? 'pl'
+  // A sheet left open across a topic's lifetime must not silently misfile a
+  // word, so an unknown id is refused rather than dropped to Ogólne.
+  const topicField = form.get('topicId')
+  let topicId: string | null = null
+  if (typeof topicField === 'string' && topicField !== '') {
+    const known = db.select({ id: topics.id }).from(topics).where(eq(topics.id, topicField)).get()
+    if (!known) return NextResponse.json({ error: 'unknown topic' }, { status: 400 })
+    topicId = topicField
+  }
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const id = createCapture(db, { bytes, mime: file.type || 'audio/webm' }, new Date(), lang)
+  const id = createCapture(db, { bytes, mime: file.type || 'audio/webm' }, new Date(), lang, topicId)
 
   // Deliberately not awaited: the phone is told "stored" the moment the bytes
   // are durable, and recognition happens behind it. Generation is not started

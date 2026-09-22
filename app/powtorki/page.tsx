@@ -1,16 +1,17 @@
 'use client'
-import { useCallback, useEffect, useRef, useReducer, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ReviewCard } from '@/components/ReviewCard'
 import { currentCard, initialReviewState, reviewReducer } from '@/hooks/useReviewSession'
 import type { RatingValue } from '@/lib/scheduler'
 import { t } from '@/i18n/pl'
 import { Button } from '@/components/ui/Button'
 import { Undo2 } from '@/components/ui/icons'
+import { useScreenReducer, useScreenState } from '@/components/SessionState'
 
 export default function ReviewPage() {
-  const [state, dispatch] = useReducer(reviewReducer, initialReviewState)
-  const [nextDue, setNextDue] = useState<number | null>(null)
-  const [reviewedCount, setReviewedCount] = useState(0)
+  const [state, dispatch] = useScreenReducer('powtorki:review', reviewReducer, initialReviewState)
+  const [nextDue, setNextDue] = useScreenState<number | null>('powtorki:nextDue', () => null)
+  const [reviewedCount, setReviewedCount] = useScreenState('powtorki:reviewed', () => 0)
   // Important review finding (A3): a rejected rating POST was previously
   // ignored outright — the optimistic UI had already advanced past the card,
   // so the user had no way to know the rating never reached the server.
@@ -19,7 +20,7 @@ export default function ReviewPage() {
   // Without this, `card` is null and `reviewedCount` is 0 during the initial
   // fetch too, and the empty-queue screen (`t.noCards`) would flash on every
   // load before the real queue arrives.
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded] = useScreenState('powtorki:loaded', () => false)
   const shownAt = useRef(Date.now())
   const card = currentCard(state)
 
@@ -30,7 +31,26 @@ export default function ReviewPage() {
   const rateInFlight = useRef(false)
   const undoInFlight = useRef(false)
 
+  // A session already in progress is resumed untouched — same card, same
+  // position, same revealed answer (spec §3.3). Cards added while you were
+  // away join your next session, not the middle of this one: a queue that
+  // grows behind you makes the remaining count jump for no visible reason.
+  //
+  // `loaded` alone cannot gate this fetch: it stays true for the rest of the
+  // provider's life once set, so it cannot tell "a session is still running"
+  // (queue non-empty — must not re-fetch, or the mid-session case above
+  // breaks) apart from "the last session already ended" (queue drained —
+  // *must* re-fetch on a fresh visit, or this screen is stuck on the done
+  // screen until a full reload, even once new cards are due or generated).
+  // `freshMount` carries that second bit instead: it is true only for the
+  // span between this component instance mounting and its first fetch
+  // settling, so a remount always gets one fetch attempt, but a queue
+  // draining mid-mount (rating the last card) does not trigger another.
+  const freshMount = useRef(true)
   useEffect(() => {
+    const resumable = loaded && currentCard(state) !== null
+    if (resumable || !freshMount.current) return
+    freshMount.current = false
     void fetch('/api/review/queue')
       .then((r) => r.json())
       .then((d) => {
@@ -38,7 +58,7 @@ export default function ReviewPage() {
         setNextDue(d.nextDue ?? null)
         setLoaded(true)
       })
-  }, [])
+  }, [loaded, state, dispatch, setNextDue, setLoaded])
 
   useEffect(() => {
     shownAt.current = Date.now()
@@ -64,7 +84,11 @@ export default function ReviewPage() {
           rateInFlight.current = false
         })
     },
-    [card],
+    // The three setters are stable for the life of the screen (useState /
+    // useReducer identities, handed straight back by the session-store
+    // hooks), so listing them costs nothing and keeps exhaustive-deps quiet —
+    // `card` is the only dependency that actually changes.
+    [card, dispatch, setReviewedCount],
   )
 
   const undo = useCallback(() => {
@@ -102,7 +126,7 @@ export default function ReviewPage() {
       .finally(() => {
         undoInFlight.current = false
       })
-  }, [state.lastRated])
+  }, [state.lastRated, dispatch, setNextDue, setReviewedCount])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -127,7 +151,7 @@ export default function ReviewPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [state.revealed, rate, undo])
+  }, [state.revealed, rate, undo, dispatch])
 
   if (!card) {
     if (!loaded) return null

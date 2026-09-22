@@ -8,7 +8,10 @@ import type { CaptureView } from '@/lib/capture/pipeline'
 import type { DictationLang } from '@/lib/transcribe'
 import { t } from '@/i18n/pl'
 import { Icon } from '@/components/ui/Icon'
-import { Mic } from '@/components/ui/icons'
+import { Mic, X } from '@/components/ui/icons'
+import { useScreenState, useRestoreScroll } from '@/components/SessionState'
+import { Sheet } from '@/components/ui/Sheet'
+import { DEFAULT_TOPIC_ID } from '@/lib/topics/default'
 
 type Notice = 'deleteFailed' | 'approveFailed'
 
@@ -16,6 +19,12 @@ const NOTICE_TEXT: Record<Notice, string> = {
   deleteFailed: t.deleteFailed,
   approveFailed: t.approveFailed,
 }
+
+type ChosenTopic = { id: string; name: string }
+// Ogólne is the row's resting state: nothing chosen, nothing to reset. It is
+// never sent to the server as an id (see `onRecorded`) — only its name is
+// shown in the trigger.
+const OGOLNE: ChosenTopic = { id: DEFAULT_TOPIC_ID, name: t.defaultTopic }
 
 export default function AddPage() {
   const [captures, setCaptures] = useState<CaptureView[]>([])
@@ -32,6 +41,19 @@ export default function AddPage() {
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
   const since = useRef(Date.now() - 60_000)
   const streamRef = useRef<MediaStream | null>(null)
+
+  // The topic a run of dictated words files into (spec 2026-09-22 §3.2).
+  // Remembered across a trip to another screen; reset to Ogólne is one tap,
+  // never automatic.
+  const [topic, setTopic] = useScreenState<ChosenTopic>('dodaj:topic', () => OGOLNE)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [topicQuery, setTopicQuery] = useState('')
+  const [topicList, setTopicList] = useState<{ id: string; name: string | null }[]>([])
+  // Distinguishes "fetched, and it's genuinely empty" from "the fetch
+  // failed" — both leave `topicList` at `[]`, but they are different
+  // messages for the sheet (finding 3): "nothing matched" versus "the list
+  // could not be loaded".
+  const [topicListError, setTopicListError] = useState(false)
 
   // Shared by every async chain below (drain, poll, the chip actions) that
   // eventually calls a setter: guards against updating state after the screen
@@ -76,6 +98,10 @@ export default function AddPage() {
       // An older entry saved before the language existed has no `lang`, so no
       // field is sent and the server stores it as Polish.
       if (item.lang) form.set('lang', item.lang)
+      // A recording keeps the topic it was made under — this is the outbox
+      // entry's own topicId, not whatever `topic` currently is, so switching
+      // topics while something is still queued offline does not retag it.
+      if (item.topicId) form.set('topicId', item.topicId)
       const res = await fetch('/api/captures', { method: 'POST', body: form })
       if (!res.ok) throw new Error(`upload failed: ${res.status}`)
     })
@@ -102,7 +128,16 @@ export default function AddPage() {
 
   const onRecorded = useCallback(
     async (bytes: ArrayBuffer, mime: string, lang: DictationLang) => {
-      await enqueue({ id: crypto.randomUUID(), bytes, mime, createdAt: Date.now(), lang })
+      await enqueue({
+        id: crypto.randomUUID(),
+        bytes,
+        mime,
+        createdAt: Date.now(),
+        lang,
+        // Ogólne is sent as no topic at all, so the row keeps the NULL that
+        // `topicView` and `listTopics` already read as Ogólne.
+        topicId: topic.id === DEFAULT_TOPIC_ID ? null : topic.id,
+      })
       navigator.vibrate?.(20)
       // Reflect the just-enqueued recording immediately, as its own chip,
       // rather than waiting for `drain` to attempt (and possibly finish) the
@@ -113,7 +148,7 @@ export default function AddPage() {
       if (mountedRef.current) setOutboxItems(items)
       await drain()
     },
-    [drain],
+    [drain, topic],
   )
 
   // One factory (one getUserMedia stream) shared by both buttons, since only
@@ -243,12 +278,6 @@ export default function AddPage() {
     [refresh],
   )
 
-  // Without a microphone this screen has no function at all, so say so plainly
-  // rather than presenting a button that silently does nothing.
-  if (micDenied) {
-    return <p className="p-6 text-lg">{t.micDenied}</p>
-  }
-
   // Outbox items (no server row yet — still local, possibly stuck retrying an
   // upload) and server-known captures are merged into one waterfall, newest
   // first. See `components/CaptureChip.tsx` for how the two id spaces are
@@ -258,13 +287,60 @@ export default function AddPage() {
     ...captures.map((c): ChipItem => ({ kind: 'capture', capture: c })),
   ].sort((a, b) => chipCreatedAt(b) - chipCreatedAt(a))
 
+  // Restores the waterfall's scroll position once it has something to
+  // restore to — a screen that fetches its list paints short on mount, and a
+  // position restored before the list is up would be clamped to 0. Called
+  // before the mic-denied early return below so it runs on every render,
+  // never conditionally.
+  useRestoreScroll('dodaj', chips.length > 0)
+
+  // Without a microphone this screen has no function at all, so say so plainly
+  // rather than presenting a button that silently does nothing.
+  if (micDenied) {
+    return <p className="p-6 text-lg">{t.micDenied}</p>
+  }
+
+  // Fetched on every open so a topic renamed since the screen loaded is never
+  // shown stale. Ogólne is pinned first: it is the way back out of a topic and
+  // must not need scrolling or typing to reach.
+  async function openPicker() {
+    try {
+      const res = await fetch('/api/topics')
+      if (!res.ok) throw new Error()
+      const body = (await res.json()) as { topics: { id: string; name: string | null; suspendedAt: number | null }[] }
+      setTopicList(body.topics)
+      setTopicListError(false)
+      // The list is the source of truth this fetch just refreshed — but the
+      // trigger's own remembered name (`topic.name`) isn't part of it and
+      // was never re-fetched on its own. If the chosen topic is still on the
+      // list under a different name, reconcile the stored name to match, so
+      // the trigger stops naming the wrong topic while still filing
+      // correctly by id (spec §4.1: never shown stale — the trigger included).
+      const current = body.topics.find((x) => x.id === topic.id)
+      if (current && (current.name ?? t.unnamedTopic) !== topic.name) {
+        setTopic({ id: topic.id, name: current.name ?? t.unnamedTopic })
+      }
+    } catch {
+      setTopicList([])
+      setTopicListError(true)
+    }
+    setPickerOpen(true)
+  }
+
+  const search = topicQuery.trim().toLowerCase()
+  const named = topicList.map((x) => ({ ...x, name: x.name ?? t.unnamedTopic }))
+  const pickable = [
+    ...named.filter((x) => x.id === DEFAULT_TOPIC_ID),
+    ...named.filter((x) => x.id !== DEFAULT_TOPIC_ID),
+  ].filter((x) => x.id !== topic.id && x.name.toLowerCase().includes(search))
+
   return (
     <div className="flex flex-col">
       {notice && <p className="p-3 text-sm text-red-600">{NOTICE_TEXT[notice]}</p>}
       {/* Bottom padding reserves the height of the fixed bar below, so the
           last chip can still be read and swiped instead of sitting under the
           button. */}
-      <ul className="w-full pb-60">
+      <ul className="w-full pb-72">
         {chips.map((item) => (
           <CaptureChip
             key={chipKey(item)}
@@ -307,6 +383,32 @@ export default function AddPage() {
           and the buttons' row, so the bar stays short enough for the list's
           bottom padding above to cover it. */}
       <div className="above-tabbar fixed left-0 right-0 z-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 border-t border-neutral-200 bg-background px-4 py-4">
+        {/* The topic a run of dictated words files into (spec 2026-09-22
+            §3.2): a run below the bar's caption, above the buttons, so it
+            reads as governing every recording made from here rather than
+            belonging to any one of them. The reset button only appears once
+            a non-default topic is chosen — Ogólne itself has nothing to
+            reset back to, and a stray reset button next to it would be a tap
+            target with no useful effect but an accidental one. */}
+        <div className="flex w-full items-center justify-center gap-1">
+          <button
+            type="button"
+            onClick={() => { setTopicQuery(''); void openPicker() }}
+            className="inline-flex min-h-8 items-center rounded-full px-3 text-sm text-neutral-600 underline"
+          >
+            {`${t.recordingTopic}: ${topic.name}`}
+          </button>
+          {topic.id !== DEFAULT_TOPIC_ID && (
+            <button
+              type="button"
+              aria-label={t.resetTopic}
+              onClick={() => setTopic(OGOLNE)}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center"
+            >
+              <Icon icon={X} size={16} />
+            </button>
+          )}
+        </div>
         <p className="w-full text-center text-sm text-neutral-500">{t.holdToRecord}</p>
         <button
           onPointerDown={() => { navigator.vibrate?.(10); pl.start() }}
@@ -337,6 +439,34 @@ export default function AddPage() {
           </span>
         </button>
       </div>
+
+      <Sheet open={pickerOpen} label={t.chooseTopic} onClose={() => setPickerOpen(false)}>
+        <input
+          value={topicQuery}
+          onChange={(e) => setTopicQuery(e.target.value)}
+          placeholder={t.filterTopics}
+          className="w-full rounded-lg border border-neutral-300 px-3 py-3"
+        />
+        {topicListError ? (
+          <p className="text-sm text-red-600">{t.topicsLoadFailed}</p>
+        ) : pickable.length === 0 ? (
+          <p className="text-sub text-neutral-500">{t.noTopicsFound}</p>
+        ) : (
+          <ul>
+            {pickable.map((x) => (
+              <li key={x.id}>
+                <button
+                  type="button"
+                  onClick={() => { setTopic({ id: x.id, name: x.name ?? t.unnamedTopic }); setPickerOpen(false) }}
+                  className="w-full border-b py-3 text-left text-row"
+                >
+                  {x.name ?? t.unnamedTopic}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Sheet>
     </div>
   )
 }

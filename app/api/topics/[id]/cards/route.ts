@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db/client'
-import { addManualItem } from '@/lib/topics/service'
+import { addManualCard } from '@/lib/topics/service'
 
 const Body = z.object({ text: z.string() })
 
-/** `dodaj` on the hand-add bar (spec 2026-09-19-topic-items §4.6). */
+/** The hand-add bar on `z kartą` (spec 2026-09-22 §6.3): a typed word becomes a card. */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = Body.safeParse(await req.json())
   if (!body.success) return NextResponse.json({ error: 'bad item' }, { status: 400 })
-  const result = addManualItem(db, id, body.data.text, new Date())
-  if (result.ok) return NextResponse.json({ item: result.item }, { status: 201 })
+  const result = addManualCard(db, id, body.data.text, new Date())
+  if (result.ok) return NextResponse.json({ item: result.item, captureId: result.captureId }, { status: 202 })
   switch (result.reason) {
     case 'empty':
       return NextResponse.json({ error: 'empty' }, { status: 400 })

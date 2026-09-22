@@ -9,8 +9,8 @@ const TABS: ReadonlyArray<{ href: string; label: string; short?: string; icon: L
   { href: '/powtorki', label: t.review, icon: RotateCcw },
   { href: '/sluchaj', label: t.listen, icon: Headphones },
   { href: '/dodaj', label: t.add, icon: Mic },
-  { href: '/fiszki', label: t.cards, icon: Layers },
   { href: '/tematy', label: t.topics, icon: List },
+  { href: '/fiszki', label: t.cards, icon: Layers },
   { href: '/ustawienia', label: t.settings, short: t.settingsTab, icon: Settings },
 ]
 
