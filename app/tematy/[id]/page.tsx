@@ -203,7 +203,13 @@ export default function TopicPage() {
       {saveError && <p className="text-sm text-red-600">{saveError}</p>}
 
       {tab === 'carded' && (
-        <div className="flex flex-col gap-4">
+        // `pb-20` reserves the height of the fixed `+` band below (56px button
+        // + its 16px of padding). The layout's `pad-below-tabbar` only clears
+        // the tab bar, so without this the band — whose button is opaque —
+        // covers the last card row's right-aligned buttons. `/tematy` reserves
+        // the same 80px for the same band; `/dodaj` does the same for its
+        // taller record bar.
+        <div className="flex flex-col gap-4 pb-20">
           {adding && (
             <ManualAddBar
               value={draft}

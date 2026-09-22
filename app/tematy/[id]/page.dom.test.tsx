@@ -234,6 +234,26 @@ describe('TopicPage', () => {
     expect(screen.getByText('gorączka')).toBeTruthy()
   })
 
+  // The `+` band is fixed above the tab bar and its button is opaque, so
+  // without reserved space below the list it sits on top of the last card
+  // row's own buttons — which are right-aligned, exactly where it lands.
+  // Reported from a phone after the 2026-09-22 round shipped. `/tematy` and
+  // `/dodaj` each reserve this space for the same reason; this tab did not.
+  it('reserves space below the cards so the + cannot cover the last row', async () => {
+    stubFetch(() => view())
+    render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabCarded) }))
+
+    const plus = screen.getByRole('button', { name: t.manualAdd })
+    const band = plus.closest('.fixed')
+    expect(band).toBeTruthy()
+
+    // The card rows and the band are siblings under the tab's container; the
+    // container is what has to carry the reservation.
+    const container = band!.parentElement!
+    expect(container.className).toMatch(/\bpb-\d+\b/)
+  })
+
   it('adds an item by hand', async () => {
     const calls = stubFetch(() => view(), { 'POST /api/topics/t1/cards': { status: 202, body: { item: item('i4', 'recepta'), captureId: 'c1' } } })
     render(<SessionState><TopicPage /></SessionState>)
