@@ -9,6 +9,7 @@ import { enqueueJob } from '../queue/jobs'
 import { DEFAULT_TOPIC_ID } from './default'
 import {
   activeSuggestJob,
+  addManualCard,
   addManualItem,
   cardItem,
   createTopic,
@@ -466,6 +467,49 @@ describe('adding by hand (§4.6)', () => {
   it('is allowed in the default topic', () => {
     const { db } = createTestDb()
     expect(addManualItem(db, DEFAULT_TOPIC_ID, 'wahacz', NOW)).toMatchObject({ ok: true })
+  })
+})
+
+describe('addManualCard', () => {
+  it('adds the word and cards it in one go', () => {
+    const { db } = createTestDb()
+    topic(db)
+    const result = addManualCard(db, 't1', 'recepta', NOW)
+    expect(result.ok).toBe(true)
+
+    const row = db.select().from(topicItems).where(eq(topicItems.answerPl, 'recepta')).get()!
+    expect(row.status).toBe('carded')
+    expect(row.source).toBe('manual')
+    expect(row.captureId).toBe((result as { captureId: string }).captureId)
+
+    const capture = db.select().from(captures).get()!
+    expect(capture.transcript).toBe('recepta')
+    expect(capture.topicId).toBe('t1')
+    expect(capture.status).toBe('queued')
+    expect(db.select().from(generationJobs).get()!.kind).toBe('new')
+  })
+
+  it('refuses a word already in this topic, writing nothing', () => {
+    const { db } = createTestDb()
+    topic(db)
+    item(db, 'recepta')
+    expect(addManualCard(db, 't1', 'Recepta', NOW)).toEqual({ ok: false, reason: 'in-topic' })
+    expect(db.select().from(captures).all()).toHaveLength(0)
+  })
+
+  it('refuses a word already in the deck, naming its topic', () => {
+    const { db } = createTestDb()
+    topic(db)
+    card(db, 'kot')
+    expect(addManualCard(db, 't1', 'Kot', NOW)).toEqual({ ok: false, reason: 'in-deck', topicName: 'Ogólne' })
+    expect(db.select().from(captures).all()).toHaveLength(0)
+  })
+
+  it('refuses an unknown topic and an empty word', () => {
+    const { db } = createTestDb()
+    expect(addManualCard(db, 'nope', 'recepta', NOW)).toEqual({ ok: false, reason: 'not-found' })
+    topic(db)
+    expect(addManualCard(db, 't1', '   ', NOW)).toEqual({ ok: false, reason: 'empty' })
   })
 })
 
