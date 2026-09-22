@@ -84,7 +84,11 @@ export default function ReviewPage() {
           rateInFlight.current = false
         })
     },
-    [card],
+    // The three setters are stable for the life of the screen (useState /
+    // useReducer identities, handed straight back by the session-store
+    // hooks), so listing them costs nothing and keeps exhaustive-deps quiet —
+    // `card` is the only dependency that actually changes.
+    [card, dispatch, setReviewedCount],
   )
 
   const undo = useCallback(() => {
@@ -122,7 +126,7 @@ export default function ReviewPage() {
       .finally(() => {
         undoInFlight.current = false
       })
-  }, [state.lastRated])
+  }, [state.lastRated, dispatch, setNextDue, setReviewedCount])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -147,7 +151,7 @@ export default function ReviewPage() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [state.revealed, rate, undo])
+  }, [state.revealed, rate, undo, dispatch])
 
   if (!card) {
     if (!loaded) return null

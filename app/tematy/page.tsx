@@ -32,7 +32,9 @@ export default function TopicsPage() {
     } catch {
       setError(t.topicsLoadFailed)
     }
-  }, [])
+    // `setTopics` is a stable useState identity handed back by the session
+    // store, so `load` stays stable and the mount effect below still runs once.
+  }, [setTopics])
 
   useEffect(() => {
     void load()
