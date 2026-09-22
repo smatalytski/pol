@@ -31,6 +31,7 @@ export function createCapture(
   audio: { bytes: Uint8Array; mime: string },
   now: Date,
   lang: DictationLang = 'pl',
+  topicId: string | null = null,
 ): string {
   const audioMediaId = putMedia(db, { kind: 'audio', mime: audio.mime, bytes: audio.bytes, now })
   const id = randomUUID()
@@ -45,6 +46,7 @@ export function createCapture(
       cardId: null,
       createdAt: now.getTime(),
       lang,
+      topicId,
     })
     .run()
   return id
