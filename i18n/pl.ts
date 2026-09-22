@@ -107,7 +107,7 @@ export const t = {
   cardBadge: 'karta',
   moveTo: 'temat',
   manualAdd: 'dodaj słowo lub frazę',
-  manualPlaceholder: 'wpisz albo nagraj…',
+  manualPlaceholder: 'wpisz słowo lub frazę…',
   addItem: 'dodaj',
   cancel: 'anuluj',
   moveToDiscarded: 'przenieś do odrzuconych',

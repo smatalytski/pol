@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { SessionState } from '@/components/SessionState'
 import { t } from '@/i18n/pl'
 
 vi.mock('next/link', () => ({
@@ -99,7 +100,7 @@ afterEach(() => {
 describe('TopicPage', () => {
   it('counts each group in its tab, pending included in "z kartą"', async () => {
     stubFetch(() => view({ pending: [{ id: 'c1', transcript: 'osłuchać', status: 'queued' }] }))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await tab(t.tabCarded, 2)).toBeTruthy()
     expect(screen.getByRole('button', { name: `${t.tabOpen} (2)` })).toBeTruthy()
     expect(screen.getByRole('button', { name: `${t.tabDiscarded} (2)` })).toBeTruthy()
@@ -107,14 +108,14 @@ describe('TopicPage', () => {
 
   it('opens on "bez karty" when the topic has open items', async () => {
     stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect((await tab(t.tabOpen, 2)).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('gorączka')).toBeTruthy()
   })
 
   it('opens on "z kartą" when there are no open items', async () => {
     stubFetch(() => view({}, { open: [] }))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect((await tab(t.tabCarded, 1)).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('katar')).toBeTruthy()
   })
@@ -122,7 +123,7 @@ describe('TopicPage', () => {
   it('opens on the tab last used for this topic, and remembers a new choice', async () => {
     localStorage.setItem('fiszki:tab:t1', 'discarded')
     stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect((await tab(t.tabDiscarded, 2)).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('kaszel')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: `${t.tabCarded} (1)` }))
@@ -133,7 +134,7 @@ describe('TopicPage', () => {
   it('lists pending captures above the cards, and ✕ on a card deletes it', async () => {
     localStorage.setItem('fiszki:tab:t1', 'carded')
     const calls = stubFetch(() => view({ pending: [{ id: 'c1', transcript: 'osłuchać', status: 'generating' }] }))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText('osłuchać')).toBeTruthy()
     expect(within(row('osłuchać')).getByText(t.generating)).toBeTruthy()
     const items = screen.getAllByRole('listitem')
@@ -146,7 +147,7 @@ describe('TopicPage', () => {
   it('moves a card to another topic', async () => {
     localStorage.setItem('fiszki:tab:t1', 'carded')
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('katar')
     fireEvent.click(within(row('katar')).getByRole('button', { name: t.moveTo }))
     fireEvent.click(await screen.findByRole('button', { name: 'W sklepie' }))
@@ -155,7 +156,7 @@ describe('TopicPage', () => {
 
   it('shows an item with its gloss, kind and level badge', async () => {
     stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText('gorączka')).toBeTruthy()
     expect(within(row('gorączka')).getByText(/температура, жар/)).toBeTruthy()
     expect(within(row('gorączka')).getByText(t.kindWord)).toBeTruthy()
@@ -167,7 +168,7 @@ describe('TopicPage', () => {
 
   it('splits an item row into a title line and a right-aligned controls line', async () => {
     stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     const li = row('gorączka')
     const controls = within(li).getByRole('button', { name: t.makeCard }).parentElement!
@@ -179,7 +180,7 @@ describe('TopicPage', () => {
 
   it('makes a card of an item', async () => {
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.makeCard }))
     await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/items/i1/card']))
@@ -187,7 +188,7 @@ describe('TopicPage', () => {
 
   it('discards an item', async () => {
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.discard }))
     await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/items/i1/discard']))
@@ -195,7 +196,7 @@ describe('TopicPage', () => {
 
   it('moves an item to another topic', async () => {
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.moveTo }))
     fireEvent.click(await screen.findByRole('button', { name: 'W sklepie' }))
@@ -212,7 +213,7 @@ describe('TopicPage', () => {
       if (init?.method === 'POST') return new Promise<void>((r) => (release = r)).then(() => base(url, init))
       return base(url, init)
     }))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.makeCard }))
     await waitFor(() => expect((within(row('gorączka')).getByRole('button', { name: t.discard }) as HTMLButtonElement).disabled).toBe(true))
@@ -225,7 +226,7 @@ describe('TopicPage', () => {
 
   it('shows a save error when an action fails, leaving the list as it was', async () => {
     stubFetch(() => view(), { 'POST /api/topics/t1/items/i1/discard': { status: 500, body: { error: 'boom' } } })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.discard }))
     expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
@@ -234,34 +235,80 @@ describe('TopicPage', () => {
   })
 
   it('adds an item by hand', async () => {
-    const calls = stubFetch(() => view(), { 'POST /api/topics/t1/items': { status: 201, body: { item: item('i4', 'recepta') } } })
-    render(<TopicPage />)
-    fireEvent.change(await screen.findByLabelText(t.manualAdd), { target: { value: 'recepta' } })
+    const calls = stubFetch(() => view(), { 'POST /api/topics/t1/cards': { status: 202, body: { item: item('i4', 'recepta'), captureId: 'c1' } } })
+    render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabCarded) }))
+    fireEvent.click(screen.getByRole('button', { name: t.manualAdd }))
+    fireEvent.change(screen.getByLabelText(t.manualAdd), { target: { value: 'recepta' } })
     fireEvent.click(screen.getByRole('button', { name: t.addItem }))
-    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/topics/t1/items', method: 'POST', body: { text: 'recepta' } }]))
+    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/topics/t1/cards', method: 'POST', body: { text: 'recepta' } }]))
   })
 
   it('shows the server’s message when a hand-added item is a duplicate', async () => {
-    stubFetch(() => view(), { 'POST /api/topics/t1/items': { status: 409, body: { error: 'już masz — w temacie Ogólne' } } })
-    render(<TopicPage />)
-    fireEvent.change(await screen.findByLabelText(t.manualAdd), { target: { value: 'katar' } })
+    stubFetch(() => view(), { 'POST /api/topics/t1/cards': { status: 409, body: { error: 'już masz — w temacie Ogólne' } } })
+    render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabCarded) }))
+    fireEvent.click(screen.getByRole('button', { name: t.manualAdd }))
+    fireEvent.change(screen.getByLabelText(t.manualAdd), { target: { value: 'katar' } })
     fireEvent.click(screen.getByRole('button', { name: t.addItem }))
     expect(await screen.findByText('już masz — w temacie Ogólne')).toBeTruthy()
   })
 
   it('shows a Polish save error, not the English 400 text, when a hand-added item is rejected', async () => {
-    stubFetch(() => view(), { 'POST /api/topics/t1/items': { status: 400, body: { error: 'empty' } } })
-    render(<TopicPage />)
-    fireEvent.change(await screen.findByLabelText(t.manualAdd), { target: { value: '?' } })
+    stubFetch(() => view(), { 'POST /api/topics/t1/cards': { status: 400, body: { error: 'empty' } } })
+    render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabCarded) }))
+    fireEvent.click(screen.getByRole('button', { name: t.manualAdd }))
+    fireEvent.change(screen.getByLabelText(t.manualAdd), { target: { value: '?' } })
     fireEvent.click(screen.getByRole('button', { name: t.addItem }))
     expect(await screen.findByText(t.topicSaveFailed)).toBeTruthy()
     expect(screen.queryByText('empty')).toBeNull()
   })
 
+  it('offers the hand-add on z kartą, not on bez karty', async () => {
+    stubFetch(() => view())
+    render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabOpen) }))
+    expect(screen.queryByRole('button', { name: t.manualAdd })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(t.tabCarded) }))
+    expect(screen.getByRole('button', { name: t.manualAdd })).toBeTruthy()
+  })
+
+  it('keeps the bar shut until + is tapped, and posts to /cards', async () => {
+    const calls = stubFetch(() => view(), { 'POST /api/topics/t1/cards': { status: 202, body: { item: item('i4', 'recepta'), captureId: 'c1' } } })
+    render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabCarded) }))
+    // Not queryByLabelText: the "+" trigger itself carries aria-label={t.manualAdd},
+    // so that query would match it too. This checks for the bar's actual input.
+    expect(screen.queryByRole('textbox', { name: t.manualAdd })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: t.manualAdd }))
+    fireEvent.change(screen.getByLabelText(t.manualAdd), { target: { value: 'recepta' } })
+    fireEvent.click(screen.getByRole('button', { name: t.addItem }))
+
+    await waitFor(() =>
+      expect(writes(calls)).toContainEqual({ url: '/api/topics/t1/cards', method: 'POST', body: { text: 'recepta' } }),
+    )
+  })
+
+  it('keeps a half-typed word across a trip to another screen', async () => {
+    stubFetch(() => view())
+    const page = render(<SessionState><TopicPage /></SessionState>)
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(t.tabCarded) }))
+    fireEvent.click(screen.getByRole('button', { name: t.manualAdd }))
+    fireEvent.change(screen.getByLabelText(t.manualAdd), { target: { value: 'recep' } })
+
+    page.rerender(<SessionState><span /></SessionState>)
+    page.rerender(<SessionState><TopicPage /></SessionState>)
+
+    expect((await screen.findByLabelText(t.manualAdd) as HTMLInputElement).value).toBe('recep')
+  })
+
   it('restores a discarded item', async () => {
     localStorage.setItem('fiszki:tab:t1', 'discarded')
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('kaszel')
     expect(within(row('kaszel')).queryByText(t.cardBadge)).toBeNull()
     fireEvent.click(within(row('kaszel')).getByRole('button', { name: t.restore }))
@@ -271,7 +318,7 @@ describe('TopicPage', () => {
   it('restores a discarded card, marked as a card', async () => {
     localStorage.setItem('fiszki:tab:t1', 'discarded')
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('wysypka')
     expect(within(row('wysypka')).getByText(t.cardBadge)).toBeTruthy()
     fireEvent.click(within(row('wysypka')).getByRole('button', { name: t.restore }))
@@ -281,7 +328,7 @@ describe('TopicPage', () => {
   it('shows the server’s message when a restored card would be a duplicate', async () => {
     localStorage.setItem('fiszki:tab:t1', 'discarded')
     stubFetch(() => view(), { 'POST /api/cards/k9/restore': { status: 409, body: { error: 'już masz — w temacie Ogólne' } } })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('wysypka')
     fireEvent.click(within(row('wysypka')).getByRole('button', { name: t.restore }))
     expect(await screen.findByText('już masz — w temacie Ogólne')).toBeTruthy()
@@ -290,7 +337,7 @@ describe('TopicPage', () => {
 
   it('asks for a batch with the chosen settings', async () => {
     const calls = stubFetch(() => view(), { 'POST /api/topics/t1/batches': { status: 202, body: { jobId: 'j' } } })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(screen.getByRole('button', { name: t.mixWords }))
     fireEvent.click(screen.getByRole('button', { name: t.levelIntermediate }))
@@ -306,7 +353,7 @@ describe('TopicPage', () => {
     stubFetch(() =>
       view({ topic: { id: 't1', name: 'Ogólne', context: '', suspendedAt: null, createdAt: 1, isDefault: true } }),
     )
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     expect(screen.queryByRole('button', { name: t.more })).toBeNull()
     expect(screen.queryByRole('button', { name: t.mixWords })).toBeNull()
@@ -317,13 +364,13 @@ describe('TopicPage', () => {
 
   it('says it is searching while a batch runs', async () => {
     stubFetch(() => view({ batch: { state: 'searching', error: null } }))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText(t.searching)).toBeTruthy()
   })
 
   it('shows a failed batch with its error and a retry', async () => {
     const calls = stubFetch(() => view({ batch: { state: 'failed', error: 'unusable payload' } }))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText('unusable payload')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: t.tryAgain }))
     await waitFor(() => expect(writes(calls).map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/topics/t1/retry']))
@@ -331,7 +378,7 @@ describe('TopicPage', () => {
 
   it('switches the topic off', async () => {
     const calls = stubFetch(() => view())
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     const toggle = await screen.findByRole('switch', { name: t.topicOn })
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(toggle)
@@ -340,7 +387,7 @@ describe('TopicPage', () => {
 
   it('shows a save error when a rename fails with a non-2xx status', async () => {
     stubFetch(() => view(), { 'PATCH /api/topics/t1': { status: 500, body: {} } })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     const input = await screen.findByDisplayValue('U lekarza')
     fireEvent.change(input, { target: { value: 'Nowa nazwa' } })
     fireEvent.blur(input)
@@ -349,7 +396,7 @@ describe('TopicPage', () => {
 
   it('says so for an unknown topic', async () => {
     stubFetch(() => view(), { 'GET /api/topics/t1': { status: 404, body: {} } })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText(t.topicNotFound)).toBeTruthy()
   })
 
@@ -358,21 +405,21 @@ describe('TopicPage', () => {
   // and must never produce an unhandled rejection, on a first load or a poll.
   it('shows a load error rather than "not found" for a non-404 failure', async () => {
     stubFetch(() => view(), { 'GET /api/topics/t1': { status: 500, body: {} } })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
     expect(screen.queryByText(t.topicNotFound)).toBeNull()
   })
 
   it('shows a load error rather than "not found" for a malformed body', async () => {
     stubFetch(() => ({}))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
     expect(screen.queryByText(t.topicNotFound)).toBeNull()
   })
 
   it('shows a load error rather than "not found" when fetch rejects, without an unhandled rejection', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
     expect(screen.queryByText(t.topicNotFound)).toBeNull()
   })
@@ -383,7 +430,7 @@ describe('TopicPage', () => {
       gets++
       return gets === 1 ? view() : {}
     })
-    render(<TopicPage />)
+    render(<SessionState><TopicPage /></SessionState>)
     await screen.findByText('gorączka')
     fireEvent.click(within(row('gorączka')).getByRole('button', { name: t.makeCard }))
     expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
