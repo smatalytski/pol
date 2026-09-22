@@ -91,7 +91,7 @@ navigation that scrolls the window before the screen tears down.
 
 | Screen | Remembered | Re-fetched on return |
 |---|---|---|
-| `/powtorki` | queue, position, `revealed`, `lastRated`, session count, `nextDue`, `loaded` | nothing (§3.3) |
+| `/powtorki` | queue, position, `revealed`, `lastRated`, session count, `nextDue`, `loaded` | the queue, but only once there is no session left to resume (§3.3) |
 | `/dodaj` | chosen topic, scroll | chips — already polled from the server and the outbox |
 | `/tematy` | list, search text, scroll | the list, seeded from the store first |
 | `/tematy/[id]` | active tab, add-bar draft, whether the bar is open, scroll — keyed per topic id | the topic view |
@@ -102,14 +102,23 @@ share a draft.
 ### 3.3 `/powtorki` resumes exactly
 
 Today the queue fetch runs in a mount effect with an empty dependency list.
-With the reducer moved into the store, that effect becomes conditional on
-`loaded`: a session already in progress is resumed untouched — same card, same
-position, and the answer still revealed if it was — and only a screen with no
-session loads one.
+With the reducer moved into the store, that effect is gated on whether there
+is a session to resume — a loaded queue that still has a card in it — rather
+than on whether a fetch has ever happened: a session already in progress is
+resumed untouched — same card, same position, and the answer still revealed
+if it was. `loaded` by itself cannot carry this: it stays true for the rest
+of the screen's life once a fetch has completed, so it cannot tell a session
+still in progress apart from one that has already ended. A screen whose
+session has ended — the queue ran out, or nothing was ever due — fetches
+again on the next fresh visit, exactly as it would if it had never loaded.
 
 Cards added while you were away join the queue on your next session, not
 mid-stream. That is the point: a queue that grows behind you while you are
 halfway through a card makes the remaining count jump for no visible reason.
+That argument applies only while a session is actually in progress — once it
+has finished, the next visit is a new session and should see everything that
+has since become due, including a card generated from a word dictated on
+`/dodaj` after the last one was rated.
 
 ### 3.4 Remembering versus freshness
 
@@ -123,7 +132,9 @@ the case where staleness would show. The rule:
   copy.
 
 So the screen looks unchanged at the instant you arrive and is correct a moment
-later. `/powtorki` is the one screen that skips the fetch, per §3.3.
+later. `/powtorki` is the one screen that can skip the fetch — but only while
+a session is still in progress; once it has ended, the next visit fetches
+like any other screen (§3.3).
 
 ## 4. `/dodaj` — recording into a topic
 
@@ -140,8 +151,11 @@ The existing fixed bottom bar gains a row above its caption and mic buttons:
 - The trigger reads `temat: <name>` and opens a full-screen `Sheet` — the same
   overlay `/sluchaj` uses for its topic picker — with a search field and the
   topic list. The list is fetched on open, as `MoveToTopic` does, so a topic
-  renamed since the page loaded can never be shown stale. **Ogólne is pinned to
-  the top of the list**, so the way back is short even with the sheet open.
+  renamed since the page loaded can never be shown stale — and that promise
+  covers the trigger's own label too: if the chosen topic comes back under a
+  different name, the stored topic is reconciled to it there and then, rather
+  than waiting for it to be re-picked. **Ogólne is pinned to the top of the
+  list**, so the way back is short even with the sheet open.
 - The `✕` sets the topic back to Ogólne in one tap without opening the sheet.
   It is rendered only when the current topic is not Ogólne, so a fresh load has
   nothing extra to hit by accident. 32px tap target, matching `/sluchaj`'s

@@ -882,4 +882,60 @@ describe('AddPage topic row', () => {
     await waitFor(() => expect(postAttempts).toBe(2), { timeout: 3000 })
     expect(posts[1].get('topicId')).toBe('tA')
   })
+
+  // Minor review finding: §4.1 re-fetches the topic list on every sheet open
+  // precisely so a topic renamed since the page loaded is never shown stale
+  // — but that promise only covered the picker's own rows, not the trigger's
+  // remembered label. Opening the picker again after a rename must reconcile
+  // the stored topic so the trigger stops naming the wrong topic while still
+  // filing correctly by id.
+  it('reconciles the trigger label when the chosen topic was renamed since it was picked', async () => {
+    let topics = [{ id: 't1', name: 'Praca w IT', suspendedAt: null }]
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const body = url.startsWith('/api/topics') ? { topics } : { captures: [] }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) }) as unknown as Promise<Response>
+    }))
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+
+    render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Praca w IT' }))
+    expect(screen.getByRole('button', { name: `${t.recordingTopic}: Praca w IT` })).toBeTruthy()
+
+    // The topic is renamed server-side while we're away — the trigger still
+    // shows the old name until the list is fetched again.
+    topics = [{ id: 't1', name: 'Dział IT', suspendedAt: null }]
+
+    fireEvent.click(screen.getByRole('button', { name: `${t.recordingTopic}: Praca w IT` }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: `${t.recordingTopic}: Dział IT` })).toBeTruthy()
+    })
+  })
+
+  // Minor review finding: the sheet had no empty state and no error state,
+  // unlike its otherwise-identical twin on /sluchaj.
+  it('shows a message when no topic matches the filter', async () => {
+    stubScreen([{ id: 't1', name: 'Praca w IT', suspendedAt: null }])
+    render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    await screen.findByRole('button', { name: 'Praca w IT' })
+    fireEvent.change(screen.getByPlaceholderText(t.filterTopics), { target: { value: 'zzz' } })
+    expect(await screen.findByText(t.noTopicsFound)).toBeTruthy()
+  })
+
+  it('shows an error when the topic list fails to load', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/topics')) {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [] }) }) as unknown as Promise<Response>
+    }))
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+
+    render(<SessionState><AddPage /></SessionState>)
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    expect(await screen.findByText(t.topicsLoadFailed)).toBeTruthy()
+  })
 })

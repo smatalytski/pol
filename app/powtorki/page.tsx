@@ -32,12 +32,25 @@ export default function ReviewPage() {
   const undoInFlight = useRef(false)
 
   // A session already in progress is resumed untouched — same card, same
-  // position, same revealed answer (spec §3.3). Only a screen with no session
-  // loads one. Cards added while you were away join your next session, not the
-  // middle of this one: a queue that grows behind you makes the remaining count
-  // jump for no visible reason.
+  // position, same revealed answer (spec §3.3). Cards added while you were
+  // away join your next session, not the middle of this one: a queue that
+  // grows behind you makes the remaining count jump for no visible reason.
+  //
+  // `loaded` alone cannot gate this fetch: it stays true for the rest of the
+  // provider's life once set, so it cannot tell "a session is still running"
+  // (queue non-empty — must not re-fetch, or the mid-session case above
+  // breaks) apart from "the last session already ended" (queue drained —
+  // *must* re-fetch on a fresh visit, or this screen is stuck on the done
+  // screen until a full reload, even once new cards are due or generated).
+  // `freshMount` carries that second bit instead: it is true only for the
+  // span between this component instance mounting and its first fetch
+  // settling, so a remount always gets one fetch attempt, but a queue
+  // draining mid-mount (rating the last card) does not trigger another.
+  const freshMount = useRef(true)
   useEffect(() => {
-    if (loaded) return
+    const resumable = loaded && currentCard(state) !== null
+    if (resumable || !freshMount.current) return
+    freshMount.current = false
     void fetch('/api/review/queue')
       .then((r) => r.json())
       .then((d) => {
@@ -45,7 +58,7 @@ export default function ReviewPage() {
         setNextDue(d.nextDue ?? null)
         setLoaded(true)
       })
-  }, [loaded, dispatch, setNextDue, setLoaded])
+  }, [loaded, state, dispatch, setNextDue, setLoaded])
 
   useEffect(() => {
     shownAt.current = Date.now()

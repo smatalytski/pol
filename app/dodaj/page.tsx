@@ -49,6 +49,11 @@ export default function AddPage() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [topicQuery, setTopicQuery] = useState('')
   const [topicList, setTopicList] = useState<{ id: string; name: string | null }[]>([])
+  // Distinguishes "fetched, and it's genuinely empty" from "the fetch
+  // failed" — both leave `topicList` at `[]`, but they are different
+  // messages for the sheet (finding 3): "nothing matched" versus "the list
+  // could not be loaded".
+  const [topicListError, setTopicListError] = useState(false)
 
   // Shared by every async chain below (drain, poll, the chip actions) that
   // eventually calls a setter: guards against updating state after the screen
@@ -304,8 +309,20 @@ export default function AddPage() {
       if (!res.ok) throw new Error()
       const body = (await res.json()) as { topics: { id: string; name: string | null; suspendedAt: number | null }[] }
       setTopicList(body.topics)
+      setTopicListError(false)
+      // The list is the source of truth this fetch just refreshed — but the
+      // trigger's own remembered name (`topic.name`) isn't part of it and
+      // was never re-fetched on its own. If the chosen topic is still on the
+      // list under a different name, reconcile the stored name to match, so
+      // the trigger stops naming the wrong topic while still filing
+      // correctly by id (spec §4.1: never shown stale — the trigger included).
+      const current = body.topics.find((x) => x.id === topic.id)
+      if (current && (current.name ?? t.unnamedTopic) !== topic.name) {
+        setTopic({ id: topic.id, name: current.name ?? t.unnamedTopic })
+      }
     } catch {
       setTopicList([])
+      setTopicListError(true)
     }
     setPickerOpen(true)
   }
@@ -430,19 +447,25 @@ export default function AddPage() {
           placeholder={t.filterTopics}
           className="w-full rounded-lg border border-neutral-300 px-3 py-3"
         />
-        <ul>
-          {pickable.map((x) => (
-            <li key={x.id}>
-              <button
-                type="button"
-                onClick={() => { setTopic({ id: x.id, name: x.name ?? t.unnamedTopic }); setPickerOpen(false) }}
-                className="w-full border-b py-3 text-left text-row"
-              >
-                {x.name ?? t.unnamedTopic}
-              </button>
-            </li>
-          ))}
-        </ul>
+        {topicListError ? (
+          <p className="text-sm text-red-600">{t.topicsLoadFailed}</p>
+        ) : pickable.length === 0 ? (
+          <p className="text-sub text-neutral-500">{t.noTopicsFound}</p>
+        ) : (
+          <ul>
+            {pickable.map((x) => (
+              <li key={x.id}>
+                <button
+                  type="button"
+                  onClick={() => { setTopic({ id: x.id, name: x.name ?? t.unnamedTopic }); setPickerOpen(false) }}
+                  className="w-full border-b py-3 text-left text-row"
+                >
+                  {x.name ?? t.unnamedTopic}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </Sheet>
     </div>
   )
