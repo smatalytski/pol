@@ -826,4 +826,60 @@ describe('AddPage topic row', () => {
 
     expect(screen.getByRole('button', { name: `${t.recordingTopic}: Praca w IT` })).toBeTruthy()
   })
+
+  // The load-bearing case the brief calls out three times: `drain` must tag
+  // a retried upload with the outbox entry's own `topicId`, not whatever
+  // `topic` is live at retry time. This is the only test in the suite that
+  // creates a window where the two diverge — the other topic-row tests drain
+  // synchronously in the same tick they enqueue, so `topic` never has a
+  // chance to change before the (single, successful) upload fires.
+  it('keeps the topic a queued recording was made under, even after the topic is switched before it retries', async () => {
+    stubMic()
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    const topics = [
+      { id: 'tA', name: 'Temat A', suspendedAt: null },
+      { id: 'tB', name: 'Temat B', suspendedAt: null },
+    ]
+    const posts: FormData[] = []
+    let postAttempts = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (typeof url === 'string' && url.startsWith('/api/topics')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ topics }) }) as unknown as Promise<Response>
+        }
+        if (typeof url === 'string' && url.startsWith('/api/captures?since=')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captures: [] }) }) as unknown as Promise<Response>
+        }
+        if (url === '/api/captures' && init?.method === 'POST') {
+          postAttempts++
+          posts.push(init.body as FormData)
+          // The first attempt fails (e.g. offline) and the item stays
+          // queued (spec: losing a dictated word is worse than a stuck
+          // queue — outbox.ts's `flush`); the retry succeeds.
+          if (postAttempts === 1) return Promise.resolve({ ok: false, status: 503 }) as unknown as Promise<Response>
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ captureId: 'c' }) }) as unknown as Promise<Response>
+        }
+        throw new Error(`unexpected fetch ${url}`)
+      }),
+    )
+
+    render(<SessionState><AddPage /></SessionState>)
+
+    fireEvent.click(screen.getByRole('button', { name: chooseTopic }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Temat A' }))
+    await holdPolish()
+    await waitFor(() => expect(postAttempts).toBe(1))
+
+    // Switch the active topic to Temat B before the retry fires — the
+    // already-queued recording must not be retagged.
+    fireEvent.click(screen.getByRole('button', { name: `${t.recordingTopic}: Temat A` }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Temat B' }))
+    expect(screen.getByRole('button', { name: `${t.recordingTopic}: Temat B` })).toBeTruthy()
+
+    // The real 1s poll interval keeps retrying while the item is still
+    // queued (hasPending stays true); this attempt succeeds.
+    await waitFor(() => expect(postAttempts).toBe(2), { timeout: 3000 })
+    expect(posts[1].get('topicId')).toBe('tA')
+  })
 })
