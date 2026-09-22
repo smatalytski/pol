@@ -70,8 +70,8 @@ export function useScreenState<T>(key: string, initial: () => T): [T, Dispatch<S
 /** Drop-in for useReducer, for /powtorki's existing reviewReducer. */
 export function useScreenReducer<S, A>(key: string, reducer: Reducer<S, A>, initial: S): [S, Dispatch<A>]
 
-/** Records scrollY on unmount; restores it once the screen has content to scroll. */
-export function useRestoreScroll(key: string): void
+/** Records scrollY as you scroll; restores it once `ready` says there is content to scroll. */
+export function useRestoreScroll(key: string, ready: boolean): void
 ```
 
 Each hook keeps local `useState`/`useReducer` for rendering and mirrors the
@@ -81,8 +81,11 @@ life of the app.
 
 `useRestoreScroll` must not restore on mount alone. `/tematy` fetches its list
 asynchronously, so at mount the page is still short and a restore would be
-clamped to 0; the restore runs in a layout effect gated on the screen having
-rendered its content.
+clamped to 0; hence the `ready` argument — the restore runs in a layout effect
+gated on the screen having rendered its content, and runs at most once per
+mount. The position itself is recorded from a passive `scroll` listener
+straight into the Map, not read at unmount, so it cannot be lost to a
+navigation that scrolls the window before the screen tears down.
 
 ### 3.2 What each screen keeps
 
