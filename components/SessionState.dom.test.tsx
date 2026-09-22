@@ -82,4 +82,21 @@ describe('useRestoreScroll', () => {
     expect(scrollTo).toHaveBeenCalledWith(0, 240)
     expect(scrollTo).toHaveBeenCalledTimes(1)
   })
+
+  it('restores when ready flips true in place, without unmounting — the real fetch-resolves path', () => {
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+    const view = render(<SessionState><Scrolled ready={false} /></SessionState>)
+
+    Object.defineProperty(window, 'scrollY', { value: 240, configurable: true })
+    fireEvent.scroll(window)
+
+    // Screen paints short first, same instance stays mounted throughout.
+    expect(scrollTo).not.toHaveBeenCalled()
+
+    // Fetch resolves: ready flips true on the same mounted instance.
+    view.rerender(<SessionState><Scrolled ready={true} /></SessionState>)
+    expect(scrollTo).toHaveBeenCalledWith(0, 240)
+    expect(scrollTo).toHaveBeenCalledTimes(1)
+  })
 })
