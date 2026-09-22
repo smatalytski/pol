@@ -26,10 +26,10 @@ describe('TabBar', () => {
     render(<TabBar />)
     const links = screen.getAllByRole('link')
     expect(links.map((l) => l.getAttribute('href'))).toEqual([
-      '/powtorki', '/sluchaj', '/dodaj', '/fiszki', '/tematy', '/ustawienia',
+      '/powtorki', '/sluchaj', '/dodaj', '/tematy', '/fiszki', '/ustawienia',
     ])
     expect(links.map((l) => l.textContent)).toEqual([
-      t.review, t.listen, t.add, t.cards, t.topics, t.settingsTab,
+      t.review, t.listen, t.add, t.topics, t.cards, t.settingsTab,
     ])
   })
 
@@ -49,6 +49,12 @@ describe('TabBar', () => {
     expect(screen.getByRole('link', { name: t.topics }).getAttribute('aria-current')).toBe('page')
     expect(screen.getByRole('link', { name: t.review }).getAttribute('aria-current')).toBeNull()
     expect(screen.getAllByRole('link').filter((l) => l.getAttribute('aria-current') === 'page')).toHaveLength(1)
+  })
+
+  it('puts tematy beside dodaj, in the thumb zone', () => {
+    render(<TabBar />)
+    const labels = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(labels).toEqual(['/powtorki', '/sluchaj', '/dodaj', '/tematy', '/fiszki', '/ustawienia'])
   })
 
   // jsdom has no layout engine: these pin the mechanism. The bar is fixed to
