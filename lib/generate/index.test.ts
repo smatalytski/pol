@@ -298,6 +298,40 @@ describe('card generation SYSTEM instruction', () => {
     const req = generate.mock.calls[0][0]
     expect(req.config.systemInstruction).toContain('никогда не через «/»')
   })
+
+  const systemFor = async () => {
+    const generate = ok(FULL)
+    await make(generate).fromDictation('złośliwy')
+    return generate.mock.calls[0][0].config.systemInstruction as string
+  }
+  const ruleFor = (system: string, kind: string) =>
+    system.split('\n').find((l) => l.trimStart().startsWith(`- ${kind}:`)) ?? ''
+  const inOrder = (line: string, labels: string[]) => {
+    const at = labels.map((l) => line.indexOf(l))
+    expect(at.every((i) => i >= 0)).toBe(true)
+    expect(at).toEqual([...at].sort((a, b) => a - b))
+  }
+
+  it('puts both comparisons around the derived adverb for a przymiotnik', async () => {
+    const line = ruleFor(await systemFor(), 'przymiotnik')
+    inOrder(line, ['«stopniowanie przymiotnika»', '«przysłówek»', '«stopniowanie przysłówka»'])
+  })
+
+  it('puts both comparisons around the base adjective for a przyslowek', async () => {
+    const line = ruleFor(await systemFor(), 'przyslowek')
+    inOrder(line, ['«stopniowanie przysłówka»', '«przymiotnik»', '«stopniowanie przymiotnika»'])
+  })
+
+  it('keeps a stopniowanie row that has no degrees, saying so', async () => {
+    const line = ruleFor(await systemFor(), 'Для обеих строк stopniowanie')
+    expect(line).toContain('value «nie stopniuje się»')
+  })
+
+  it('opens a czasownik extended list with the 1st person past tense', async () => {
+    const line = ruleFor(await systemFor(), 'czasownik')
+    const extended = line.slice(line.indexOf('forms_extended'))
+    inOrder(extended, ['«cz. przeszły 1 os.»', '«cz. przeszły l.poj.»'])
+  })
 })
 
 describe('geminiGenerator with a meaning', () => {
